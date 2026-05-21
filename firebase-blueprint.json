@@ -1,0 +1,108 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "company": { "type": "string" },
+        "targetIndustries": { "type": "array", "items": { "type": "string" } },
+        "bio": { "type": "string" },
+        "resumeText": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "createdAt", "updatedAt"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "A professional contact in the CRM",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "company": { "type": "string" },
+        "role": { "type": "string" },
+        "location": { "type": "string" },
+        "email": { "type": "string" },
+        "linkedinUrl": { "type": "string" },
+        "summary": { "type": "string" },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "relationshipTier": { "type": "string", "enum": ["Warm", "Cold", "Strong"] },
+        "industry": { "type": "string" },
+        "subIndustry": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "lastContactedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "createdAt", "updatedAt"]
+    },
+    "Note": {
+      "title": "Note",
+      "description": "A note about a contact",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "contactId": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "contactId", "content", "createdAt"]
+    },
+    "Outreach": {
+      "title": "Outreach",
+      "description": "Log of an outreach attempt",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "contactId": { "type": "string" },
+        "type": { "type": "string" },
+        "subject": { "type": "string" },
+        "status": { "type": "string", "enum": ["Sent", "Responded", "Pending Follow-Up", "Closed"] },
+        "sentAt": { "type": "string", "format": "date-time" },
+        "nextFollowUpDate": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "contactId", "type", "status", "sentAt", "updatedAt"]
+    },
+    "Template": {
+      "title": "Template",
+      "description": "Saved outreach template",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "subject": { "type": "string" },
+        "body": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "body", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profiles"
+    },
+    "users/{userId}/contacts/{contactId}": {
+      "schema": { "$ref": "#/entities/Contact" },
+      "description": "User's contacts"
+    },
+    "users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/Note" },
+      "description": "User's notes on contacts"
+    },
+    "users/{userId}/outreaches/{outreachId}": {
+      "schema": { "$ref": "#/entities/Outreach" },
+      "description": "User's outreaches"
+    },
+    "users/{userId}/templates/{templateId}": {
+      "schema": { "$ref": "#/entities/Template" },
+      "description": "User's outreach templates"
+    }
+  }
+}
