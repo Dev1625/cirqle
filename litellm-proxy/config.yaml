@@ -1,0 +1,50 @@
+model_list:
+  # 1. Google Gemini Flash Endpoint
+  - model_name: gemini-flash
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: "os.environ/GEMINI_API_KEY"
+
+  # 2. OpenAI GPT-4o-mini Chat Completion Endpoint
+  - model_name: openai-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: "os.environ/OPENAI_API_KEY"
+
+  # 3. OpenAI GPT-4o-mini Batch API Routing Endpoint
+  - model_name: openai-mini-batch
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: "os.environ/OPENAI_API_KEY"
+    model_info:
+      mode: batch
+
+general_settings:
+  # Master key to perform proxy administrative operations (generate keys, etc.)
+  master_key: "os.environ/LITELLM_MASTER_KEY"
+  
+  # SQLite database configuration via environment variables
+  database_url: "os.environ/DATABASE_URL"
+  database_connection_timeout: 30
+  
+  # Redis service connection configurations for tracking spend and rate limits
+  redis_host: "os.environ/REDIS_HOST"
+  redis_port: "os.environ/REDIS_PORT"
+  
+  # Enable high-performance Redis cache for virtual keys validation (reduces DB roundtrips)
+  enable_redis_auth_cache: true
+
+litellm_settings:
+  # Enable response caching
+  cache: true
+  cache_params:
+    type: redis
+    host: "os.environ/REDIS_HOST"
+    port: "os.environ/REDIS_PORT"
+    # Keep auth cached in Redis for high-performance key verification
+    supported_caches: ["redis"]
+
+router_settings:
+  # Automatically retry on rate limits or failures across models
+  routing_strategy: latency-based
+  set_verbose: true

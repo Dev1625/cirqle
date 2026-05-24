@@ -1,0 +1,5 @@
+# Ignore active environment file
+.env
+
+# Ignore SQLite persistent database folder
+data/

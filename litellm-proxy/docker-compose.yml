@@ -1,0 +1,45 @@
+services:
+  # --- State Management & Rate Limiting (Redis) ---
+  redis:
+    image: redis:7-alpine
+    container_name: cirqle-proxy-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # --- Core API Proxy (LiteLLM) ---
+  litellm-proxy:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: cirqle-proxy-gateway
+    ports:
+      - "4000:4000"
+    volumes:
+      # Mount configuration file (Read-Only)
+      - ./config.yaml:/app/config.yaml:ro
+      # Persist SQLite key database locally on the host machine
+      - ./data:/data
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}
+      - LITELLM_SALT_KEY=${LITELLM_SALT_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PORT=${REDIS_PORT}
+      - DATABASE_URL=${DATABASE_URL}
+    command: ["--config=/app/config.yaml"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  # Named persistent volume for Redis data
+  redis_data:
