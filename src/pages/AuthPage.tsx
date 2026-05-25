@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { auth, handleFirestoreError } from '../config/firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithRedirect, getRedirectResult } from 'firebase/auth';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { db } from '../config/firebase';
@@ -17,39 +17,15 @@ export default function AuthPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    let isMounted = true;
-
-    const finishRedirectSignIn = async () => {
-      try {
-        const result = await getRedirectResult(auth);
-        if (result) {
-          navigate('/app', { replace: true });
-        }
-      } catch (err: any) {
-        if (!isMounted) return;
-        if (err.message?.includes('auth/')) {
-          setError(err.message);
-        } else {
-          console.error(err);
-          setError('An unexpected error occurred during Google Sign In.');
-        }
-      }
-    };
-
-    finishRedirectSignIn();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [navigate]);
-
   const handleGoogleSignIn = async () => {
     setError('');
     setLoading(true);
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithRedirect(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      if (result.user) {
+        navigate('/app', { replace: true });
+      }
     } catch (err: any) {
       if (err.message?.includes('auth/')) {
         setError(err.message);
