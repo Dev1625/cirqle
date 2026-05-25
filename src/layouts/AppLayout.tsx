@@ -41,6 +41,11 @@ const AppLayout = () => {
              resumeText: null,
              targetIndustries: [],
            });
+        } else {
+           const data = docSnap.data();
+           if (data && data.apiKey) {
+             localStorage.setItem('CIRQLE_USER_PROXY_KEY', data.apiKey);
+           }
         }
       } catch (err) {
         console.error("Failed to initialize user document:", err);
