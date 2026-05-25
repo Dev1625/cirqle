@@ -65,8 +65,6 @@ litellm_settings:
     type: redis
     host: "os.environ/REDIS_HOST"
     port: "os.environ/REDIS_PORT"
-    # Keep auth cached in Redis for high-performance key verification
-    supported_caches: ["redis"]
 
 router_settings:
   # Automatically retry on rate limits or failures across models
