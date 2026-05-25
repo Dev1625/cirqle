@@ -53,7 +53,8 @@ general_settings:
   
   # Redis service connection configurations for tracking spend and rate limits
   redis_host: "os.environ/REDIS_HOST"
-  redis_port: 6379
+  redis_port: "os.environ/REDIS_PORT"
+  redis_password: "os.environ/REDIS_PASSWORD"
   
   # Enable high-performance Redis cache for virtual keys validation (reduces DB roundtrips)
   enable_redis_auth_cache: true
@@ -64,7 +65,8 @@ litellm_settings:
   cache_params:
     type: redis
     host: "os.environ/REDIS_HOST"
-    port: 6379
+    port: "os.environ/REDIS_PORT"
+    password: "os.environ/REDIS_PASSWORD"
 
 router_settings:
   # Automatically retry on rate limits or failures across models
