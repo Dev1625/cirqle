@@ -23,7 +23,14 @@ export function getGemini(userApiKey?: string): GoogleGenAI {
   }
 
   // target the newly exposed LiteLLM gateway instead of standard Google endpoints
-  const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "http://localhost:4000";
+  // LiteLLM requires Gemini SDK requests to route through the '/gemini' path prefix
+  let gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "http://localhost:4000";
+  if (gatewayUrl.endsWith('/')) {
+    gatewayUrl = gatewayUrl.slice(0, -1);
+  }
+  if (!gatewayUrl.endsWith('/gemini')) {
+    gatewayUrl = `${gatewayUrl}/gemini`;
+  }
 
   // Re-initialize client if it does not exist or if the API key has changed
   if (!aiClient || lastApiKey !== apiKey) {

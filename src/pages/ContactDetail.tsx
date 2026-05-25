@@ -130,7 +130,7 @@ export default function ContactDetail() {
         const prompt = `Analyze this email/message reply from ${contact.name}:\n\n"${replyText}"\n\nProvide a very short 1-2 sentence summary of what they said. Identify if a follow-up is needed and what we should do next. Return JSON EXACTLY like this: {"summary": "Brief summary", "suggestedAction": "Suggested next step"}`;
         
         const response = await ai.models.generateContent({
-           model: "gemini-3.1-pro-preview",
+           model: "gemini-3-flash-preview",
            contents: prompt,
            config: { responseMimeType: "application/json" }
         });
@@ -174,7 +174,7 @@ export default function ContactDetail() {
         const prompt = `Analyze the following conversation notes/log with ${contact.name}:\n\n"${conversationLog}"\n\nExtract key life events, facts, or things they mentioned (e.g., "Moving to NY", "Looking for hires", "Launching a podcast"). Return them as an array of short tag strings. Return JSON EXACTLY like this: {"tags": ["Mentioned: Moving cities", "Mentioned: Hiring engineers"]}`;
         
         const response = await ai.models.generateContent({
-           model: "gemini-3.1-pro-preview",
+           model: "gemini-2.5-flash-lite",
            contents: prompt,
            config: { responseMimeType: "application/json" }
         });
@@ -256,7 +256,7 @@ Return the result in JSON format EXACTLY like this:
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-3-flash-preview",
         contents: prompt,
         config: { responseMimeType: "application/json" }
       });

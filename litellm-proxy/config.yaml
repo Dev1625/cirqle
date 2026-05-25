@@ -5,13 +5,37 @@ model_list:
       model: gemini/gemini-1.5-flash
       api_key: "os.environ/GEMINI_API_KEY"
 
-  # 2. OpenAI GPT-4o-mini Chat Completion Endpoint
+  # 2. Google Gemini 3 Flash Preview Alias (routes to stable 1.5-flash)
+  - model_name: gemini-3-flash-preview
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: "os.environ/GEMINI_API_KEY"
+
+  # 3. Google Gemini 2.5 Flash Lite Alias (routes to stable 1.5-flash)
+  - model_name: gemini-2.5-flash-lite
+    litellm_params:
+      model: gemini/gemini-1.5-flash
+      api_key: "os.environ/GEMINI_API_KEY"
+
+  # 4. Google Gemini 3.1 Pro Preview Alias (routes to stable 1.5-pro)
+  - model_name: gemini-3.1-pro-preview
+    litellm_params:
+      model: gemini/gemini-1.5-pro
+      api_key: "os.environ/GEMINI_API_KEY"
+
+  # 5. OpenAI GPT-5 Mini Alias (routes to stable gpt-4o-mini)
+  - model_name: gpt-5-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: "os.environ/OPENAI_API_KEY"
+
+  # 6. OpenAI GPT-4o-mini Chat Completion Endpoint
   - model_name: openai-mini
     litellm_params:
       model: openai/gpt-4o-mini
       api_key: "os.environ/OPENAI_API_KEY"
 
-  # 3. OpenAI GPT-4o-mini Batch API Routing Endpoint
+  # 7. OpenAI GPT-4o-mini Batch API Routing Endpoint
   - model_name: openai-mini-batch
     litellm_params:
       model: openai/gpt-4o-mini

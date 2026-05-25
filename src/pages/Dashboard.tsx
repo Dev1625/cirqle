@@ -98,7 +98,7 @@ export default function Dashboard() {
 
       const ai = getGemini();
       const response = await ai.models.generateContent({
-         model: "gemini-3.1-pro-preview",
+         model: "gemini-3-flash-preview",
          contents: `You are an AI Executive Assistant managing my CRM pipeline. 
          Here is a slice of my tracker data: ${JSON.stringify(miniTracker)}
          Analyze this and write a very short "This Week's Priorities" brief. 
