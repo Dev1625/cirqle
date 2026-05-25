@@ -14,13 +14,8 @@ export function getGemini(userApiKey?: string): GoogleGenAI {
   // Dynamically ingest user-specific key, falling back to localStorage or environment variable
   const apiKey = userApiKey || 
                  (typeof window !== "undefined" ? localStorage.getItem("CIRQLE_USER_PROXY_KEY") : null) || 
-                 import.meta.env.VITE_GEMINI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error(
-      "API Key is not defined. Please log in or provide a trackable user API key."
-    );
-  }
+                 import.meta.env.VITE_GEMINI_API_KEY ||
+                 "sk-placeholder-key-please-configure-vite-gemini-api-key";
 
   // target the newly exposed LiteLLM gateway instead of standard Google endpoints
   // LiteLLM requires Gemini SDK requests to route through the '/gemini' path prefix
