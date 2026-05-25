@@ -5,16 +5,16 @@ let lastApiKey: string | null = null;
 
 /**
  * Returns an instance of the GoogleGenAI client configured to route requests
- * through the local LiteLLM API proxy gateway (http://localhost:4000).
+ * through the LiteLLM API proxy gateway.
  * 
  * @param userApiKey Optional individual trackable user-specific API key. 
- *                   If not provided, falls back to localStorage or process.env.GEMINI_API_KEY.
+ *                   If not provided, falls back to localStorage or import.meta.env.VITE_GEMINI_API_KEY.
  */
 export function getGemini(userApiKey?: string): GoogleGenAI {
   // Dynamically ingest user-specific key, falling back to localStorage or environment variable
   const apiKey = userApiKey || 
                  (typeof window !== "undefined" ? localStorage.getItem("CIRQLE_USER_PROXY_KEY") : null) || 
-                 process.env.GEMINI_API_KEY;
+                 import.meta.env.VITE_GEMINI_API_KEY;
 
   if (!apiKey) {
     throw new Error(
@@ -22,8 +22,8 @@ export function getGemini(userApiKey?: string): GoogleGenAI {
     );
   }
 
-  // target the newly exposed local LiteLLM gateway instead of standard Google endpoints
-  const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || "http://localhost:4000";
+  // target the newly exposed LiteLLM gateway instead of standard Google endpoints
+  const gatewayUrl = import.meta.env.VITE_GATEWAY_URL || "http://localhost:4000";
 
   // Re-initialize client if it does not exist or if the API key has changed
   if (!aiClient || lastApiKey !== apiKey) {
