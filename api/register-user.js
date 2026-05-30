@@ -34,7 +34,7 @@ export default async function handler(req, res) {
         max_budget: 5.00,
         reset_value: 5.00,
         reset_period: "month",
-        models: ["gemini-2.5-flash-lite", "gpt-5-mini"]
+        models: ["gemini-2.5-flash-lite", "gpt-5-mini", "gemini-3-flash-preview", "gemini-flash", "gemini-3.1-pro-preview", "openai-mini"]
       })
     });
 
