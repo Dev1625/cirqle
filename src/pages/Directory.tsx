@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, query, onSnapshot, addDoc, serverTimestamp, doc, updateDoc, where, writeBatch, getDocs } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
@@ -516,26 +516,45 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       return;
     }
 
-    const confirmed = window.confirm(`Clear ${contacts.length} contact${contacts.length === 1 ? '' : 's'} from your directory? This cannot be undone.`);
+    const confirmed = window.confirm(`Clear ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all associated outreaches/notes? This cannot be undone.`);
     if (!confirmed) return;
 
     setIsClearingDirectory(true);
     setImportFeedback('');
 
     try {
-      const batchSize = 400;
+      // 1. Query all outreaches and notes under this user
+      const outreachesSnap = await getDocs(collection(db, `users/${user.uid}/outreaches`));
+      const notesSnap = await getDocs(collection(db, `users/${user.uid}/notes`));
 
-      for (let index = 0; index < contacts.length; index += batchSize) {
+      // 2. Aggregate all documents that need to be deleted
+      const docsToDelete: any[] = [];
+
+      contacts.forEach((contact) => {
+        docsToDelete.push(doc(db, `users/${user.uid}/contacts/${contact.id}`));
+      });
+
+      outreachesSnap.forEach((outreachDoc) => {
+        docsToDelete.push(doc(db, `users/${user.uid}/outreaches/${outreachDoc.id}`));
+      });
+
+      notesSnap.forEach((noteDoc) => {
+        docsToDelete.push(doc(db, `users/${user.uid}/notes/${noteDoc.id}`));
+      });
+
+      // 3. Batch commit deletions (up to 400 docs per batch to stay under Firestore's 500 limit)
+      const batchSize = 400;
+      for (let index = 0; index < docsToDelete.length; index += batchSize) {
         const batch = writeBatch(db);
-        contacts.slice(index, index + batchSize).forEach((contact) => {
-          batch.delete(doc(db, `users/${user.uid}/contacts/${contact.id}`));
+        docsToDelete.slice(index, index + batchSize).forEach((docRef) => {
+          batch.delete(docRef);
         });
         await batch.commit();
       }
 
       localStorage.removeItem(`ai_brief_${user.uid}`);
       localStorage.removeItem(`ai_brief_time_${user.uid}`);
-      setImportFeedback(`Cleared ${contacts.length} contact${contacts.length === 1 ? '' : 's'} from the directory.`);
+      setImportFeedback(`Cleared ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all related outreach history.`);
     } catch (error) {
       handleFirestoreError(error, 'delete', `users/${user.uid}/contacts`);
     } finally {
