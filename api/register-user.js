@@ -18,6 +18,9 @@ export default async function handler(req, res) {
   if (gatewayUrl.endsWith('/')) {
     gatewayUrl = gatewayUrl.slice(0, -1);
   }
+  if (gatewayUrl.endsWith('/gemini')) {
+    gatewayUrl = gatewayUrl.slice(0, -7);
+  }
 
   try {
     const response = await fetch(`${gatewayUrl}/key/generate`, {
