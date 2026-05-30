@@ -33,7 +33,7 @@ export default async function handler(req, res) {
   console.log(`[Proxy Call] Sending request to: ${requestUrl}`);
 
   const requestBody = {
-    key_alias: `user_${userId}`,
+    key_alias: `user_${userId}_${Math.floor(Date.now() / 1000)}`,
     max_budget: 5.00,
     reset_value: 5.00,
     reset_period: "month",
