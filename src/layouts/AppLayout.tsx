@@ -29,6 +29,8 @@ const AppLayout = () => {
       try {
         const docRef = doc(db, 'users', user.uid);
         const docSnap = await getDoc(docRef);
+        let currentApiKey = null;
+
         if (!docSnap.exists()) {
            await setDoc(docRef, {
              userId: user.uid,
@@ -44,8 +46,39 @@ const AppLayout = () => {
         } else {
            const data = docSnap.data();
            if (data && data.apiKey) {
-             localStorage.setItem('CIRQLE_USER_PROXY_KEY', data.apiKey);
+             currentApiKey = data.apiKey;
            }
+        }
+
+        // If the user does not have a virtual API key yet, generate one securely
+        if (!currentApiKey) {
+          try {
+            const res = await fetch('/api/register-user', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ userId: user.uid })
+            });
+
+            if (res.ok) {
+              const resData = await res.json();
+              if (resData.apiKey) {
+                currentApiKey = resData.apiKey;
+                // Save the key securely to the user's Firestore document
+                await setDoc(docRef, { apiKey: currentApiKey }, { merge: true });
+              }
+            } else {
+              console.error("Failed to generate key from serverless API:", await res.text());
+            }
+          } catch (apiErr) {
+            console.error("Error generating API key:", apiErr);
+          }
+        }
+
+        // Load the key into local storage for the Google GenAI SDK to use
+        if (currentApiKey) {
+          localStorage.setItem('CIRQLE_USER_PROXY_KEY', currentApiKey);
         }
       } catch (err) {
         console.error("Failed to initialize user document:", err);
