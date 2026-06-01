@@ -225,7 +225,7 @@ async function parseContactsWithAi(rows: string[][]) {
     });
 
     const response = await ai.models.generateContent({
-      model: "gpt-5-mini",
+      model: "gemini-2.5-flash-lite",
       contents: `You are importing contacts into a professional CRM. Convert these CSV rows into clean contact objects even if the column names are unusual, abbreviated, or messy.
 
 Return JSON only in this exact shape:
@@ -351,7 +351,7 @@ Extract details into JSON. Use these keys exactly:
 If a field is missing, leave it as an empty string (or empty array for tags).`;
 
       const response = await ai.models.generateContent({
-        model: "gpt-5-mini",
+        model: "gemini-2.5-flash-lite",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
