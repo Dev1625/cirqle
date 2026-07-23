@@ -383,7 +383,7 @@ Return the result in JSON format EXACTLY like this:
                  <button onClick={() => setActiveTab('parse')} className={`flex flex-1 items-center justify-center gap-1 py-3 hover:bg-paper transition-colors ${activeTab === 'parse' ? 'bg-white border-b-2 border-b-ink' : ''}`}><Tag size={12}/> Add AI Tags <Sparkles size={10}/></button>
                </div>
                
-               <div className="p-6 border-b border-ink/20 bg-white">
+               <div key={activeTab} className="p-6 border-b border-ink/20 bg-white animate-fade-in">
                  {/* Quick Note */}
                  {activeTab === 'note' && (
                    <form onSubmit={handleAddNote} className="flex gap-2">

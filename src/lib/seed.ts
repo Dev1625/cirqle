@@ -83,7 +83,13 @@ export async function seedSampleData(user: any) {
     let responseReceived = 'No';
     let meetingHeld = false;
     let aiSummary = `Sent initial cold approach outlining mutual connections.`;
-    const pastDate = new Date(now.getTime() - Math.random() * 10 * 24 * 60 * 60 * 1000); // Up to 10 days ago
+    // Dormant contacts should actually read as stale (90-150 days) rather
+    // than "recently touched" — otherwise every seeded contact looks
+    // equally fresh and Network Strength/At Risk always read as a
+    // suspiciously perfect 100/0.
+    const pastDate = person.tier === 'Dormant'
+      ? new Date(now.getTime() - (90 + Math.random() * 60) * 24 * 60 * 60 * 1000)
+      : new Date(now.getTime() - Math.random() * 10 * 24 * 60 * 60 * 1000); // Up to 10 days ago
 
     if (person.tier === 'Strong' || person.tier === 'Warm') {
       status = 'Meeting Complete';

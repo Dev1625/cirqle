@@ -63,8 +63,10 @@ export default function AuthPage() {
       }
       navigate('/app');
     } catch (err: any) {
-      if (err.message?.includes('auth/')) {
-        setError(err.message + " (Note: Email/Password may be disabled in Firebase. Use Google instead.)");
+      if (err.code === 'auth/operation-not-allowed') {
+        setError('Email/password sign-in is turned off for this project — use "Continue with Google" above instead.');
+      } else if (err.message?.includes('auth/')) {
+        setError(err.message);
       } else {
         handleFirestoreError(err, isLogin ? 'get' : 'create', isLogin ? null : `users/${auth.currentUser?.uid}`);
       }
@@ -84,11 +86,11 @@ export default function AuthPage() {
            </div>
         )}
 
-        <Button 
-          type="button" 
-          variant="outline" 
-          className="w-full mb-6 font-mono text-xs uppercase" 
-          onClick={handleGoogleSignIn} 
+        <Button
+          type="button"
+          variant="default"
+          className="w-full mb-6 font-mono text-xs uppercase"
+          onClick={handleGoogleSignIn}
           disabled={loading}
         >
           {loading ? 'Processing...' : 'Continue with Google'}
@@ -119,7 +121,7 @@ export default function AuthPage() {
               required 
             />
           </div>
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button type="submit" variant="outline" className="w-full" disabled={loading}>
             {loading ? 'Processing...' : (isLogin ? 'Log In' : 'Sign Up')}
           </Button>
         </form>
