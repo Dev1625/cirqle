@@ -17,8 +17,10 @@ const AppLayout = () => {
   const showGlobalSearch = location.pathname !== '/app/graph';
 
   const [isInitializing, setIsInitializing] = useState(true);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  
+  // Start collapsed on narrower viewports (tablet widths) so the fixed
+  // 256px sidebar doesn't permanently eat a third of the content area.
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 1100);
+
   // Help Menu State
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const { startTour, completedTours } = useTour();

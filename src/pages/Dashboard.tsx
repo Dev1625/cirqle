@@ -206,7 +206,7 @@ export default function Dashboard() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 border-b border-ink/10">
+        <div className="grid grid-cols-2 lg:grid-cols-4 border-b border-ink/10">
           <DashboardQueueMetric icon={ListTodo} label="Items" value={queueItems.length} />
           <DashboardQueueMetric icon={Clock} label="Overdue" value={queueItems.filter((item) => item._actionDate && item._actionDate.getTime() < Date.now()).length} />
           <DashboardQueueMetric icon={Send} label="Replies" value={queueItems.filter((item) => item.status === 'Responded').length} />

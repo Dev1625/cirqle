@@ -433,7 +433,7 @@ function buildAnalysis(params: {
     radius: 28,
     score: 100,
     lastTouchDays: 0,
-    initials: getInitials(profile?.name || 'You'),
+    initials: profile?.name ? getInitials(profile.name) : '◎',
     targetX: 0,
     targetY: 0,
     fx: 0,
@@ -1089,7 +1089,7 @@ export default function NetworkGraph() {
       <div className="border-b border-ink/20 pb-6">
         <div>
           <h1 className="font-serif text-5xl italic font-black mb-2">Network Graph.</h1>
-          <p className="font-mono text-xs uppercase tracking-widest opacity-50">
+          <p className="font-mono text-xs uppercase tracking-widest text-muted">
             You at the center, industry lanes around you, and contacts nested inside each lane.
           </p>
         </div>
@@ -1101,7 +1101,7 @@ export default function NetworkGraph() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard
           icon={Radar}
           label="Network Strength"

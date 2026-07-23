@@ -103,7 +103,7 @@ export default function OutreachCalendar() {
       <div className="flex justify-between items-center pb-6 border-b border-ink/20 flex-wrap gap-4">
          <div>
             <h1 className="font-serif text-5xl italic font-black mb-2">Outreach Calendar.</h1>
-            <p className="font-mono text-xs uppercase tracking-widest opacity-50">Pace yourself. View upcoming planned follow-ups.</p>
+            <p className="font-mono text-xs uppercase tracking-widest text-muted">Pace yourself. View upcoming planned follow-ups.</p>
          </div>
          <div className="flex gap-2">
             <button onClick={prevMonth} className="px-4 py-2 border border-ink bg-white font-mono text-xs hover:bg-paper uppercase tracking-widest">Prev</button>

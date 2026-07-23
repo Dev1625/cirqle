@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { doc, getDoc, setDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
@@ -11,13 +11,17 @@ GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { Upload } from 'lucide-react';
+import { useToast } from '../contexts/ToastContext';
 
 export default function Settings() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [profile, setProfile] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [resumeFile, setResumeFile] = useState<File | null>(null);
   const [isParsingPdf, setIsParsingPdf] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -46,7 +50,7 @@ export default function Settings() {
           ...profile,
           updatedAt: serverTimestamp()
        });
-       alert('Settings saved!');
+       toast('Settings saved.', 'success');
     } catch (err: any) {
        handleFirestoreError(err, 'update', `users/${user.uid}`);
     } finally {
@@ -58,13 +62,13 @@ export default function Settings() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.type !== 'application/pdf') {
-       alert("Please upload a PDF file.");
+       toast("Please upload a PDF file.", 'error');
        return;
     }
-    
+
     setResumeFile(file);
     setIsParsingPdf(true);
-    
+
     try {
        const arrayBuffer = await file.arrayBuffer();
        const pdf = await getDocument(arrayBuffer).promise;
@@ -76,10 +80,10 @@ export default function Settings() {
           text += strings.join(' ') + '\\n';
        }
        setProfile(prev => ({ ...prev, resumeText: text }));
-       alert("Resume parsed successfully!");
+       toast('Resume parsed successfully.', 'success');
     } catch (err) {
        console.error("PDF parse error", err);
-       alert("Failed to parse PDF.");
+       toast("Failed to parse that PDF. Please try another file.", 'error');
     } finally {
        setIsParsingPdf(false);
     }
@@ -91,7 +95,7 @@ export default function Settings() {
     <div className="space-y-8">
       <div className="pb-6 border-b border-ink/20">
         <h1 className="font-serif text-5xl italic font-black mb-2">Settings & Profile.</h1>
-        <p className="font-mono text-xs uppercase tracking-widest opacity-50">Set your context to generate better AI outreach drafts.</p>
+        <p className="font-mono text-xs uppercase tracking-widest text-muted">Set your context to generate better AI outreach drafts.</p>
       </div>
 
       <div className="bg-white border border-ink p-8 flex-1 max-w-4xl">
@@ -124,16 +128,34 @@ export default function Settings() {
               <p className="text-subtle mb-4">Upload your resume. We extract the text so the AI knows your history when drafting emails.</p>
               
               <div className="flex items-center gap-4">
-                 <Input type="file" accept="application/pdf" onChange={handlePdfUpload} className="py-1" disabled={isParsingPdf} />
-                 {isParsingPdf && <span>Parsing...</span>}
+                 <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="application/pdf"
+                    onChange={handlePdfUpload}
+                    className="hidden"
+                    disabled={isParsingPdf}
+                 />
+                 <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isParsingPdf}
+                    className="flex items-center gap-2 border border-ink px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest font-bold hover:bg-ink hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                 >
+                    <Upload size={14} />
+                    {isParsingPdf ? 'Parsing...' : resumeFile ? 'Replace PDF' : 'Choose PDF'}
+                 </button>
+                 {resumeFile && !isParsingPdf && (
+                    <span className="text-xs text-muted truncate max-w-xs">{resumeFile.name}</span>
+                 )}
               </div>
-              
+
               {profile.resumeText && (
-                 <div className="mt-4">
+                 <div className="mt-4 animate-fade-slide-up">
                     <label className="text-xs uppercase tracking-widest text-subtle block mb-1">Parsed Resume Text (Editable)</label>
-                    <textarea 
+                    <textarea
                       className="w-full h-64 border border-ink p-3 font-mono text-sm bg-paper/50 text-subtle"
-                      value={profile.resumeText} 
+                      value={profile.resumeText}
                       onChange={e => setProfile({...profile, resumeText: e.target.value})}
                     />
                  </div>
