@@ -4,16 +4,19 @@ import { doc, onSnapshot, updateDoc, collection, query, addDoc, serverTimestamp,
 import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
+import { TierBadge } from '../components/ui/TierBadge';
 import { Sparkles, ArrowLeft, Send, Calendar, MessageSquare, Tag } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
 import { Input } from '../components/ui/Input';
 import Markdown from 'react-markdown';
+import { useToast } from '../contexts/ToastContext';
 
 export default function ContactDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
-  
+  const { toast } = useToast();
+
   const [contact, setContact] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
   const [outreaches, setOutreaches] = useState<any[]>([]);
@@ -61,6 +64,15 @@ export default function ContactDetail() {
 
     return () => { unsub(); unsubNotes(); unsubOutreaches(); };
   }, [user, id, navigate]);
+
+  useEffect(() => {
+    if (!isDrafting) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setIsDrafting(false); setCurrentDraft(null); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isDrafting]);
 
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,7 +171,7 @@ export default function ContactDetail() {
         setActiveTab('note');
      } catch (err: any) {
         console.error(err);
-        alert("Failed to process reply.");
+        toast("Failed to process that reply. Please try again.", 'error');
      } finally {
         setIsProcessing(false);
      }
@@ -202,7 +214,7 @@ export default function ContactDetail() {
         setActiveTab('note');
      } catch (err) {
         console.error(err);
-        alert("Failed to parse conversation.");
+        toast("Failed to extract tags from that conversation. Please try again.", 'error');
      } finally {
         setIsProcessing(false);
      }
@@ -265,7 +277,7 @@ Return the result in JSON format EXACTLY like this:
       setCurrentDraft(parsed);
     } catch (err) {
       console.error(err);
-      alert("Failed to generate draft. Please try again.");
+      toast("Failed to generate the draft. Please try again.", 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -330,7 +342,10 @@ Return the result in JSON format EXACTLY like this:
              </div>
              
              <div className="flex flex-col gap-2 mb-6">
-                <span className="text-xs font-mono bg-ink/5 px-2 py-1 uppercase tracking-widest inline-block w-fit">{contact.relationshipTier} connection</span>
+                <div className="flex items-center gap-2 w-fit">
+                  <TierBadge tier={contact.relationshipTier} />
+                  <span className="text-xs font-mono text-subtle uppercase tracking-widest">connection</span>
+                </div>
                 {contact.email && <span className="text-sm font-mono text-subtle">{contact.email}</span>}
              </div>
              
@@ -466,7 +481,7 @@ Return the result in JSON format EXACTLY like this:
                                   <div className="font-bold flex items-center gap-2">
                                     <Send size={14} className="text-subtle" />
                                     {item.type} Outreach
-                                    <span className="bg-accent/30 text-ink px-2 py-0.5 text-[10px] uppercase tracking-widest rounded-full ml-2">
+                                    <span className="bg-accent/30 text-ink px-2 py-0.5 text-[10px] uppercase tracking-widest ml-2">
                                       {item.status}
                                     </span>
                                   </div>
@@ -504,8 +519,11 @@ Return the result in JSON format EXACTLY like this:
 
       {/* Drafting Modal overlay */}
       {isDrafting && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/30 backdrop-blur-sm">
-            <div className="bg-white border border-ink w-full max-w-2xl max-h-[90vh] flex flex-col shadow-[16px_16px_0px_0px_rgba(26,26,26,1)]">
+         <div
+           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/30 backdrop-blur-sm animate-fade-in"
+           onClick={(e) => { if (e.target === e.currentTarget) { setIsDrafting(false); setCurrentDraft(null); } }}
+         >
+            <div className="animate-fade-scale-in bg-white border border-ink w-full max-w-2xl max-h-[90vh] flex flex-col shadow-[16px_16px_0px_0px_rgba(26,26,26,1)]">
                <div className="p-6 border-b border-ink/20 flex justify-between items-center bg-paper/50">
                   <h2 className="font-serif text-2xl flex items-center gap-2"><Sparkles size={24} /> AI Outreach Draft</h2>
                   <button onClick={() => { setIsDrafting(false); setCurrentDraft(null); }} className="text-xl font-bold font-mono hover:text-red-500 transition-colors">×</button>

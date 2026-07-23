@@ -2,6 +2,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { TourProvider } from './contexts/TourContext';
+import { ToastProvider } from './contexts/ToastContext';
+import { ConfirmProvider } from './contexts/ConfirmContext';
 
 import LandingLayout from './layouts/LandingLayout';
 import AppLayout from './layouts/AppLayout';
@@ -28,28 +30,32 @@ const PlaceholderPage = ({ title }: { title: string }) => (
 export default function App() {
   return (
     <AuthProvider>
-      <TourProvider>
-        <BrowserRouter>
-          <Routes>
-            <Route path="/" element={<LandingLayout />}>
-              <Route index element={<LandingPage />} />
-              <Route path="login" element={<AuthPage />} />
-              <Route path="signup" element={<AuthPage />} />
-            </Route>
-            
-            <Route path="/app" element={<AppLayout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="directory" element={<Directory />} />
-              <Route path="directory/:id" element={<ContactDetail />} />
-              <Route path="graph" element={<NetworkGraph />} />
-              <Route path="tracker" element={<Tracker />} />
-              <Route path="calendar" element={<OutreachCalendar />} />
-              <Route path="templates" element={<Templates />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </TourProvider>
+      <ToastProvider>
+        <ConfirmProvider>
+          <TourProvider>
+            <BrowserRouter>
+              <Routes>
+                <Route path="/" element={<LandingLayout />}>
+                  <Route index element={<LandingPage />} />
+                  <Route path="login" element={<AuthPage />} />
+                  <Route path="signup" element={<AuthPage />} />
+                </Route>
+
+                <Route path="/app" element={<AppLayout />}>
+                  <Route index element={<Dashboard />} />
+                  <Route path="directory" element={<Directory />} />
+                  <Route path="directory/:id" element={<ContactDetail />} />
+                  <Route path="graph" element={<NetworkGraph />} />
+                  <Route path="tracker" element={<Tracker />} />
+                  <Route path="calendar" element={<OutreachCalendar />} />
+                  <Route path="templates" element={<Templates />} />
+                  <Route path="settings" element={<Settings />} />
+                </Route>
+              </Routes>
+            </BrowserRouter>
+          </TourProvider>
+        </ConfirmProvider>
+      </ToastProvider>
     </AuthProvider>
   );
 }

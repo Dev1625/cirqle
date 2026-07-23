@@ -6,11 +6,16 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Filter, Search, Table, Building, Briefcase, Calendar as CalendarIcon, ListTodo, Download, Sparkles, Trash2, Clock, CheckCircle2, Send, Users } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { getFollowUpQueueItems, getRecordDate, getRecordTime } from '../lib/tracker';
+import { TierBadge } from '../components/ui/TierBadge';
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
 
 type ViewMode = 'sheet' | 'firm' | 'industry' | 'recruiting' | 'calendar' | 'queue';
 
 export default function Tracker() {
   const { user } = useAuth();
+  const { toast } = useToast();
+  const confirm = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeView = (searchParams.get('mode') as ViewMode) || 'sheet';
 
@@ -130,7 +135,12 @@ export default function Tracker() {
   const handleClearTracker = async () => {
      if (!user || outreaches.length === 0) return;
 
-     const confirmed = window.confirm(`Clear ${outreaches.length} tracker record${outreaches.length === 1 ? '' : 's'}? This will remove outreach history but leave contacts and notes intact.`);
+     const confirmed = await confirm({
+        title: 'Clear tracker history?',
+        message: `This removes ${outreaches.length} tracker record${outreaches.length === 1 ? '' : 's'} but leaves contacts and notes intact. This cannot be undone.`,
+        confirmLabel: 'Clear Tracker',
+        tone: 'danger',
+     });
      if (!confirmed) return;
 
      setIsClearingTracker(true);
@@ -151,6 +161,7 @@ export default function Tracker() {
 
         localStorage.removeItem(`ai_brief_${user.uid}`);
         localStorage.removeItem(`ai_brief_time_${user.uid}`);
+        toast(`Cleared ${outreaches.length} tracker record${outreaches.length === 1 ? '' : 's'}.`, 'success');
      } catch (error) {
         handleFirestoreError(error, 'delete', `users/${user.uid}/outreaches`);
      } finally {
@@ -168,7 +179,7 @@ export default function Tracker() {
              <Sparkles className="text-ink" size={32} />
              Tracker.
            </h1>
-           <p className="font-mono text-xs uppercase tracking-widest opacity-50">Global view of all relationship interactions.</p>
+           <p className="font-mono text-xs uppercase tracking-widest text-muted">Global view of all relationship interactions.</p>
         </div>
         <div className="flex gap-2">
            <button
@@ -188,8 +199,8 @@ export default function Tracker() {
       {/* Control Bar (Tabs & Filters) */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white border border-ink p-2 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] z-20 relative">
          
-         {/* Tabs */}
-         <div className="tour-tracker-modes flex overflow-x-auto no-scrollbar w-full xl:w-auto">
+         {/* Tabs — wraps to a second line rather than clipping/hiding overflow at narrow widths */}
+         <div className="tour-tracker-modes flex flex-wrap w-full xl:w-auto">
             {[
               { id: 'queue', label: 'Follow-Up Queue', icon: ListTodo },
               { id: 'sheet', label: 'Sheet', icon: Table },
@@ -344,7 +355,9 @@ function formatRelativeDays(date: Date | null) {
    const days = differenceInDays(new Date(), date);
    if (days === 0) return 'Today';
    if (days === 1) return '1 day ago';
-   return `${days} days ago`;
+   if (days > 1) return `${days} days ago`;
+   if (days === -1) return 'In 1 day';
+   return `In ${Math.abs(days)} days`;
 }
 
 function getPipelineStage(row: any) {
@@ -623,9 +636,7 @@ function SheetView({ data }: { data: any[] }) {
                         <Link to={`/app/directory/${row.contactId}`} className="font-bold hover:underline">
                            {row.contact?.name || 'Unknown'}
                         </Link>
-                        {row.contact?.relationshipTier && (
-                           <span className="ml-2 px-1 py-0.5 border border-ink/20 text-[9px] uppercase">{row.contact.relationshipTier}</span>
-                        )}
+                        <TierBadge tier={row.contact?.relationshipTier} className="ml-2 !px-1.5 !py-0.5 !text-[9px]" />
                      </td>
                      <td className="p-3 border-r border-ink/10">
                         {row.contact?.company || '--'}

@@ -4,9 +4,12 @@ import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { TierBadge } from '../components/ui/TierBadge';
 import { Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
 import Markdown from 'react-markdown';
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
 
 import { useNavigate } from 'react-router-dom';
 
@@ -282,6 +285,8 @@ ${JSON.stringify(chunk)}`,
 export default function Directory() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const confirm = useConfirm();
   const [contacts, setContacts] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   
@@ -368,7 +373,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       });
     } catch (error) {
       console.error(error);
-      alert("Failed to parse. Please try again.");
+      toast("Failed to parse that text. Please try again or use manual entry.", 'error');
     } finally {
       setIsParsing(false);
     }
@@ -516,7 +521,12 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       return;
     }
 
-    const confirmed = window.confirm(`Clear ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all associated outreaches/notes? This cannot be undone.`);
+    const confirmed = await confirm({
+      title: 'Clear entire directory?',
+      message: `This deletes ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all associated outreaches and notes. This cannot be undone.`,
+      confirmLabel: 'Clear Directory',
+      tone: 'danger',
+    });
     if (!confirmed) return;
 
     setIsClearingDirectory(true);
@@ -554,7 +564,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
 
       localStorage.removeItem(`ai_brief_${user.uid}`);
       localStorage.removeItem(`ai_brief_time_${user.uid}`);
-      setImportFeedback(`Cleared ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all related outreach history.`);
+      toast(`Cleared ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all related outreach history.`, 'success');
     } catch (error) {
       handleFirestoreError(error, 'delete', `users/${user.uid}/contacts`);
     } finally {
@@ -567,7 +577,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       <div className="flex justify-between items-center pb-6 border-b border-ink/20 flex-wrap gap-4">
         <div>
            <h1 className="font-serif text-5xl italic font-black mb-2">Directory.</h1>
-           <p className="font-mono text-xs uppercase tracking-widest opacity-50">Filter, search, and skim through your network.</p>
+           <p className="font-mono text-xs uppercase tracking-widest text-muted">Filter, search, and skim through your network.</p>
         </div>
         <div className="flex flex-wrap gap-3 items-center justify-end">
           <input
@@ -608,7 +618,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       )}
 
       {isAddMode && (
-        <div className="bg-white border border-ink p-6 mb-8 group overflow-hidden">
+        <div className="bg-white border border-ink p-6 mb-8 group overflow-hidden animate-fade-slide-up">
           <div className="flex justify-between items-start mb-6">
             <h2 className="font-serif text-2xl italic font-bold">New Contact</h2>
             <button onClick={() => { setIsAddMode(false); setFormData(null); setPasteText(''); }} className="text-xs font-mono uppercase tracking-widest opacity-60 hover:opacity-100 transition-opacity">Cancel</button>
@@ -715,7 +725,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
                    
                    <div className="flex items-center gap-3">
                       {c.industry && <span className="text-[10px] uppercase tracking-widest font-mono border-b border-ink/20 pb-0.5">{c.industry}</span>}
-                      {c.relationshipTier && <span className="text-[10px] uppercase tracking-widest font-mono bg-accent px-2 py-1">{c.relationshipTier}</span>}
+                      <TierBadge tier={c.relationshipTier} />
                    </div>
                 </div>
 
@@ -726,7 +736,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
                        <Markdown>{c.summary}</Markdown>
                      </div>
                    ) : (
-                     <span className="italic opacity-50">No AI summary generated for this contact yet. Click to add context.</span>
+                     <span className="italic text-muted">No AI summary generated for this contact yet. Click to add context.</span>
                    )}
                 </div>
               </div>
