@@ -16,8 +16,8 @@ Legend: `[ALIGN]` `[COLOR]` `[TYPE]` `[MOTION]` `[STATE]` `[FLOW]` `[RESPONSIVE]
 - [x] **[MOTION] No mount/unmount transition on modals.** Draft Outreach, Add Contact, Help & Tours, and Filter panel all pop in/out with zero transition (instant `{show && <div>}`). Per the polish standard, these should fade+scale in ~150–200ms.
 - [x] **[STATE] Tracker tab bar clips text at 1024px.** "Industry" renders as "INDUS" with a hard clip and no ellipsis or scroll affordance — `overflow-x-auto` + `no-scrollbar` hides the only cue that more tabs exist off-screen.
 - [x] **[RESPONSIVE] Sidebar never collapses responsively.** Below ~1100px the fixed 256px sidebar plus content squeezes dashboards/grids (4-col metric rows) uncomfortably tight at 768–1024px; only a manual click collapses it.
-- [ ] **[STATE] `alert()` / `window.confirm()` used for feedback and destructive confirmation** (Settings save, PDF parse errors, Templates delete, reply/draft failures, Clear Directory/Tracker). These block the render thread and look unfinished next to the rest of the product's custom UI. Needs a toast system + a styled confirm dialog matching the app's modal pattern.
-- [ ] **[MOTION] No `prefers-reduced-motion` handling anywhere new motion is added** — needs to be baked into whatever transition utility we introduce.
+- [x] **[STATE] `alert()` / `window.confirm()` used for feedback and destructive confirmation** (Settings save, PDF parse errors, Templates delete, reply/draft failures, Clear Directory/Tracker). Replaced with a shared Toast system and a styled Confirm dialog matching the app's own modal language (Escape-to-cancel, Enter-to-confirm).
+- [x] **[MOTION] No `prefers-reduced-motion` handling anywhere new motion is added** — baked into `index.css` globally alongside the new transition keyframes.
 
 ## Dashboard
 
@@ -36,8 +36,8 @@ Legend: `[ALIGN]` `[COLOR]` `[TYPE]` `[MOTION]` `[STATE]` `[FLOW]` `[RESPONSIVE]
 
 Overall this screen is already excellent — token-matched industry colors, radial layout, live detail panel, cluster intelligence, gap analysis. Treat as high-leverage, not high-risk.
 
-- [ ] **[TYPE] Center "you" node shows "Y"** when no profile name is set — reads oddly for a demo. Should default to a friendlier glyph/label when profile name is empty.
-- [ ] **[COLOR] Network Strength maxes at a flat 100** with the current seed density (all outreach clustered in the last ~10 days) — looks less credible than a good-but-imperfect score. Will age a couple of seed interactions further back for realism.
+- [x] **[TYPE] Center "you" node shows "Y"** when no profile name is set — reads oddly for a demo. Now defaults to a bullseye glyph instead of a bare initial.
+- [x] **[COLOR] Network Strength maxes at a flat 100** with the current seed density (all outreach clustered in the last ~10 days) — looks less credible than a good-but-imperfect score. Dormant-tier seed contacts now get a genuinely stale (90-150 day) last-touch date instead of the same recency as everyone else.
 - [ ] **[MOTION] Hover-to-highlight-connections works but has no transition** — instantaneous alpha snap for faded vs. active nodes/links; a short ease would read as more "alive" per the prime directive.
 - [ ] **[STATE] Tooltip/detail card on node hover doesn't exist — only click.** A lightweight hover tooltip (name + tier) before committing to a click would match the "polished tooltip" bar set in the brief.
 
@@ -52,7 +52,7 @@ Overall this screen is already excellent — token-matched industry colors, radi
 ## Contact Detail
 
 - [x] This screen is close to done: AI-labeled tabs (sparkle icon on Process Reply / Add AI Tags — good disclosure pattern already), clean modal, good timeline. Only minor items:
-- [ ] **[MOTION] Tab switching has no transition** (instant content swap) — a quick fade would smooth it.
+- [x] **[MOTION] Tab switching has no transition** (instant content swap) — now fades in on switch.
 - [ ] **[STATE] "Draft Outreach AI" clarifying questions are hardcoded, static text inputs** — fine functionally, but per Shape-of-AI "Wayfinders/Prompt details" patterns, showing *why* each question matters (or letting the AI skip ones already answered by notes) would feel more considered. Lower priority — functional as-is.
 
 ## Outreach Calendar
@@ -73,7 +73,7 @@ Overall this screen is already excellent — token-matched industry colors, radi
 
 ## Auth / Landing
 
-- [x] **[FLOW] Email/password sign-in is disabled at the Firebase project level**, but the signup/login form is shown as the primary path with Google buried as a secondary option and only surfaces the real reason via a raw Firebase error string after a failed submit. Either lead with Google (primary, working path) or clarify email/password status before the user hits an error. *(Environment-level; documented in the report — see there for what was/was not touched.)*
+- [x] **[FLOW] Email/password sign-in is disabled at the Firebase project level**, but the signup/login form showed it as the primary path with Google buried as a secondary option, and only surfaced the real reason via a raw Firebase error string after a failed submit. Swapped button hierarchy (Google now primary/filled, email secondary/outline — visual only, no auth logic touched) and added a plain-language message for the specific `auth/operation-not-allowed` case.
 - [ ] **[TYPE] Landing hero renders in Inter, not the Playfair serif used everywhere else in-app** — intentional-looking contrast for marketing copy; left as-is, flagged for awareness only.
 
 ## Help & Tours
