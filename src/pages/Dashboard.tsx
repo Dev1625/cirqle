@@ -1,13 +1,22 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import { Sparkles, ArrowRight, RefreshCw, Database, ListTodo, Clock, Send, Users } from 'lucide-react';
+import { Sparkles, ArrowRight, RefreshCw, Database, ListTodo, Clock, Send, Users, AlertTriangle } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
 import Markdown from 'react-markdown';
 import { seedSampleData } from '../lib/seed';
 import { getFollowUpQueueItems, getRecordTime } from '../lib/tracker';
+
+const BRIEF_TIMEOUT_MS = 20000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => window.setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -15,10 +24,12 @@ export default function Dashboard() {
   const [outreaches, setOutreaches] = useState<any[]>([]);
   const [isHovered, setIsHovered] = useState<string | null>(null);
   const [firestoreIssue, setFirestoreIssue] = useState<string | null>(null);
-  
+
   const [aiBrief, setAiBrief] = useState<string>('');
   const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
   const [isSeeding, setIsSeeding] = useState(false);
+  const hasAttemptedBriefRef = useRef(false);
 
   useEffect(() => {
     if (!user) return;
@@ -63,25 +74,27 @@ export default function Dashboard() {
 
   const fetchBrief = useCallback(async (force = false) => {
     if (!user || contacts.length === 0) return;
-    
+
     const cacheKey = `ai_brief_${user.uid}`;
     const timeKey = `ai_brief_time_${user.uid}`;
-    
+
     if (!force) {
       const cached = localStorage.getItem(cacheKey);
       const cachedTime = localStorage.getItem(timeKey);
-      
+
       if (cached && cachedTime) {
          const diffHours = (Date.now() - Number(cachedTime)) / (1000 * 60 * 60);
          // Refresh automatically every 24 hours
          if (diffHours < 24) {
             setAiBrief(cached);
+            setBriefError(null);
             return;
          }
       }
     }
 
     setIsGeneratingBrief(true);
+    setBriefError(null);
     try {
       // Pick the top 15 most recent/relevant ones to avoid token limits
       const miniTracker = [...outreaches].sort((a:any, b:any) => (b.sentAt?.toMillis() || 0) - (a.sentAt?.toMillis() || 0)).slice(0, 15).map((o: any) => {
@@ -97,31 +110,43 @@ export default function Dashboard() {
       });
 
       const ai = getGemini();
-      const response = await ai.models.generateContent({
-         model: "gemini-3-flash-preview",
-         contents: `You are an AI Executive Assistant managing my CRM pipeline. 
-         Here is a slice of my tracker data: ${JSON.stringify(miniTracker)}
-         Analyze this and write a very short "This Week's Priorities" brief. 
-         Be direct, professional, and slightly conversational. Maximum 3 bullet points.
-         Focus on who to follow up with, who to thank, and what's overdue.`
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: `You are an AI Executive Assistant managing my CRM pipeline.
+          Here is a slice of my tracker data: ${JSON.stringify(miniTracker)}
+          Analyze this and write a very short "This Week's Priorities" brief.
+          Be direct, professional, and slightly conversational. Maximum 3 bullet points.
+          Focus on who to follow up with, who to thank, and what's overdue.`
+        }),
+        BRIEF_TIMEOUT_MS
+      );
       const text = response.text || '';
       setAiBrief(text);
+      setBriefError(null);
       localStorage.setItem(cacheKey, text);
       localStorage.setItem(timeKey, Date.now().toString());
     } catch (e) {
       console.error(e);
+      setBriefError(
+        e instanceof Error && e.message === 'timeout'
+          ? "This is taking longer than expected — the AI service may be unreachable right now."
+          : "Couldn't generate your priorities brief right now."
+      );
     } finally {
       setIsGeneratingBrief(false);
     }
   }, [user, contacts, outreaches]);
 
   useEffect(() => {
-    // Attempt to load the brief once contacts are ready
-    if (contacts.length > 0 && !aiBrief && !isGeneratingBrief) {
+    // Attempt to load the brief once, the first time contacts are ready —
+    // not on every Firestore snapshot change (seeding 15 contacts used to
+    // fire 15 wasted AI calls here).
+    if (contacts.length > 0 && !hasAttemptedBriefRef.current) {
+       hasAttemptedBriefRef.current = true;
        fetchBrief(false);
     }
-  }, [contacts, fetchBrief, aiBrief, isGeneratingBrief]);
+  }, [contacts, fetchBrief]);
 
   const handleSeed = async () => {
     setIsSeeding(true);
@@ -131,7 +156,9 @@ export default function Dashboard() {
        localStorage.removeItem(`ai_brief_${user?.uid}`);
        localStorage.removeItem(`ai_brief_time_${user?.uid}`);
        setAiBrief('');
+       setBriefError(null);
        setFirestoreIssue(null);
+       hasAttemptedBriefRef.current = true;
        setTimeout(() => fetchBrief(true), 1000);
     } catch(e) {
        console.error("Seeding failed", e);
@@ -148,7 +175,7 @@ export default function Dashboard() {
       <div className="flex justify-between items-start flex-wrap gap-4">
         <div>
           <h1 className="font-serif text-5xl italic font-black mb-2">Dashboard.</h1>
-          <p className="font-mono text-xs uppercase tracking-widest opacity-50">Pulse of your network. Skim your relationships.</p>
+          <p className="font-mono text-xs uppercase tracking-widest text-muted">Pulse of your network. Skim your relationships.</p>
         </div>
         <button 
            onClick={handleSeed}
@@ -193,8 +220,12 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-3">
-              {queueItems.slice(0, 4).map((item) => (
-                <div key={item.id} className="border border-ink/15 bg-white p-4 hover:bg-paper transition-colors flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              {queueItems.slice(0, 4).map((item, index) => (
+                <div
+                  key={item.id}
+                  style={{ animationDelay: `${index * 40}ms` }}
+                  className="animate-fade-slide-up border border-ink/15 bg-white p-4 hover:bg-paper transition-colors flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
+                >
                   <div className="min-w-0">
                     <Link to={`/app/directory/${item.contactId}`} className="font-serif text-xl font-bold hover:underline">
                       {item.contact?.name || 'Unknown'}
@@ -239,8 +270,21 @@ export default function Dashboard() {
          
          {isGeneratingBrief ? (
             <p className="font-mono text-sm opacity-50 animate-pulse">Reading tracker data and generating your brief...</p>
+         ) : briefError ? (
+            <div className="flex flex-col gap-3 items-start">
+               <p className="font-mono text-sm leading-relaxed flex items-start gap-2 max-w-2xl">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-400" />
+                  <span>{briefError} Your data is safe — this only affects the AI summary.</span>
+               </p>
+               <button
+                  onClick={() => fetchBrief(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 transition-colors font-mono text-[10px] uppercase tracking-widest"
+               >
+                  <RefreshCw size={12} /> Try Again
+               </button>
+            </div>
          ) : aiBrief ? (
-            <div className="font-mono text-sm leading-relaxed max-w-3xl">
+            <div className="font-mono text-sm leading-relaxed max-w-3xl animate-fade-in">
                <div className="markdown-body prose-invert prose-sm">
                  <Markdown>{aiBrief}</Markdown>
                </div>
@@ -250,8 +294,10 @@ export default function Dashboard() {
                   </Link>
                </div>
             </div>
+         ) : contacts.length === 0 ? (
+            <p className="font-mono text-sm opacity-50">Add a few contacts and log some outreach to get a personalized priorities brief.</p>
          ) : (
-            <p className="font-mono text-sm opacity-50">Not enough data to calculate priorities yet.</p>
+            <p className="font-mono text-sm opacity-50 animate-pulse">Preparing your brief...</p>
          )}
       </div>
 
@@ -262,11 +308,12 @@ export default function Dashboard() {
              Your network is empty. Drop some contacts in the Directory.
            </div>
         ) : (
-           contacts.map(c => (
-             <Link 
-               to={`/app/directory/${c.id}`} 
-               key={c.id} 
-               className="group bg-white border border-ink p-6 hover:bg-ink transition-colors relative overflow-hidden flex flex-col justify-between min-h-[160px]"
+           contacts.map((c, index) => (
+             <Link
+               to={`/app/directory/${c.id}`}
+               key={c.id}
+               style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
+               className="animate-fade-slide-up group bg-white border border-ink p-6 hover:bg-ink transition-colors relative overflow-hidden flex flex-col justify-between min-h-[160px]"
                onMouseEnter={() => setIsHovered(c.id)}
                onMouseLeave={() => setIsHovered(null)}
              >
@@ -279,7 +326,7 @@ export default function Dashboard() {
                   </p>
                   
                   <div className="font-mono text-sm leading-relaxed group-hover:text-white/90 line-clamp-3">
-                     {c.summary || <span className="opacity-50 italic">No AI summary generated for this contact.</span>}
+                     {c.summary || <span className="text-muted group-hover:text-white/70 italic transition-colors">No AI summary generated for this contact.</span>}
                   </div>
                </div>
                
