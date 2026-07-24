@@ -98,7 +98,7 @@ export default function Settings() {
         <p className="font-mono text-xs uppercase tracking-widest text-muted">Set your context to generate better AI outreach drafts.</p>
       </div>
 
-      <div className="bg-white border border-ink p-8 flex-1 max-w-4xl">
+      <div className="bg-white border border-ink/15 rounded-card p-8 flex-1 max-w-4xl">
         <form onSubmit={handleSave} className="space-y-6 font-mono text-sm">
            <div className="grid grid-cols-2 gap-4">
              <div className="col-span-2">
@@ -116,7 +116,7 @@ export default function Settings() {
              <div className="col-span-2">
                  <label className="text-xs uppercase tracking-widest text-subtle block mb-1">Bio / Career Goals</label>
                  <textarea 
-                    className="w-full h-32 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
+                    className="w-full h-32 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
                     value={profile.bio || ''} 
                     onChange={e => setProfile({...profile, bio: e.target.value})} 
                  />
@@ -140,7 +140,7 @@ export default function Settings() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isParsingPdf}
-                    className="flex items-center gap-2 border border-ink px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest font-bold hover:bg-ink hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center gap-2 border border-ink/15 rounded-card px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest font-bold hover:bg-ink hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                  >
                     <Upload size={14} />
                     {isParsingPdf ? 'Parsing...' : resumeFile ? 'Replace PDF' : 'Choose PDF'}
@@ -154,7 +154,7 @@ export default function Settings() {
                  <div className="mt-4 animate-fade-slide-up">
                     <label className="text-xs uppercase tracking-widest text-subtle block mb-1">Parsed Resume Text (Editable)</label>
                     <textarea
-                      className="w-full h-64 border border-ink p-3 font-mono text-sm bg-paper/50 text-subtle"
+                      className="w-full h-64 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 text-subtle"
                       value={profile.resumeText}
                       onChange={e => setProfile({...profile, resumeText: e.target.value})}
                     />

@@ -77,7 +77,7 @@ export default function AuthPage() {
 
   return (
     <div className="flex-1 flex items-center justify-center p-6 bg-paper">
-      <div className="w-full max-w-sm bg-white border border-ink p-8">
+      <div className="w-full max-w-sm bg-white border border-ink/15 rounded-card p-8">
         <h2 className="font-serif text-3xl font-black italic mb-6">{isLogin ? 'Welcome Back' : 'Create Account'}</h2>
         
         {error && (

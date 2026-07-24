@@ -11,7 +11,7 @@ export function TierBadge({ tier, className = '' }: { tier?: string | null; clas
   if (!tier) return null;
   const styles = TIER_STYLES[tier] || TIER_STYLES.Cold;
   return (
-    <span className={`inline-block px-2 py-1 text-[10px] uppercase tracking-widest font-mono font-bold ${styles} ${className}`}>
+    <span className={`inline-block rounded-card px-2 py-1 text-[10px] uppercase tracking-widest font-mono font-bold ${styles} ${className}`}>
       {tier}
     </span>
   );

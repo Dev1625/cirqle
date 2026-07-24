@@ -333,7 +333,7 @@ Return the result in JSON format EXACTLY like this:
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
          {/* Details Panel */}
          <div className="xl:col-span-1 space-y-6">
-           <div className="bg-white border border-ink p-8">
+           <div className="bg-white border border-ink/15 rounded-card p-8">
              <div className="flex justify-between items-start mb-6">
                <div>
                  <p className="font-mono text-lg">{contact.role}</p>
@@ -375,7 +375,7 @@ Return the result in JSON format EXACTLY like this:
          
          {/* Outreach Tracker & Notes */}
          <div className="xl:col-span-2">
-            <div className="bg-white border border-ink">
+            <div className="bg-white border border-ink/15 rounded-card">
                <div className="border-b border-ink/20 flex divide-x divide-ink/20 bg-paper/30 font-mono text-[10px] uppercase tracking-widest font-bold">
                  <button onClick={() => setActiveTab('note')} className={`flex-1 py-3 hover:bg-paper transition-colors ${activeTab === 'note' ? 'bg-white border-b-2 border-b-ink' : ''}`}>Quick Note</button>
                  <button onClick={() => setActiveTab('meeting')} className={`flex flex-1 items-center justify-center gap-1 py-3 hover:bg-paper transition-colors ${activeTab === 'meeting' ? 'bg-white border-b-2 border-b-ink' : ''}`}><Calendar size={12}/> Log Meeting</button>
@@ -411,15 +411,15 @@ Return the result in JSON format EXACTLY like this:
                         </div>
                         <div className="col-span-2">
                           <label className="block text-[10px] uppercase tracking-widest text-subtle mb-1">What was discussed?</label>
-                          <textarea required className="w-full h-20 border border-ink p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.discussed} onChange={e => setMeetingData({...meetingData, discussed: e.target.value})}></textarea>
+                          <textarea required className="w-full h-20 border border-ink/15 rounded-card p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.discussed} onChange={e => setMeetingData({...meetingData, discussed: e.target.value})}></textarea>
                         </div>
                         <div className="col-span-2 md:col-span-1">
                           <label className="block text-[10px] uppercase tracking-widest text-subtle mb-1">What was promised / Action items?</label>
-                          <textarea className="w-full h-16 border border-ink p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.promised} onChange={e => setMeetingData({...meetingData, promised: e.target.value})}></textarea>
+                          <textarea className="w-full h-16 border border-ink/15 rounded-card p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.promised} onChange={e => setMeetingData({...meetingData, promised: e.target.value})}></textarea>
                         </div>
                         <div className="col-span-2 md:col-span-1">
                           <label className="block text-[10px] uppercase tracking-widest text-subtle mb-1">Next Steps for AI</label>
-                          <textarea className="w-full h-16 border border-ink p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.nextSteps} onChange={e => setMeetingData({...meetingData, nextSteps: e.target.value})}></textarea>
+                          <textarea className="w-full h-16 border border-ink/15 rounded-card p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.nextSteps} onChange={e => setMeetingData({...meetingData, nextSteps: e.target.value})}></textarea>
                         </div>
                       </div>
                       <div className="flex justify-end pt-2">
@@ -432,7 +432,7 @@ Return the result in JSON format EXACTLY like this:
                  {activeTab === 'reply' && (
                    <form onSubmit={handleProcessReply} className="space-y-4">
                       <p className="font-mono text-xs text-subtle">Paste the unstructured email or message reply. The AI will summarize it, update context, and track the outreach as responded.</p>
-                      <textarea required className="w-full h-32 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" placeholder="Hi there, thanks for reaching out. Let's chat next week..." value={replyText} onChange={e => setReplyText(e.target.value)}></textarea>
+                      <textarea required className="w-full h-32 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" placeholder="Hi there, thanks for reaching out. Let's chat next week..." value={replyText} onChange={e => setReplyText(e.target.value)}></textarea>
                       <div className="flex justify-end pt-2">
                         <Button type="submit" disabled={isProcessing} className="gap-2">
                           {isProcessing ? 'Processing AI...' : 'Process Reply'} <Sparkles size={14}/>
@@ -445,7 +445,7 @@ Return the result in JSON format EXACTLY like this:
                  {activeTab === 'parse' && (
                    <form onSubmit={handleParseConversation} className="space-y-4">
                       <p className="font-mono text-xs text-subtle">Paste conversation notes or a raw transcript. The AI will extract "They Mentioned" structured tags like events, hiring, or personal news and attach to their profile context.</p>
-                      <textarea required className="w-full h-32 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" placeholder="Spoke to them. They mentioned they are moving to NY next month and will be looking for full-stack hires in Q3..." value={conversationLog} onChange={e => setConversationLog(e.target.value)}></textarea>
+                      <textarea required className="w-full h-32 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" placeholder="Spoke to them. They mentioned they are moving to NY next month and will be looking for full-stack hires in Q3..." value={conversationLog} onChange={e => setConversationLog(e.target.value)}></textarea>
                       <div className="flex justify-end pt-2">
                         <Button type="submit" disabled={isProcessing} className="gap-2">
                           {isProcessing ? 'Extracting...' : 'Extract Tags'} <Sparkles size={14}/>
@@ -523,7 +523,7 @@ Return the result in JSON format EXACTLY like this:
            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/30 backdrop-blur-sm animate-fade-in"
            onClick={(e) => { if (e.target === e.currentTarget) { setIsDrafting(false); setCurrentDraft(null); } }}
          >
-            <div className="animate-fade-scale-in bg-white border border-ink w-full max-w-2xl max-h-[90vh] flex flex-col shadow-[16px_16px_0px_0px_rgba(26,26,26,1)]">
+            <div className="animate-fade-scale-in bg-white border border-ink/15 rounded-card w-full max-w-2xl max-h-[90vh] flex flex-col shadow-float">
                <div className="p-6 border-b border-ink/20 flex justify-between items-center bg-paper/50">
                   <h2 className="font-serif text-2xl flex items-center gap-2"><Sparkles size={24} /> AI Outreach Draft</h2>
                   <button onClick={() => { setIsDrafting(false); setCurrentDraft(null); }} className="text-xl font-bold font-mono hover:text-red-500 transition-colors">×</button>
@@ -561,7 +561,7 @@ Return the result in JSON format EXACTLY like this:
                        <div>
                          <label className="text-[10px] uppercase tracking-widest text-subtle block mb-1">Body</label>
                          <textarea 
-                           className="w-full h-64 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
+                           className="w-full h-64 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
                            value={currentDraft.body}
                            onChange={(e) => setCurrentDraft({...currentDraft, body: e.target.value})}
                          />

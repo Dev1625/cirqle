@@ -145,7 +145,7 @@ const AppLayout = () => {
       {!isSidebarOpen && (
          <button 
            onClick={() => setIsSidebarOpen(true)}
-           className="absolute top-6 left-6 z-50 p-2 bg-paper border border-ink shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] hover:bg-ink hover:text-white transition-colors"
+           className="absolute top-6 left-6 z-50 p-2 bg-paper border border-ink/15 rounded-card hover:bg-ink hover:text-white transition-colors"
          >
            <Menu size={20} />
          </button>
@@ -153,7 +153,7 @@ const AppLayout = () => {
 
       {/* Sidebar */}
       {isSidebarOpen && (
-         <aside className="w-64 flex-shrink-0 border-r border-ink bg-paper p-8 z-10 flex flex-col relative transition-all duration-300">
+         <aside className="w-64 flex-shrink-0 border-r border-ink/15 bg-paper p-8 z-10 flex flex-col relative transition-all duration-300">
            <div onClick={() => setIsSidebarOpen(false)} className="cursor-pointer group relative">
              <Logo />
              <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 font-mono text-[10px] bg-ink text-white px-2 py-0.5 pointer-events-none transition-opacity">
@@ -243,7 +243,7 @@ const AppLayout = () => {
       {/* Embedded Help Menu Overlay */}
       {showHelpMenu && (
          <div className="fixed inset-0 z-50 bg-ink/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" onClick={(e) => { if (e.target === e.currentTarget) setShowHelpMenu(false); }}>
-            <div className="bg-paper border border-ink p-8 w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-[16px_16px_0px_0px_rgba(26,26,26,1)] animate-fade-scale-in relative">
+            <div className="bg-paper border border-ink/15 rounded-card p-8 w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-float animate-fade-scale-in relative">
                <button onClick={() => setShowHelpMenu(false)} className="absolute top-6 right-6 font-mono text-xl hover:text-red-500 transition-colors">X</button>
                <h2 className="font-serif text-3xl font-bold mb-8">Guided Tours & Help</h2>
                
@@ -278,7 +278,7 @@ const AppLayout = () => {
                                   startTour(tourId);
                                }, 150);
                              }}
-                             className="text-[10px] font-mono uppercase font-bold tracking-widest border border-ink px-3 py-1 hover:bg-ink hover:text-white transition-colors"
+                             className="text-[10px] font-mono uppercase font-bold tracking-widest border border-ink/15 rounded-card px-3 py-1 hover:bg-ink hover:text-white transition-colors"
                            >
                              Run Tour
                            </button>

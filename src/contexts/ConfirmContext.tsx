@@ -50,7 +50,7 @@ export const ConfirmProvider = ({ children }: { children: React.ReactNode }) => 
           className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-ink/40 backdrop-blur-sm animate-fade-in"
           onClick={(e) => { if (e.target === e.currentTarget) close(false); }}
         >
-          <div className="animate-fade-scale-in bg-white border border-ink w-full max-w-md shadow-[12px_12px_0px_0px_rgba(26,26,26,1)]">
+          <div className="animate-fade-scale-in bg-white rounded-card border border-ink/15 w-full max-w-md shadow-float">
             <div className="p-6">
               <h2 className="font-serif text-2xl italic font-bold mb-3">{pending.title}</h2>
               <p className="font-mono text-sm leading-relaxed text-subtle">{pending.message}</p>

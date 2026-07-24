@@ -783,7 +783,7 @@ function MetricCard({
   detail: string;
 }) {
   return (
-    <div className="border border-ink bg-white p-5 shadow-[4px_4px_0px_0px_rgba(26,26,26,0.12)]">
+    <div className="border border-ink/15 rounded-card bg-white p-5">
       <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
         <Icon size={14} />
         {label}
@@ -1128,7 +1128,7 @@ export default function NetworkGraph() {
         />
       </div>
 
-      <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)] space-y-4">
+      <div className="bg-white border border-ink/15 rounded-card p-5 space-y-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="relative w-full max-w-xl">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle" size={16} />
@@ -1149,7 +1149,7 @@ export default function NetworkGraph() {
               >
                 Detail Overlay
               </button>
-              <div className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-20 hidden w-72 border border-ink/15 bg-[#F8F5EF] p-3 text-ink shadow-[4px_4px_0px_0px_rgba(26,26,26,0.08)] group-hover:block group-focus-within:block">
+              <div className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-20 hidden w-72 border border-ink/15 bg-[#F8F5EF] p-3 text-ink group-hover:block group-focus-within:block">
                 <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-subtle">Signal Overlay</div>
                 <div className="space-y-2 text-xs text-subtle">
                   <div className="flex items-center gap-2">
@@ -1198,7 +1198,7 @@ export default function NetworkGraph() {
       </div>
 
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_360px]">
-        <section className="self-start bg-white border border-ink shadow-[6px_6px_0px_0px_rgba(26,26,26,0.10)] overflow-hidden">
+        <section className="self-start bg-white border border-ink/15 rounded-card overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-ink/15 bg-[#F8F5EF] p-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="font-serif text-2xl italic font-bold">Live Network Surface</h2>
@@ -1288,7 +1288,7 @@ export default function NetworkGraph() {
 
         <aside className="space-y-4">
           {selectedNode && selectedNode.kind === 'contact' && selectedInsight ? (
-            <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+            <div className="bg-white border border-ink/15 rounded-card p-5">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <p className="font-mono text-[10px] uppercase tracking-widest text-subtle mb-1">Selected Contact</p>
@@ -1362,7 +1362,7 @@ export default function NetworkGraph() {
               </div>
             </div>
           ) : (
-            <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+            <div className="bg-white border border-ink/15 rounded-card p-5">
               <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
                 <Network size={14} />
                 Cluster Intelligence
@@ -1390,7 +1390,7 @@ export default function NetworkGraph() {
             </div>
           )}
 
-          <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+          <div className="bg-white border border-ink/15 rounded-card p-5">
             <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
               <Link2 size={14} />
               Network Opportunities
@@ -1416,7 +1416,7 @@ export default function NetworkGraph() {
             </div>
           </div>
 
-          <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+          <div className="bg-white border border-ink/15 rounded-card p-5">
             <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
               <Search size={14} />
               How To Read It
@@ -1428,7 +1428,7 @@ export default function NetworkGraph() {
             </div>
           </div>
 
-          <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+          <div className="bg-white border border-ink/15 rounded-card p-5">
             <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
               <AlertTriangle size={14} />
               Live Alerts

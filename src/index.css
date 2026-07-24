@@ -25,6 +25,21 @@
   --color-tier-dormant-bg: #F6E6E1;
   --color-tier-dormant-text: #93401F;
 
+  /* v2 (premium pass) — the one decision-point accent. A new *role*, not a
+     retint of --color-accent (which keeps its passive sand-wash job).
+     Deep oxblood/signet red: sits in the existing warm/earthy family, avoids
+     the terracotta-on-cream AI cliché. Used narrowly — single primary CTA
+     per view, active nav, link hover/active, focus-visible rings. */
+  --color-brand: #7A2331;
+  --color-brand-on: #F5F0E8;
+
+  /* v2 skin: a considered 7px signature radius (was hard 0px), and one
+     reserved soft elevation shadow for genuinely floating layers only
+     (modals, dropdowns, popovers, toasts). In-flow surfaces get no shadow —
+     the border-ink/15 hairline is the entire structural cue. */
+  --radius-card: 7px;
+  --shadow-float: 0 12px 32px -14px rgba(26, 26, 26, 0.30), 0 4px 12px -6px rgba(26, 26, 26, 0.16);
+
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Playfair Display", ui-serif, Georgia, serif;
   --font-mono: "Inconsolata", ui-monospace, SFMono-Regular, monospace;

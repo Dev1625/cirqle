@@ -180,7 +180,7 @@ export default function Dashboard() {
         <button 
            onClick={handleSeed}
            disabled={isSeeding}
-           className="flex items-center gap-2 px-4 py-2 border border-ink bg-white hover:bg-ink hover:text-white transition-colors font-mono text-[10px] uppercase tracking-widest font-bold disabled:opacity-50"
+           className="flex items-center gap-2 px-4 py-2 border border-ink/15 rounded-card bg-white hover:bg-ink hover:text-white transition-colors font-mono text-[10px] uppercase tracking-widest font-bold disabled:opacity-50"
         >
            <Database size={14} className={isSeeding ? "animate-pulse" : ""} />
            {isSeeding ? 'Seeding...' : 'Seed Test Data'}
@@ -193,7 +193,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="border border-ink bg-white shadow-[8px_8px_0px_0px_rgba(26,26,26,0.12)]">
+      <div className="border border-ink/15 rounded-card bg-white overflow-hidden">
         <div className="flex items-center justify-between gap-4 border-b border-ink/15 bg-[#F8F5EF] px-6 py-5 flex-wrap">
           <div>
             <h2 className="font-serif text-3xl italic font-bold flex items-center gap-2">
@@ -201,7 +201,7 @@ export default function Dashboard() {
             </h2>
             <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-subtle">Action-first view of the people who need you next.</p>
           </div>
-          <Link to="/app/tracker?mode=queue" className="inline-flex items-center gap-2 border border-ink px-3 py-2 font-mono text-[10px] uppercase tracking-widest font-bold hover:bg-ink hover:text-white transition-colors">
+          <Link to="/app/tracker?mode=queue" className="inline-flex items-center gap-2 border border-ink/15 rounded-card px-3 py-2 font-mono text-[10px] uppercase tracking-widest font-bold hover:bg-ink hover:text-white transition-colors">
             Open Full Queue <ArrowRight size={14} />
           </Link>
         </div>
@@ -238,7 +238,7 @@ export default function Dashboard() {
                     {item.nextAction && <p className="mt-3 font-mono text-sm leading-relaxed">{item.nextAction}</p>}
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    <Link to={`/app/directory/${item.contactId}`} className="px-4 py-2 border border-ink bg-white font-mono text-xs uppercase tracking-widest hover:bg-paper transition-colors">
+                    <Link to={`/app/directory/${item.contactId}`} className="px-4 py-2 border border-ink/15 rounded-card bg-white font-mono text-xs uppercase tracking-widest hover:bg-paper transition-colors">
                       Open
                     </Link>
                     <Link to={`/app/directory/${item.contactId}`} className="px-4 py-2 bg-ink text-white font-mono text-xs uppercase tracking-widest hover:bg-zinc-800 transition-colors">
@@ -253,7 +253,7 @@ export default function Dashboard() {
       </div>
 
       {/* AI Briefing Card */}
-      <div className="bg-ink text-paper p-6 shadow-[8px_8px_0px_0px_var(--tw-shadow-color)] shadow-ink/20">
+      <div className="bg-ink text-paper rounded-card p-6">
          <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
             <h2 className="font-serif text-2xl italic font-bold flex items-center gap-2">
                <Sparkles size={20} /> This Week's AI Priorities
@@ -304,7 +304,7 @@ export default function Dashboard() {
       {/* Skimmable AI Rolodex */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {contacts.length === 0 ? (
-           <div className="col-span-2 p-12 text-center border border-ink bg-white font-mono text-sm">
+           <div className="col-span-2 p-12 text-center border border-ink/15 rounded-card bg-white font-mono text-sm">
              Your network is empty. Drop some contacts in the Directory.
            </div>
         ) : (
@@ -313,7 +313,7 @@ export default function Dashboard() {
                to={`/app/directory/${c.id}`}
                key={c.id}
                style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
-               className="animate-fade-slide-up group bg-white border border-ink p-6 hover:bg-ink transition-colors relative overflow-hidden flex flex-col justify-between min-h-[160px]"
+               className="animate-fade-slide-up group bg-white border border-ink/15 rounded-card p-6 hover:bg-ink transition-colors relative overflow-hidden flex flex-col justify-between min-h-[160px]"
                onMouseEnter={() => setIsHovered(c.id)}
                onMouseLeave={() => setIsHovered(null)}
              >

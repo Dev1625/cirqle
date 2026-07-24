@@ -594,7 +594,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={isImportingCsv || isClearingDirectory}
-            className="tour-csv-btn font-mono text-[10px] uppercase tracking-widest border border-ink px-3 py-1.5 hover:bg-ink hover:text-white transition-colors bg-white shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2"
+            className="tour-csv-btn font-mono text-[10px] uppercase tracking-widest border border-ink/15 rounded-card px-3 py-1.5 hover:bg-ink hover:text-white transition-colors bg-white disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2"
           >
             <Upload size={14} />
             {isImportingCsv ? 'Importing...' : 'Import CSV'}
@@ -603,7 +603,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
             type="button"
             onClick={handleClearDirectory}
             disabled={contacts.length === 0 || isImportingCsv || isClearingDirectory}
-            className="font-mono text-[10px] uppercase tracking-widest border border-red-300 px-3 py-1.5 text-red-700 hover:bg-red-700 hover:text-white transition-colors bg-white shadow-[2px_2px_0px_0px_rgba(127,29,29,0.18)] disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
+            className="font-mono text-[10px] uppercase tracking-widest border border-red-300 px-3 py-1.5 text-red-700 hover:bg-red-700 hover:text-white transition-colors bg-white disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
           >
             <Trash2 size={14} />
             {isClearingDirectory ? 'Clearing...' : 'Clear Directory'}
@@ -618,7 +618,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       )}
 
       {isAddMode && (
-        <div className="bg-white border border-ink p-6 mb-8 group overflow-hidden animate-fade-slide-up">
+        <div className="bg-white border border-ink/15 rounded-card p-6 mb-8 group overflow-hidden animate-fade-slide-up">
           <div className="flex justify-between items-start mb-6">
             <h2 className="font-serif text-2xl italic font-bold">New Contact</h2>
             <button onClick={() => { setIsAddMode(false); setFormData(null); setPasteText(''); }} className="text-xs font-mono uppercase tracking-widest opacity-60 hover:opacity-100 transition-opacity">Cancel</button>
@@ -628,7 +628,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
             <div className="space-y-4 tour-paste-btn">
               <label className="block text-xs uppercase tracking-widest text-subtle">Paste text (LinkedIn bio, signature, notes) to auto-fill</label>
               <textarea 
-                className="w-full h-32 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
+                className="w-full h-32 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
                 placeholder="John Doe is a VP at Goldman Sachs based in NY..."
                 value={pasteText}
                 onChange={(e) => setPasteText(e.target.value)}
@@ -667,8 +667,8 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       )}
 
       {/* Directory Filters & List */}
-      <div className="tour-directory-list bg-white border border-ink">
-        <div className="p-4 border-b border-ink bg-paper/50 flex flex-col md:flex-row gap-4">
+      <div className="tour-directory-list bg-white border border-ink/15 rounded-card">
+        <div className="p-4 border-b border-ink/15 bg-paper/50 flex flex-col md:flex-row gap-4">
            {/* Search */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle" size={16} />
@@ -683,7 +683,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
            {/* Filters */}
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase">
              <select 
-               className="bg-white border border-ink px-3 py-2 text-ink outline-none"
+               className="bg-white border border-ink/15 rounded-card px-3 py-2 text-ink outline-none"
                value={selectedTier}
                onChange={(e) => setSelectedTier(e.target.value)}
              >
@@ -693,7 +693,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
              
              {uniqueIndustries.length > 0 && (
                <select 
-                 className="bg-white border border-ink px-3 py-2 text-ink outline-none max-w-[120px] truncate"
+                 className="bg-white border border-ink/15 rounded-card px-3 py-2 text-ink outline-none max-w-[120px] truncate"
                  value={selectedIndustry}
                  onChange={(e) => setSelectedIndustry(e.target.value)}
                >

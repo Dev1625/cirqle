@@ -50,7 +50,7 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
           return (
             <div
               key={t.id}
-              className={`animate-toast-in pointer-events-auto flex items-start gap-3 max-w-sm border border-ink border-l-4 ${ACCENTS[t.type]} bg-white px-4 py-3 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.85)]`}
+              className={`animate-toast-in pointer-events-auto flex items-start gap-3 max-w-sm rounded-card border border-ink/15 border-l-4 ${ACCENTS[t.type]} bg-white px-4 py-3 shadow-float`}
             >
               <Icon size={16} className="mt-0.5 shrink-0" />
               <p className="font-mono text-xs leading-relaxed">{t.message}</p>

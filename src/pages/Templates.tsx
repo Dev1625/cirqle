@@ -82,7 +82,7 @@ export default function Templates() {
       </div>
 
       {isAdding && (
-        <div className="bg-white border border-ink p-6 mb-8 group overflow-hidden animate-fade-slide-up">
+        <div className="bg-white border border-ink/15 rounded-card p-6 mb-8 group overflow-hidden animate-fade-slide-up">
            <form onSubmit={handleSave} className="space-y-4 font-mono text-sm">
               <div>
                 <label className="text-xs uppercase tracking-widest text-subtle block mb-1">Template Name</label>
@@ -95,7 +95,7 @@ export default function Templates() {
               <div>
                 <label className="text-xs uppercase tracking-widest text-subtle block mb-1">Body (Supports variables like {"{{contact_name}}"})</label>
                 <textarea 
-                  className="w-full h-48 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
+                  className="w-full h-48 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
                   value={formData.body}
                   required
                   onChange={e => setFormData({...formData, body: e.target.value})}
@@ -115,7 +115,7 @@ export default function Templates() {
             <div
               key={t.id}
               style={{ animationDelay: `${Math.min(index, 8) * 30}ms` }}
-              className="animate-fade-slide-up bg-white border border-ink p-6 flex flex-col justify-between"
+              className="animate-fade-slide-up bg-white border border-ink/15 rounded-card p-6 flex flex-col justify-between"
             >
                <div className="mb-4">
                  <h3 className="font-serif text-2xl font-bold mb-2">{t.name}</h3>

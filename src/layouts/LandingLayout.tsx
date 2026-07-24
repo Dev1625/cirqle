@@ -16,7 +16,7 @@ const LandingLayout = () => {
         </div>
         <nav className="flex items-center gap-6 text-sm font-mono">
           <Link to="/login" className="hover:underline">Log in</Link>
-          <Link to="/signup" className="border border-ink bg-transparent hover:bg-ink hover:text-paper px-4 py-2 transition-colors">
+          <Link to="/signup" className="border border-ink/15 rounded-card bg-transparent hover:bg-ink hover:text-paper px-4 py-2 transition-colors">
             Get Started Free
           </Link>
         </nav>
