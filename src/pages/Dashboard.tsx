@@ -8,6 +8,7 @@ import { getGemini } from '../lib/gemini';
 import Markdown from 'react-markdown';
 import { seedSampleData } from '../lib/seed';
 import { getFollowUpQueueItems, getRecordTime } from '../lib/tracker';
+import { TierBadge, TierDot, tierMarkerColor } from '../components/ui/TierBadge';
 
 const BRIEF_TIMEOUT_MS = 20000;
 
@@ -223,13 +224,22 @@ export default function Dashboard() {
               {queueItems.slice(0, 4).map((item, index) => (
                 <div
                   key={item.id}
-                  style={{ animationDelay: `${index * 40}ms` }}
-                  className="animate-fade-slide-up border border-ink/15 bg-white p-4 hover:bg-paper transition-colors flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
+                  style={{
+                    animationDelay: `${index * 40}ms`,
+                    borderLeftColor: tierMarkerColor(item.contact?.relationshipTier),
+                  }}
+                  className="animate-fade-slide-up rounded-card border border-l-[3px] border-ink/15 bg-white p-4 hover:bg-paper transition-colors flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
                 >
                   <div className="min-w-0">
-                    <Link to={`/app/directory/${item.contactId}`} className="font-serif text-xl font-bold hover:underline">
-                      {item.contact?.name || 'Unknown'}
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <Link to={`/app/directory/${item.contactId}`} className="font-serif text-xl font-bold hover:underline">
+                        {item.contact?.name || 'Unknown'}
+                      </Link>
+                      {/* Relationship strength is Cirqle's whole pitch — the
+                          queue is the first surface a user sees, so it carries
+                          the same tier signal as Directory/Tracker. */}
+                      <TierBadge tier={item.contact?.relationshipTier} />
+                    </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
                       <span>{item.contact?.company || 'No firm'}</span>
                       <span>{item.status}</span>
@@ -332,7 +342,12 @@ export default function Dashboard() {
                
                <div className={`mt-4 pt-4 border-t ${isHovered === c.id ? 'border-white/20' : 'border-ink/10'} font-mono text-[10px] uppercase flex justify-between group-hover:text-white/50 transition-colors`}>
                   <span>Explore Connection</span>
-                  <span>{c.relationshipTier}</span>
+                  {/* A dot rather than a TierBadge chip: these cards invert to
+                      ink on hover, which a pale chip background fights. */}
+                  <span className="flex items-center gap-1.5">
+                    <TierDot tier={c.relationshipTier} />
+                    {c.relationshipTier}
+                  </span>
                </div>
              </Link>
            ))

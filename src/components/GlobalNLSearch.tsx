@@ -157,7 +157,12 @@ ${JSON.stringify(miniContacts)}
           {queryStr && (
              <button type="button" onClick={() => setQueryStr('')} className="p-2 text-subtle hover:text-ink"><X size={14} /></button>
           )}
-          <Button type="submit" variant="brand" disabled={isSearching || !queryStr} size="sm" className="h-8">
+          {/* Only disabled while a search is genuinely in flight. An empty
+              field is the *resting* state, not an error — disabling on it
+              left the app's single most visible accent permanently dimmed
+              (see the disabled treatment in Button). handleSearch already
+              no-ops on an empty query. */}
+          <Button type="submit" variant="brand" disabled={isSearching} size="sm" className="h-8">
             {isSearching ? '…' : 'Search'}
           </Button>
         </div>
