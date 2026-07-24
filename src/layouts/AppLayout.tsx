@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
@@ -236,7 +236,15 @@ const AppLayout = () => {
             transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
             className={`p-8 max-w-6xl mx-auto w-full pb-8 ${!isSidebarOpen ? 'pt-24' : ''}`}
           >
-            <Outlet />
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center py-24 font-mono text-xs uppercase tracking-widest text-muted">
+                  Loading…
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
           </motion.div>
         </main>
 
