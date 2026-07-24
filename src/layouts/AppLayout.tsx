@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { motion } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { Network, Navigation, Settings, FileText, LogOut, Menu, HelpCircle, CheckCircle2, PlayCircle } from 'lucide-react';
 import { auth, db } from '../config/firebase';
@@ -224,9 +225,19 @@ const AppLayout = () => {
       {/* Main Content Area */}
       <div className="flex-1 relative flex flex-col overflow-hidden">
         <main className="flex-1 overflow-auto bg-transparent">
-          <div className={`p-8 max-w-6xl mx-auto w-full pb-8 ${!isSidebarOpen ? 'pt-24' : ''}`}>
+          {/* Keyed on the route so each view fades + slides in on navigation
+              instead of snapping. Sub-route query changes (e.g. Tracker
+              ?mode=) are intentionally excluded so in-page tab switches
+              don't re-trigger a full page transition. */}
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            className={`p-8 max-w-6xl mx-auto w-full pb-8 ${!isSidebarOpen ? 'pt-24' : ''}`}
+          >
             <Outlet />
-          </div>
+          </motion.div>
         </main>
 
         {/* Reserves real layout space (rather than floating over content) so

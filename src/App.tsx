@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { MotionConfig } from 'motion/react';
 import { AuthProvider } from './contexts/AuthContext';
 import { TourProvider } from './contexts/TourContext';
 import { ToastProvider } from './contexts/ToastContext';
@@ -29,6 +30,7 @@ const PlaceholderPage = ({ title }: { title: string }) => (
 
 export default function App() {
   return (
+    <MotionConfig reducedMotion="user">
     <AuthProvider>
       <ToastProvider>
         <ConfirmProvider>
@@ -57,5 +59,6 @@ export default function App() {
         </ConfirmProvider>
       </ToastProvider>
     </AuthProvider>
+    </MotionConfig>
   );
 }

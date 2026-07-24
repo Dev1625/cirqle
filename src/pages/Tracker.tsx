@@ -7,6 +7,7 @@ import { Filter, Search, Table, Building, Briefcase, Calendar as CalendarIcon, L
 import { format, differenceInDays } from 'date-fns';
 import { getFollowUpQueueItems, getRecordDate, getRecordTime } from '../lib/tracker';
 import { TierBadge } from '../components/ui/TierBadge';
+import { ScrollFadeX } from '../components/ui/ScrollFadeX';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 
@@ -612,7 +613,7 @@ function SheetView({ data }: { data: any[] }) {
    if (data.length === 0) return <div className="p-8 text-center font-mono text-subtle">No interaction data matched your query.</div>;
 
    return (
-      <div className="overflow-auto flex-1">
+      <ScrollFadeX className="flex-1 overflow-y-auto">
          <table className="w-full text-left font-mono text-xs whitespace-nowrap">
             <thead className="bg-paper border-b border-ink/15 sticky top-0 z-10">
                <tr>
@@ -666,7 +667,7 @@ function SheetView({ data }: { data: any[] }) {
                )})}
             </tbody>
          </table>
-      </div>
+      </ScrollFadeX>
    );
 }
 
@@ -683,14 +684,18 @@ function GroupedView({ data, groupBy, label }: { data: any[], groupBy: string, l
 
    return (
       <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-paper/10">
-         {groups.map(([name, items]) => {
+         {groups.map(([name, items], groupIndex) => {
             const respondedCount = items.filter(i => i.responseReceived === 'Yes').length;
             const resRate = items.length ? Math.round((respondedCount / items.length) * 100) : 0;
             const meetingsCount = items.filter(i => i.meetingHeld).length;
             const meetRate = respondedCount ? Math.round((meetingsCount / respondedCount) * 100) : 0;
 
             return (
-               <div key={name} className="border border-ink/15 rounded-card bg-white">
+               <div
+                  key={name}
+                  style={{ animationDelay: `${Math.min(groupIndex, 8) * 45}ms` }}
+                  className="animate-fade-slide-up border border-ink/15 rounded-card bg-white"
+               >
                   <div className="p-4 border-b border-ink/20 flex justify-between items-center bg-paper/50 flex-wrap gap-4">
                      <h3 className="font-serif text-2xl font-bold flex items-center gap-3">
                         <Building size={20} className="text-subtle" /> {name}
