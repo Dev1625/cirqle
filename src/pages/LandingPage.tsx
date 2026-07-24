@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { motion, useReducedMotion, type Variants } from 'motion/react';
-import { ArrowRight, Sparkles, Send, ListTodo, Network } from 'lucide-react';
+import { motion, useReducedMotion, useScroll, useTransform, type Variants } from 'motion/react';
+import { ArrowRight, Sparkles, Send, ListTodo, Network, Nfc, Mail, CalendarDays, Compass } from 'lucide-react';
 import { CountUp } from '../components/landing/CountUp';
 import { Reveal, RevealGroup } from '../components/landing/motion';
 import { LandingGraph } from '../components/landing/LandingGraph';
@@ -269,6 +269,24 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Roadmap: everything below here is explicitly NOT shipped ─── */}
+      <RoadmapIntro />
+      <NfcCardSection />
+      <RoadmapBeat
+        icon={Mail}
+        title="Your inbox, already filed."
+        body="Connect Gmail and every thread lands on the right person automatically — no copy-pasting, no forgetting who said what. Cirqle reads the reply, updates the pipeline stage, and moves them up or down the queue on its own."
+        reverse
+        visual={<GmailVisual />}
+      />
+      <RoadmapBeat
+        icon={CalendarDays}
+        title="Every coffee, on the record."
+        body="Two-way calendar sync turns meetings into relationship history. A call gets logged against the contact before you've left the room, and the follow-up it should trigger is already waiting in your queue the next morning."
+        reverse={false}
+        visual={<CalendarVisual />}
+      />
+
       {/* ── Closing CTA ────────────────────────────────────────── */}
       <section className="snap-section py-24 md:py-32 border-t border-ink/15">
         <RevealGroup className="max-w-3xl mx-auto px-6 text-center">
@@ -339,6 +357,296 @@ function FeatureBeat({
         </Reveal>
       </div>
     </section>
+  );
+}
+
+/* ────────────────────────────────────────────────────────────────────────
+   Roadmap sections.
+
+   Everything below the RoadmapIntro divider is a plan, not a feature. None
+   of it ships today, so the copy stays in the future tense and each beat
+   carries a visible "Planned" marker — and the mock visuals use dashed
+   hairlines rather than the solid ones the shipped-feature sections use,
+   reusing the app's own dashed = "nothing here yet" empty-state language.
+   ──────────────────────────────────────────────────────────────────────── */
+
+function PlannedChip() {
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-card border border-dashed border-ink/35 px-2.5 py-1 font-mono text-[9px] uppercase tracking-widest font-bold text-muted">
+      Planned
+    </span>
+  );
+}
+
+function RoadmapIntro() {
+  return (
+    <section className="snap-section border-t border-ink/15 bg-white/30 py-20 md:py-28">
+      <RevealGroup className="max-w-3xl mx-auto px-6 text-center">
+        <Reveal>
+          <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-brand mb-5 flex items-center justify-center gap-2">
+            <Compass size={13} /> Roadmap
+          </p>
+        </Reveal>
+        <Reveal>
+          <h2 className="font-serif text-4xl md:text-6xl italic font-black tracking-tight text-balance">
+            What we're building next.
+          </h2>
+        </Reveal>
+        <Reveal>
+          <p className="mt-6 font-mono text-sm leading-relaxed text-subtle max-w-[52ch] mx-auto">
+            Everything above this line works today. Everything below it is where Cirqle is
+            headed — three pieces that close the loop between meeting someone, staying in
+            touch, and never having to write it down.
+          </p>
+        </Reveal>
+        <Reveal>
+          <div className="mt-9 flex justify-center">
+            <PlannedChip />
+          </div>
+        </Reveal>
+      </RevealGroup>
+    </section>
+  );
+}
+
+/**
+ * The NFC card beat. A physical product is being depicted rather than a UI
+ * surface, so this one card is allowed more dimensionality and sheen than the
+ * flat hairline language everywhere else on the page — that contrast is the
+ * point. It must not bleed into the surrounding sections.
+ *
+ * Scroll progress across the section maps to rotateY 0 -> 180 -> 360, so the
+ * card turns through a full revolution showing a real front and back face,
+ * with transformPerspective for actual depth rather than a flat spin.
+ */
+function NfcCardSection() {
+  const ref = React.useRef<HTMLElement>(null);
+  const reduce = useReducedMotion();
+  const { scrollYProgress } = useScroll({
+    target: ref,
+    offset: ['start end', 'end start'],
+  });
+  const rotateY = useTransform(scrollYProgress, [0, 0.5, 1], [0, 180, 360]);
+
+  return (
+    <section ref={ref} className="snap-section border-t border-ink/15 py-20 md:py-28">
+      <div className="max-w-6xl mx-auto px-6 md:px-8 grid grid-cols-1 lg:grid-cols-2 gap-14 lg:gap-16 items-center">
+        <RevealGroup>
+          <Reveal>
+            <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-brand mb-4 flex items-center gap-2">
+              <Nfc size={13} /> The card
+            </p>
+          </Reveal>
+          <Reveal>
+            <h2 className="font-serif text-3xl md:text-5xl italic font-bold tracking-tight max-w-[16ch] text-balance">
+              Tap once. They're in your circle.
+            </h2>
+          </Reveal>
+          <Reveal>
+            <p className="mt-5 font-mono text-sm leading-relaxed text-subtle max-w-[52ch]">
+              A physical Cirqle card that writes the introduction for you. Tap a phone and
+              they get your details — you get a contact already filed, tagged with where you
+              met and when, sitting in the queue for a follow-up while the conversation is
+              still warm.
+            </p>
+          </Reveal>
+          <Reveal>
+            <div className="mt-8">
+              <PlannedChip />
+            </div>
+          </Reveal>
+        </RevealGroup>
+
+        <Reveal y={24}>
+          <div className="flex justify-center [perspective:1600px]">
+            <motion.div
+              className="relative w-[320px] h-[202px] md:w-[380px] md:h-[240px]"
+              style={
+                reduce
+                  ? undefined
+                  : { rotateY, transformPerspective: 1600, transformStyle: 'preserve-3d' }
+              }
+            >
+              <NfcCardFace side="front" />
+              <NfcCardFace side="back" />
+            </motion.div>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function NfcCardFace({ side }: { side: 'front' | 'back' }) {
+  const front = side === 'front';
+  return (
+    <div
+      className="absolute inset-0 rounded-[14px] overflow-hidden"
+      style={{
+        backfaceVisibility: 'hidden',
+        WebkitBackfaceVisibility: 'hidden',
+        transform: front ? undefined : 'rotateY(180deg)',
+        // A product render, not a UI card: real depth + a raking sheen.
+        background: 'linear-gradient(145deg, #232323 0%, #101010 46%, #262626 100%)',
+        boxShadow:
+          '0 26px 60px -28px rgba(26,26,26,0.72), 0 8px 20px -12px rgba(26,26,26,0.45), inset 0 1px 0 rgba(255,255,255,0.10)',
+      }}
+    >
+      {/* raking highlight across the face */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(112deg, rgba(255,255,255,0) 34%, rgba(255,255,255,0.10) 47%, rgba(255,255,255,0) 60%)',
+        }}
+      />
+      {front ? (
+        <div className="relative h-full flex flex-col justify-between p-6 md:p-7">
+          <div className="flex items-start justify-between">
+            <RingMark />
+            <Nfc size={19} className="text-paper/45" />
+          </div>
+          <div>
+            <div className="font-serif text-[30px] md:text-[34px] font-black italic tracking-tight text-paper leading-none">
+              Cirqle
+            </div>
+            <div className="mt-2 font-mono text-[9px] uppercase tracking-[0.28em] text-paper/45">
+              Personal CRM
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="relative h-full flex flex-col justify-between p-6 md:p-7">
+          <div className="font-mono text-[9px] uppercase tracking-[0.28em] text-paper/45">
+            Tap to connect
+          </div>
+          <div className="space-y-2.5">
+            <div className="h-px w-full bg-paper/15" />
+            <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-paper/80">
+              cirqle.app/you
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <span className="h-1.5 w-1.5 rounded-full bg-brand" />
+              <span className="font-mono text-[9px] uppercase tracking-[0.22em] text-paper/45">
+                Contact written on tap
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A static paper-on-black rendering of the sidebar logo's ring-"C" mark. */
+function RingMark() {
+  return (
+    <div aria-hidden="true" className="relative h-8 w-8">
+      <div className="absolute inset-0 rounded-full border-[2px] border-paper/85" />
+      <div className="absolute right-[-2px] top-1/2 h-3 w-3.5 -translate-y-1/2 bg-[#141414]" />
+      <div className="absolute right-[3px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-paper" />
+    </div>
+  );
+}
+
+/** Same shape as FeatureBeat, plus the Planned marker. */
+function RoadmapBeat({
+  icon: Icon,
+  title,
+  body,
+  reverse,
+  visual,
+}: {
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  title: string;
+  body: string;
+  reverse: boolean;
+  visual: React.ReactNode;
+}) {
+  return (
+    <section className="snap-section py-20 md:py-28 border-t border-ink/15">
+      <div className="max-w-6xl mx-auto px-6 md:px-8 grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
+        <RevealGroup className={reverse ? 'lg:order-2' : ''}>
+          <Reveal>
+            <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-brand mb-4 flex items-center gap-2">
+              <Icon size={13} /> Coming soon
+            </p>
+          </Reveal>
+          <Reveal>
+            <h2 className="font-serif text-3xl md:text-5xl italic font-bold tracking-tight max-w-[16ch] text-balance">
+              {title}
+            </h2>
+          </Reveal>
+          <Reveal>
+            <p className="mt-5 font-mono text-sm leading-relaxed text-subtle max-w-[52ch]">{body}</p>
+          </Reveal>
+          <Reveal>
+            <div className="mt-8">
+              <PlannedChip />
+            </div>
+          </Reveal>
+        </RevealGroup>
+        <Reveal className={reverse ? 'lg:order-1' : ''} y={24}>
+          {visual}
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function GmailVisual() {
+  return (
+    <div className="rounded-card border border-dashed border-ink/30 bg-white/70 overflow-hidden">
+      <div className="flex items-center gap-2 border-b border-dashed border-ink/20 bg-paper/50 px-5 py-3 font-mono text-[10px] uppercase tracking-widest text-muted">
+        <Mail size={13} className="text-brand" /> Inbox · filed automatically
+      </div>
+      <div className="divide-y divide-dashed divide-ink/15">
+        {[
+          { who: 'Sarah Chen', gist: 'Re: Demo day follow-up', tag: 'Responded', tone: 'bg-emerald-50 text-emerald-700' },
+          { who: 'James Taylor', gist: 'Re: Catching up', tag: 'Re-engaged', tone: 'bg-[var(--color-tier-dormant-bg)] text-[var(--color-tier-dormant-text)]' },
+          { who: 'Priya Nair', gist: 'Intro to our payer team', tag: 'Meeting set', tone: 'bg-blue-50 text-blue-700' },
+        ].map((m) => (
+          <div key={m.who} className="flex items-center justify-between gap-4 px-5 py-4">
+            <div className="min-w-0">
+              <p className="font-serif text-base font-bold">{m.who}</p>
+              <p className="font-mono text-[11px] text-muted truncate">{m.gist}</p>
+            </div>
+            <span className={`shrink-0 rounded-card px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest font-bold ${m.tone}`}>
+              {m.tag}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function CalendarVisual() {
+  return (
+    <div className="rounded-card border border-dashed border-ink/30 bg-white/70 p-5">
+      <div className="flex items-center gap-2 pb-4 mb-4 border-b border-dashed border-ink/20 font-mono text-[10px] uppercase tracking-widest text-muted">
+        <CalendarDays size={13} className="text-brand" /> This week · synced
+      </div>
+      <div className="space-y-3">
+        {[
+          { day: 'Tue', time: '09:30', who: 'Coffee — Alex Johnson', note: 'Logged · follow-up queued Thu' },
+          { day: 'Wed', time: '14:00', who: 'Intro call — Priya Nair', note: 'Logged · notes attached' },
+          { day: 'Fri', time: '11:15', who: 'Catch-up — Olivia Martinez', note: 'Quarterly sync · auto-scheduled' },
+        ].map((e) => (
+          <div key={e.who} className="flex gap-4 rounded-card border border-dashed border-ink/20 bg-paper/40 px-4 py-3">
+            <div className="shrink-0 text-center">
+              <div className="font-mono text-[9px] uppercase tracking-widest text-muted">{e.day}</div>
+              <div className="font-serif text-lg font-black leading-none mt-0.5">{e.time}</div>
+            </div>
+            <div className="min-w-0 border-l border-dashed border-ink/20 pl-4">
+              <p className="font-mono text-xs font-semibold truncate">{e.who}</p>
+              <p className="font-mono text-[10px] uppercase tracking-widest text-muted mt-1">{e.note}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
