@@ -21,6 +21,7 @@ import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { TierBadge } from '../components/ui/TierBadge';
 
 type Tier = 'Strong' | 'Warm' | 'Cold' | 'Dormant';
 
@@ -811,6 +812,15 @@ export default function NetworkGraph() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 960, height: 440 });
+
+  // Hover state: `hoverNode` drives the tooltip content (changes rarely, on
+  // enter/leave). The refs are read every frame inside the canvas render loop
+  // so the highlight fade can ease without triggering React re-renders.
+  const [hoverNode, setHoverNode] = useState<GraphNodeDatum | null>(null);
+  const hoverIdRef = useRef<string | null>(null);
+  const highlightSetRef = useRef<Set<string> | null>(null);
+  const hoverProgressRef = useRef(0);
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const [analysis, setAnalysis] = useState<GraphAnalysis>({
     nodes: [],
     links: [],
@@ -969,6 +979,41 @@ export default function NetworkGraph() {
       ? analysis.clusterStats.find((cluster) => cluster.key === selectedNode.industryKey) || null
       : analysis.clusterStats[0] || null;
 
+  const handleNodeHover = (node: any) => {
+    const datum = node as GraphNodeDatum | null;
+    hoverIdRef.current = datum?.id ?? null;
+    setHoverNode(datum);
+    if (datum) {
+      // Highlight = the node itself plus everyone it links to (explicit links
+      // via adjacency, plus inferred same-firm/school/industry neighbors).
+      const set = new Set<string>([datum.id]);
+      (analysis.adjacency[datum.id] || []).forEach((edge) => set.add(edge.to));
+      (analysis.inferredNeighbors[datum.id] || []).forEach((id) => set.add(id));
+      highlightSetRef.current = set;
+    } else {
+      highlightSetRef.current = null;
+    }
+    if (containerRef.current) {
+      containerRef.current.style.cursor = datum ? 'pointer' : 'grab';
+    }
+  };
+
+  const advanceHoverFrame = () => {
+    const target = hoverIdRef.current ? 1 : 0;
+    // Eased approach toward the target each frame — no instant alpha snap.
+    hoverProgressRef.current += (target - hoverProgressRef.current) * 0.16;
+
+    const tip = tooltipRef.current;
+    const id = hoverIdRef.current;
+    if (tip && id && graphRef.current?.graph2ScreenCoords) {
+      const node = analysis.nodeById[id];
+      if (node && typeof node.x === 'number' && typeof node.y === 'number') {
+        const screen = graphRef.current.graph2ScreenCoords(node.x, node.y);
+        tip.style.transform = `translate(${Math.round(screen.x + 14)}px, ${Math.round(screen.y - 12)}px)`;
+      }
+    }
+  };
+
   const nodeCanvasObject = (
     node: GraphNodeDatum,
     context: CanvasRenderingContext2D,
@@ -978,8 +1023,13 @@ export default function NetworkGraph() {
     const y = node.y || 0;
     const radius = node.radius;
     const selected = selectedNodeId === node.id;
-    const alpha = isNodeFaded(node) ? 0.18 : 1;
-    const labelVisible = globalScale > 1.75 || selected || node.kind === 'me' || node.kind === 'industry';
+    const hovered = hoverIdRef.current === node.id;
+    const emphasized = selected || hovered;
+    const baseAlpha = isNodeFaded(node) ? 0.18 : 1;
+    const highlightSet = highlightSetRef.current;
+    const hp = hoverProgressRef.current;
+    const alpha = highlightSet && !highlightSet.has(node.id) ? baseAlpha * (1 - 0.82 * hp) : baseAlpha;
+    const labelVisible = globalScale > 1.75 || emphasized || node.kind === 'me' || node.kind === 'industry';
 
     context.save();
     context.globalAlpha = alpha;
@@ -1014,7 +1064,7 @@ export default function NetworkGraph() {
       context.font = `800 ${Math.max(10, radius * 0.75)}px Inter`;
       context.fillText(node.initials, x, y);
     } else {
-    if (node.kind === 'contact' && selected) {
+    if (node.kind === 'contact' && emphasized) {
       context.fillStyle = 'rgba(97, 118, 114, 0.14)';
       context.beginPath();
       context.arc(x, y, radius + 9, 0, Math.PI * 2);
@@ -1029,7 +1079,7 @@ export default function NetworkGraph() {
     context.strokeStyle = node.ringColor;
     context.lineWidth = node.kind === 'me'
       ? 3.5
-      : selected
+      : emphasized
         ? 3.2
         : detailMode && node.kind === 'contact'
           ? (node.score >= 75 ? 3.2 : node.score >= 55 ? 2.5 : 1.7)
@@ -1242,16 +1292,31 @@ export default function NetworkGraph() {
                   context.fill();
                 }}
                 linkColor={(link: GraphLinkDatum) => {
-                  if (isLinkFaded(link)) return 'rgba(26,26,26,0.07)';
-                  if (link.kind === 'backbone') return 'rgba(26,26,26,0.24)';
-                  if (link.kind === 'membership') return 'rgba(26,26,26,0.13)';
-                  return 'rgba(26,26,26,0.18)';
+                  const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+                  const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+                  let base = link.kind === 'backbone' ? 0.24 : link.kind === 'membership' ? 0.13 : 0.18;
+                  if (isLinkFaded(link)) base = 0.07;
+                  const hoverId = hoverIdRef.current;
+                  const hp = hoverProgressRef.current;
+                  if (hoverId) {
+                    const touches = sourceId === hoverId || targetId === hoverId;
+                    base = touches ? base * (1 - hp) + 0.42 * hp : base * (1 - 0.85 * hp);
+                  }
+                  return `rgba(26,26,26,${base.toFixed(3)})`;
                 }}
                 linkWidth={(link: GraphLinkDatum) => {
                   if (isLinkFaded(link)) return 0.5;
+                  const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+                  const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+                  const hoverId = hoverIdRef.current;
+                  if (hoverId && (sourceId === hoverId || targetId === hoverId)) {
+                    return link.weight + 1.4 * hoverProgressRef.current;
+                  }
                   return link.weight;
                 }}
                 linkLineDash={(link: GraphLinkDatum) => (link.kind === 'explicit' ? [5, 4] : undefined)}
+                onNodeHover={handleNodeHover}
+                onRenderFramePre={advanceHoverFrame}
                 warmupTicks={0}
                 onNodeClick={(node) => {
                   const datum = node as GraphNodeDatum;
@@ -1281,6 +1346,25 @@ export default function NetworkGraph() {
                 }}
                 onBackgroundClick={() => setSelectedNodeId(null)}
               />
+            )}
+
+            {/* Hover tooltip — name + tier before committing to a click.
+                Positioned each frame from the node's live screen coords. */}
+            {hoverNode && (
+              <div ref={tooltipRef} className="pointer-events-none absolute left-0 top-0 z-20 will-change-transform">
+                <div className="animate-fade-in bg-white border border-ink/15 rounded-card shadow-float px-3 py-2 max-w-[230px]">
+                  <div className="flex items-center gap-2">
+                    <span className="font-serif text-sm font-bold leading-tight">{hoverNode.name}</span>
+                    {hoverNode.tier && <TierBadge tier={hoverNode.tier} className="!px-1.5 !py-0.5 !text-[8px]" />}
+                  </div>
+                  {hoverNode.subtitle && (
+                    <p className="mt-1 font-mono text-[9px] uppercase tracking-widest text-muted">{hoverNode.subtitle}</p>
+                  )}
+                  {hoverNode.kind === 'contact' && (
+                    <p className="mt-1.5 font-mono text-[9px] uppercase tracking-widest text-brand">Click to open</p>
+                  )}
+                </div>
+              </div>
             )}
 
           </div>
