@@ -53,10 +53,18 @@ function HeroHeadline() {
 export default function LandingPage() {
   const reduce = useReducedMotion();
 
+  // Scroll-snap is opt-in per route: the class lives on <html> (the scroll
+  // container) only while this page is mounted, so navigating into the app
+  // can't inherit it. See the .snap-section block in index.css.
+  React.useEffect(() => {
+    document.documentElement.classList.add('landing-snap');
+    return () => document.documentElement.classList.remove('landing-snap');
+  }, []);
+
   return (
     <div className="w-full overflow-x-clip">
       {/* ── Hero ───────────────────────────────────────────────── */}
-      <section className="max-w-6xl mx-auto px-6 md:px-8 pt-16 pb-20 md:pt-24 md:pb-28">
+      <section className="snap-section max-w-6xl mx-auto px-6 md:px-8 pt-16 pb-20 md:pt-24 md:pb-28">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
           <div className="lg:col-span-6">
             <motion.p
@@ -180,7 +188,7 @@ export default function LandingPage() {
       />
 
       {/* Out-of-frame beat: the queue row bleeds past the edge */}
-      <section className="py-20 md:py-28 border-t border-ink/15 overflow-x-clip">
+      <section className="snap-section py-20 md:py-28 border-t border-ink/15 overflow-x-clip">
         <div className="max-w-6xl mx-auto px-6 md:px-8">
           <RevealGroup>
             <Reveal>
@@ -223,7 +231,11 @@ export default function LandingPage() {
       </section>
 
       {/* ── Network graph showcase ─────────────────────────────── */}
-      <section id="network" className="scroll-mt-24 py-20 md:py-28 border-t border-ink/15 bg-white/40">
+      {/* No scroll-mt here any more: scroll-margin shifts an element's *snap
+          area* too, which would give this one section a snap position 6rem
+          off from every other. The section is full-height with centred
+          content, so the #network anchor lands correctly without it. */}
+      <section id="network" className="snap-section py-20 md:py-28 border-t border-ink/15 bg-white/40">
         <div className="max-w-6xl mx-auto px-6 md:px-8 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           <div className="lg:col-span-5">
             <RevealGroup>
@@ -258,7 +270,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── Closing CTA ────────────────────────────────────────── */}
-      <section className="py-24 md:py-32 border-t border-ink/15">
+      <section className="snap-section py-24 md:py-32 border-t border-ink/15">
         <RevealGroup className="max-w-3xl mx-auto px-6 text-center">
           <Reveal>
             <h2 className="font-serif text-4xl md:text-6xl italic font-black tracking-tight text-balance">
@@ -305,7 +317,7 @@ function FeatureBeat({
   visual: React.ReactNode;
 }) {
   return (
-    <section className="py-20 md:py-28 border-t border-ink/15">
+    <section className="snap-section py-20 md:py-28 border-t border-ink/15">
       <div className="max-w-6xl mx-auto px-6 md:px-8 grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
         <RevealGroup className={reverse ? 'lg:order-2' : ''}>
           <Reveal>

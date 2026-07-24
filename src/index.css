@@ -128,6 +128,48 @@ body::before {
   }
 }
 
+/* ── Landing page: section-at-a-time scrolling ──────────────────────────
+   CSS scroll-snap only — no wheel hijacking, so trackpad inertia, keyboard
+   paging, scrollbar dragging, find-in-page and screen-reader navigation all
+   keep working normally.
+
+   `proximity` rather than `mandatory`: it settles a section into place once
+   you come to rest near one, but never yanks a user who is deliberately
+   scrolling somewhere else. Scoped to the landing route by a class that
+   LandingPage puts on <html> for its lifetime — the in-app views must not
+   inherit this.
+
+   Snapping is deliberately switched OFF when the viewport is too small or
+   too short to hold a whole section: below that the 100svh sections
+   genuinely overflow, and snapping back to their start would strand the
+   overflow off-screen. It is also off under prefers-reduced-motion, since
+   the browser animates the snap itself. */
+.snap-section {
+  /* svh rather than vh: mobile browsers shrink the visual viewport as the
+     URL bar retracts, and vh would leave every section slightly taller than
+     the screen for the entire scroll. */
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+@media (min-width: 768px) and (min-height: 640px) {
+  @media (prefers-reduced-motion: no-preference) {
+    html.landing-snap {
+      scroll-snap-type: y proximity;
+      scroll-behavior: smooth;
+    }
+
+    html.landing-snap .snap-section {
+      scroll-snap-align: start;
+      /* `normal`, not `always` — a fast flick should still be able to cross
+         more than one section. */
+      scroll-snap-stop: normal;
+    }
+  }
+}
+
 /* Scrollbar styling for a premium feel */
 ::-webkit-scrollbar {
   width: 8px;
