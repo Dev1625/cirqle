@@ -101,6 +101,41 @@ export function LandingGraph() {
           />
         ))}
 
+        {/* Ambient signal pulses — a dot travels out from "You" along one hub
+            connection at a time, so the constellation reads as a live network
+            with traffic on it rather than a static diagram. This graph is
+            purely decorative, which is what earns it continuous motion; the
+            in-app graph deliberately gets none (see NetworkGraph.tsx).
+            Rendered between links and nodes so a pulse passes *under* the
+            node it arrives at. */}
+        {!reduce &&
+          show &&
+          links
+            .filter((l) => l.strong)
+            .map((link, i) => (
+              <motion.circle
+                key={`pulse-${link.id}`}
+                r={3.5}
+                fill="#7A2331"
+                initial={{ opacity: 0 }}
+                animate={{
+                  cx: [link.x1, link.x2],
+                  cy: [link.y1, link.y2],
+                  opacity: [0, 0.9, 0.9, 0],
+                }}
+                transition={{
+                  duration: 1.5,
+                  // Staggered so the pulses fire in sequence around the ring,
+                  // one at a time, instead of all six at once.
+                  delay: 1.4 + i * 1.5,
+                  repeat: Infinity,
+                  repeatDelay: HUBS.length * 1.5 - 1.5,
+                  ease: 'easeInOut',
+                  opacity: { times: [0, 0.15, 0.8, 1] },
+                }}
+              />
+            ))}
+
         {/* nodes fade/scale in after their links */}
         {nodes.map((node, i) => {
           const floatDur = 4 + (i % 5) * 0.6;

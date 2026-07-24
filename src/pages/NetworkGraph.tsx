@@ -822,6 +822,17 @@ export default function NetworkGraph() {
   const highlightSetRef = useRef<Set<string> | null>(null);
   const hoverProgressRef = useRef(0);
   const tooltipRef = useRef<HTMLDivElement>(null);
+
+  // Entrance assembly: a one-time flourish on load/refresh where the graph
+  // builds itself — "You" first, then the industry hubs, then each cluster's
+  // contacts, with links drawing in behind their endpoints. Deliberately NOT
+  // a persistent ambient animation: this is a working tool, and someone
+  // reading it doesn't want motion competing for attention. (The landing
+  // showcase graph is the one that gets continuous life — it's decorative.)
+  const assemblyStartRef = useRef<number | null>(null);
+  const assemblyProgressRef = useRef(1);
+  // id -> the fraction of the assembly window at which that node begins.
+  const assemblyOrderRef = useRef<Record<string, number>>({});
   const [analysis, setAnalysis] = useState<GraphAnalysis>({
     nodes: [],
     links: [],
@@ -958,6 +969,67 @@ export default function NetworkGraph() {
     return false;
   };
   const graphData = useMemo(() => ({ nodes: analysis.nodes, links: analysis.links }), [analysis.nodes, analysis.links]);
+
+  // (Re)schedule the entrance assembly whenever the underlying graph data
+  // changes — i.e. on load and on refresh. Filtering by industry or search
+  // does not land here, because those only change per-node flags, not the
+  // memoized graphData identity, so the graph doesn't re-assemble every time
+  // someone clicks a lane.
+  useEffect(() => {
+    const order: Record<string, number> = {};
+    if (analysis.nodes.length === 0) {
+      assemblyOrderRef.current = order;
+      return;
+    }
+
+    // Cluster order follows the industry hubs' own order, so the assembly
+    // sweeps around the ring the same way the layout reads.
+    const clusterIndex: Record<string, number> = {};
+    let nextCluster = 0;
+    analysis.nodes.forEach((node) => {
+      if (node.kind === 'industry' && node.industryKey && !(node.industryKey in clusterIndex)) {
+        clusterIndex[node.industryKey] = nextCluster;
+        nextCluster += 1;
+      }
+    });
+
+    const CLUSTER_STEP = 0.055;
+    const perClusterCount: Record<string, number> = {};
+
+    analysis.nodes.forEach((node) => {
+      if (node.kind === 'me') {
+        order[node.id] = 0;
+        return;
+      }
+      const ci = node.industryKey != null ? (clusterIndex[node.industryKey] ?? nextCluster) : nextCluster;
+      if (node.kind === 'industry') {
+        order[node.id] = 0.08 + ci * CLUSTER_STEP;
+        return;
+      }
+      const key = String(node.industryKey ?? '_');
+      const within = perClusterCount[key] || 0;
+      perClusterCount[key] = within + 1;
+      const base = node.kind === 'gap' ? 0.4 : 0.14;
+      // Cap so the last arrival still finishes inside the window.
+      order[node.id] = Math.min(0.72, base + ci * CLUSTER_STEP + within * 0.012);
+    });
+
+    assemblyOrderRef.current = order;
+
+    const reduce =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+    if (reduce) {
+      // Respect the user's preference: no build, just the finished graph.
+      assemblyStartRef.current = null;
+      assemblyProgressRef.current = 1;
+      return;
+    }
+
+    assemblyStartRef.current = null; // set on the first frame after this
+    assemblyProgressRef.current = 0;
+  }, [graphData, analysis.nodes]);
   const isLinkFaded = (link: GraphLinkDatum) => {
     const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
     const targetId = typeof link.target === 'string' ? link.target : link.target.id;
@@ -999,7 +1071,41 @@ export default function NetworkGraph() {
     }
   };
 
+  // How long the whole build takes, and how much of that window a single
+  // node/link spends fading in.
+  const ASSEMBLY_MS = 1250;
+  const NODE_SPAN = 0.28;
+  const LINK_SPAN = 0.22;
+  const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+
+  /** 0 → 1 arrival progress for one node, or 1 once assembly is finished. */
+  const nodeAssemblyT = (id: string) => {
+    const p = assemblyProgressRef.current;
+    if (p >= 1) return 1;
+    const start = assemblyOrderRef.current[id] ?? 0;
+    return easeOut(Math.max(0, Math.min(1, (p - start) / NODE_SPAN)));
+  };
+
+  /** A link starts drawing only once both of its endpoints have landed. */
+  const linkAssemblyT = (link: GraphLinkDatum) => {
+    const p = assemblyProgressRef.current;
+    if (p >= 1) return 1;
+    const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+    const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+    const start =
+      Math.max(assemblyOrderRef.current[sourceId] ?? 0, assemblyOrderRef.current[targetId] ?? 0) + 0.05;
+    return easeOut(Math.max(0, Math.min(1, (p - start) / LINK_SPAN)));
+  };
+
   const advanceHoverFrame = () => {
+    // Drive the one-time entrance assembly off the same frame callback that
+    // already runs for the hover easing — no extra rAF loop.
+    if (assemblyProgressRef.current < 1) {
+      const now = performance.now();
+      if (assemblyStartRef.current === null) assemblyStartRef.current = now;
+      assemblyProgressRef.current = Math.min(1, (now - assemblyStartRef.current) / ASSEMBLY_MS);
+    }
+
     const target = hoverIdRef.current ? 1 : 0;
     // Eased approach toward the target each frame — no instant alpha snap.
     hoverProgressRef.current += (target - hoverProgressRef.current) * 0.16;
@@ -1020,17 +1126,27 @@ export default function NetworkGraph() {
     context: CanvasRenderingContext2D,
     globalScale: number
   ) => {
+    // Entrance assembly: nodes fade and scale up in cluster order. Once the
+    // build has finished `at` is a constant 1, so this costs nothing on every
+    // subsequent frame.
+    const at = nodeAssemblyT(node.id);
+    if (at <= 0.001) return;
+
     const x = node.x || 0;
     const y = node.y || 0;
-    const radius = node.radius;
+    const radius = node.radius * (0.55 + 0.45 * at);
     const selected = selectedNodeId === node.id;
     const hovered = hoverIdRef.current === node.id;
     const emphasized = selected || hovered;
     const baseAlpha = isNodeFaded(node) ? 0.18 : 1;
     const highlightSet = highlightSetRef.current;
     const hp = hoverProgressRef.current;
-    const alpha = highlightSet && !highlightSet.has(node.id) ? baseAlpha * (1 - 0.82 * hp) : baseAlpha;
-    const labelVisible = globalScale > 1.75 || emphasized || node.kind === 'me' || node.kind === 'industry';
+    const alpha =
+      (highlightSet && !highlightSet.has(node.id) ? baseAlpha * (1 - 0.82 * hp) : baseAlpha) * at;
+    // Labels would pop in at full opacity over a half-formed node; hold them
+    // until the node itself has essentially landed.
+    const labelVisible =
+      at > 0.9 && (globalScale > 1.75 || emphasized || node.kind === 'me' || node.kind === 'industry');
 
     context.save();
     context.globalAlpha = alpha;
@@ -1293,30 +1409,50 @@ export default function NetworkGraph() {
                   context.arc(node.x || 0, node.y || 0, node.radius + 8, 0, Math.PI * 2);
                   context.fill();
                 }}
-                linkColor={(link: GraphLinkDatum) => {
+                /* Painted by hand rather than via linkColor/linkWidth/
+                   linkLineDash, because the entrance assembly needs each link
+                   to *extend* from its source toward its target rather than
+                   just fade in. The colour/width/dash rules below are the same
+                   ones those three props carried, including the eased hover
+                   highlight; once assembly finishes `lt` is a constant 1 and
+                   this draws the full line exactly as before. */
+                linkCanvasObject={(link: GraphLinkDatum, context: CanvasRenderingContext2D) => {
+                  const lt = linkAssemblyT(link);
+                  if (lt <= 0.001) return;
+
+                  const src = link.source as any;
+                  const tgt = link.target as any;
+                  if (typeof src?.x !== 'number' || typeof tgt?.x !== 'number') return;
+
                   const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
                   const targetId = typeof link.target === 'string' ? link.target : link.target.id;
-                  let base = link.kind === 'backbone' ? 0.24 : link.kind === 'membership' ? 0.13 : 0.18;
-                  if (isLinkFaded(link)) base = 0.07;
                   const hoverId = hoverIdRef.current;
                   const hp = hoverProgressRef.current;
+
+                  let base = link.kind === 'backbone' ? 0.24 : link.kind === 'membership' ? 0.13 : 0.18;
+                  const faded = isLinkFaded(link);
+                  if (faded) base = 0.07;
                   if (hoverId) {
                     const touches = sourceId === hoverId || targetId === hoverId;
                     base = touches ? base * (1 - hp) + 0.42 * hp : base * (1 - 0.85 * hp);
                   }
-                  return `rgba(26,26,26,${base.toFixed(3)})`;
-                }}
-                linkWidth={(link: GraphLinkDatum) => {
-                  if (isLinkFaded(link)) return 0.5;
-                  const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
-                  const targetId = typeof link.target === 'string' ? link.target : link.target.id;
-                  const hoverId = hoverIdRef.current;
-                  if (hoverId && (sourceId === hoverId || targetId === hoverId)) {
-                    return link.weight + 1.4 * hoverProgressRef.current;
+
+                  let width = link.weight;
+                  if (faded) width = 0.5;
+                  else if (hoverId && (sourceId === hoverId || targetId === hoverId)) {
+                    width = link.weight + 1.4 * hp;
                   }
-                  return link.weight;
+
+                  context.save();
+                  context.strokeStyle = `rgba(26,26,26,${base.toFixed(3)})`;
+                  context.lineWidth = width;
+                  if (link.kind === 'explicit') context.setLineDash([5, 4]);
+                  context.beginPath();
+                  context.moveTo(src.x, src.y);
+                  context.lineTo(src.x + (tgt.x - src.x) * lt, src.y + (tgt.y - src.y) * lt);
+                  context.stroke();
+                  context.restore();
                 }}
-                linkLineDash={(link: GraphLinkDatum) => (link.kind === 'explicit' ? [5, 4] : undefined)}
                 onNodeHover={handleNodeHover}
                 onRenderFramePre={advanceHoverFrame}
                 warmupTicks={0}
