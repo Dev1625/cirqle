@@ -198,7 +198,7 @@ export default function Tracker() {
       </div>
 
       {/* Control Bar (Tabs & Filters) */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white border border-ink/15 rounded-card p-2 z-20 relative">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white border border-ink/25 rounded-card p-2 z-20 relative">
          
          {/* Tabs — wraps to a second line rather than clipping/hiding overflow at narrow widths */}
          <div className="tour-tracker-modes flex flex-wrap w-full xl:w-auto">
@@ -336,8 +336,12 @@ export default function Tracker() {
          </div>
       )}
 
-      {/* Main View Area */}
-      <div className="tour-tracker-sheet flex-1 min-h-[500px] border border-ink/15 rounded-card bg-white overflow-hidden flex flex-col">
+      {/* Main View Area — this screen's primary surface. In the grouped Firm/
+          Industry modes it wraps a stack of nested firm cards, and with every
+          boundary previously at /15 the outer container simply vanished. It
+          takes the stronger boundary + card lift; the firm cards inside stay
+          at /15 so the nesting reads as nesting. */}
+      <div className="tour-tracker-sheet flex-1 min-h-[500px] border border-ink/25 rounded-card bg-white shadow-card overflow-hidden flex flex-col">
           {activeView === 'sheet' && <SheetView data={displayData} />}
           {activeView === 'firm' && <GroupedView data={displayData} groupBy="company" label="Firm" />}
           {activeView === 'industry' && <GroupedView data={displayData} groupBy="industry" label="Industry" />}
@@ -700,10 +704,14 @@ function GroupedView({ data, groupBy, label }: { data: any[], groupBy: string, l
                      <h3 className="font-serif text-2xl font-bold flex items-center gap-3">
                         <Building size={20} className="text-subtle" /> {name}
                      </h3>
+                     {/* Numbers that matter get the serif, same as the
+                         Dashboard stat strip. These were quietly falling back
+                         to small bold sans, which read as a caption rather
+                         than a figure. */}
                      <div className="flex gap-6 font-mono text-xs uppercase tracking-widest text-subtle">
-                        <div className="flex flex-col"><span className="text-[9px]">Contacts</span><span className="text-ink font-bold text-sm">{items.length}</span></div>
-                        <div className="flex flex-col"><span className="text-[9px]">Response %</span><span className="text-ink font-bold text-sm">{resRate}%</span></div>
-                        <div className="flex flex-col"><span className="text-[9px]">Meeting %</span><span className="text-ink font-bold text-sm">{meetRate}%</span></div>
+                        <div className="flex flex-col gap-0.5"><span className="text-[9px]">Contacts</span><span className="font-serif text-2xl font-black leading-none text-ink">{items.length}</span></div>
+                        <div className="flex flex-col gap-0.5"><span className="text-[9px]">Response %</span><span className="font-serif text-2xl font-black leading-none text-ink">{resRate}%</span></div>
+                        <div className="flex flex-col gap-0.5"><span className="text-[9px]">Meeting %</span><span className="font-serif text-2xl font-black leading-none text-ink">{meetRate}%</span></div>
                      </div>
                   </div>
                   <div className="p-0">

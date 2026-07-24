@@ -146,7 +146,7 @@ const AppLayout = () => {
       {!isSidebarOpen && (
          <button 
            onClick={() => setIsSidebarOpen(true)}
-           className="absolute top-6 left-6 z-50 p-2 bg-paper border border-ink/15 rounded-card hover:bg-ink hover:text-white transition-colors"
+           className="absolute top-6 left-6 z-50 p-2 bg-rail border border-ink/25 rounded-card hover:bg-ink hover:text-white transition-colors"
          >
            <Menu size={20} />
          </button>
@@ -154,7 +154,7 @@ const AppLayout = () => {
 
       {/* Sidebar */}
       {isSidebarOpen && (
-         <aside className="w-64 flex-shrink-0 border-r border-ink/15 bg-paper p-8 z-10 flex flex-col relative transition-all duration-300">
+         <aside className="w-64 flex-shrink-0 border-r border-ink/25 bg-rail p-8 z-10 flex flex-col relative transition-all duration-300">
            <div onClick={() => setIsSidebarOpen(false)} className="cursor-pointer group relative">
              <Logo />
              <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 font-mono text-[10px] bg-ink text-white px-2 py-0.5 pointer-events-none transition-opacity">
@@ -171,10 +171,12 @@ const AppLayout = () => {
                    <Link
                      to={item.path}
                      className={`flex items-center gap-3 group cursor-pointer transition-colors ${item.class} ${
-                       isActive ? 'text-ink' : 'text-muted hover:text-ink'
+                       isActive ? 'text-brand' : 'text-muted hover:text-ink'
                      }`}
                    >
-                     <div className={`w-2 h-2 transition-colors ${isActive ? 'bg-ink' : 'bg-transparent border border-current'}`}></div>
+                     {/* Active state carries the accent rather than plain ink —
+                         one more legitimate, restrained use of --color-brand. */}
+                     <div className={`w-2 h-2 transition-colors ${isActive ? 'bg-brand' : 'bg-transparent border border-current'}`}></div>
                      <span className="font-mono text-xs uppercase tracking-widest font-bold">{item.name}</span>
                    </Link>
                    
@@ -188,7 +190,7 @@ const AppLayout = () => {
                                  <Link
                                     to={`${item.path}${sub.query}`}
                                     className={`flex items-center gap-2 group cursor-pointer transition-colors ${
-                                       isSubActive ? 'text-ink' : 'text-muted hover:text-ink'
+                                       isSubActive ? 'text-brand' : 'text-muted hover:text-ink'
                                     }`}
                                  >
                                     <span className={`font-mono text-[10px] uppercase tracking-widest ${isSubActive ? 'font-bold' : ''}`}>
@@ -251,7 +253,10 @@ const AppLayout = () => {
         {/* Reserves real layout space (rather than floating over content) so
             scrollable content can never render underneath/behind it. */}
         {showGlobalSearch && (
-          <div className="shrink-0 z-40 border-t border-ink/10 bg-paper/95 backdrop-blur-sm px-8 py-4 flex justify-center tour-global-search">
+          /* Same tinted tone as the sidebar: the two together read as one
+             frame of chrome around the paper canvas, which is what lets the
+             white cards on that canvas come forward. */
+          <div className="shrink-0 z-40 border-t border-ink/25 bg-rail/95 backdrop-blur-sm px-8 py-4 flex justify-center tour-global-search">
             <div className="w-full max-w-5xl">
               <GlobalSearch />
             </div>

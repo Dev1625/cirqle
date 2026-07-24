@@ -618,7 +618,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       )}
 
       {isAddMode && (
-        <div className="bg-white border border-ink/15 rounded-card p-6 mb-8 group overflow-hidden animate-fade-slide-up">
+        <div className="bg-white border border-ink/25 rounded-card shadow-card p-6 mb-8 group overflow-hidden animate-fade-slide-up">
           <div className="flex justify-between items-start mb-6">
             <h2 className="font-serif text-2xl italic font-bold">New Contact</h2>
             <button onClick={() => { setIsAddMode(false); setFormData(null); setPasteText(''); }} className="text-xs font-mono uppercase tracking-widest opacity-60 hover:opacity-100 transition-opacity">Cancel</button>
@@ -666,8 +666,10 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
         </div>
       )}
 
-      {/* Directory Filters & List */}
-      <div className="tour-directory-list bg-white border border-ink/15 rounded-card">
+      {/* Directory Filters & List — this screen's primary surface, so it takes
+          the stronger outer boundary + the one soft card lift. Its inner
+          dividers (filter bar, contact rows) stay at /15. */}
+      <div className="tour-directory-list bg-white border border-ink/25 rounded-card shadow-card">
         <div className="p-4 border-b border-ink/15 bg-paper/50 flex flex-col md:flex-row gap-4">
            {/* Search */}
           <div className="relative flex-1">

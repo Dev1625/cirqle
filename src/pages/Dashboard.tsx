@@ -194,7 +194,10 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="border border-ink/15 rounded-card bg-white overflow-hidden">
+      {/* The dashboard's hero block. Outer boundary steps up to /25 and takes
+          the one soft card lift so it reads as a surface distinct from the
+          cream page; every divider *inside* it stays at /15 or lighter. */}
+      <div className="border border-ink/25 rounded-card bg-white shadow-card overflow-hidden">
         <div className="flex items-center justify-between gap-4 border-b border-ink/15 bg-[#F8F5EF] px-6 py-5 flex-wrap">
           <div>
             <h2 className="font-serif text-3xl italic font-bold flex items-center gap-2">
