@@ -22,6 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { TierBadge } from '../components/ui/TierBadge';
+import { AccentRule } from '../components/ui/AccentRule';
 
 type Tier = 'Strong' | 'Warm' | 'Cold' | 'Dormant';
 
@@ -1138,6 +1139,7 @@ export default function NetworkGraph() {
     <div className="space-y-6 pb-12">
       <div className="border-b border-ink/20 pb-6">
         <div>
+          <AccentRule className="mb-4" />
           <h1 className="font-serif text-5xl italic font-black mb-2">Network Graph.</h1>
           <p className="font-mono text-xs uppercase tracking-widest text-muted">
             You at the center, industry lanes around you, and contacts nested inside each lane.

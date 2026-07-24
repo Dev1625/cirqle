@@ -13,6 +13,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { Upload } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
+import { AccentRule } from '../components/ui/AccentRule';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -94,6 +95,7 @@ export default function Settings() {
   return (
     <div className="space-y-8">
       <div className="pb-6 border-b border-ink/20">
+        <AccentRule className="mb-4" />
         <h1 className="font-serif text-5xl italic font-black mb-2">Settings & Profile.</h1>
         <p className="font-mono text-xs uppercase tracking-widest text-muted">Set your context to generate better AI outreach drafts.</p>
       </div>

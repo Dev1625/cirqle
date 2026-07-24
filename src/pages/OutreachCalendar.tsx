@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, format, isSameMonth, isSameDay, startOfDay } from 'date-fns';
+import { AccentRule } from '../components/ui/AccentRule';
 
 export default function OutreachCalendar() {
   const { user } = useAuth();
@@ -102,6 +103,7 @@ export default function OutreachCalendar() {
     <div className="space-y-6">
       <div className="flex justify-between items-center pb-6 border-b border-ink/20 flex-wrap gap-4">
          <div>
+            <AccentRule className="mb-4" />
             <h1 className="font-serif text-5xl italic font-black mb-2">Outreach Calendar.</h1>
             <p className="font-mono text-xs uppercase tracking-widest text-muted">Pace yourself. View upcoming planned follow-ups.</p>
          </div>

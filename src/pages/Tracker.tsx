@@ -10,6 +10,7 @@ import { TierBadge } from '../components/ui/TierBadge';
 import { ScrollFadeX } from '../components/ui/ScrollFadeX';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
+import { AccentRule } from '../components/ui/AccentRule';
 
 type ViewMode = 'sheet' | 'firm' | 'industry' | 'recruiting' | 'calendar' | 'queue';
 
@@ -176,8 +177,9 @@ export default function Tracker() {
       {/* Header Area */}
       <div className="flex justify-between items-end pb-6 border-b border-ink/20 flex-wrap gap-4">
         <div>
+           <AccentRule className="mb-4" />
            <h1 className="font-serif text-5xl italic font-black mb-2 flex items-center gap-3">
-             <Sparkles className="text-ink" size={32} />
+             <Sparkles className="text-brand" size={32} />
              Tracker.
            </h1>
            <p className="font-mono text-xs uppercase tracking-widest text-muted">Global view of all relationship interactions.</p>

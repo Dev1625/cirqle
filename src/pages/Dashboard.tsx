@@ -9,6 +9,7 @@ import Markdown from 'react-markdown';
 import { seedSampleData } from '../lib/seed';
 import { getFollowUpQueueItems, getRecordTime } from '../lib/tracker';
 import { TierBadge, TierDot, tierMarkerColor } from '../components/ui/TierBadge';
+import { AccentRule } from '../components/ui/AccentRule';
 
 const BRIEF_TIMEOUT_MS = 20000;
 
@@ -175,6 +176,7 @@ export default function Dashboard() {
     <div className="space-y-8">
       <div className="flex justify-between items-start flex-wrap gap-4">
         <div>
+          <AccentRule className="mb-4" />
           <h1 className="font-serif text-5xl italic font-black mb-2">Dashboard.</h1>
           <p className="font-mono text-xs uppercase tracking-widest text-muted">Pulse of your network. Skim your relationships.</p>
         </div>
@@ -201,7 +203,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between gap-4 border-b border-ink/15 bg-[#F8F5EF] px-6 py-5 flex-wrap">
           <div>
             <h2 className="font-serif text-3xl italic font-bold flex items-center gap-2">
-              <ListTodo size={22} /> Follow-Up Queue
+              <ListTodo size={22} className="text-brand" /> Follow-Up Queue
             </h2>
             <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-subtle">Action-first view of the people who need you next.</p>
           </div>
@@ -269,6 +271,8 @@ export default function Dashboard() {
       <div className="bg-ink text-paper rounded-card p-6">
          <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
             <h2 className="font-serif text-2xl italic font-bold flex items-center gap-2">
+               {/* On the inverted ink card the oxblood would go muddy, so the
+                   AI sparkle keeps paper here. */}
                <Sparkles size={20} /> This Week's AI Priorities
             </h2>
             <button 

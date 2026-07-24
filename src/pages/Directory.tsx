@@ -12,6 +12,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
 
 import { useNavigate } from 'react-router-dom';
+import { AccentRule } from '../components/ui/AccentRule';
 
 type ImportedContact = {
   name: string;
@@ -576,6 +577,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
     <div className="space-y-6">
       <div className="flex justify-between items-center pb-6 border-b border-ink/20 flex-wrap gap-4">
         <div>
+           <AccentRule className="mb-4" />
            <h1 className="font-serif text-5xl italic font-black mb-2">Directory.</h1>
            <p className="font-mono text-xs uppercase tracking-widest text-muted">Filter, search, and skim through your network.</p>
         </div>

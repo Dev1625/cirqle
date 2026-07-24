@@ -7,6 +7,7 @@ import { Input } from '../components/ui/Input';
 import { FileText, Plus } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
+import { AccentRule } from '../components/ui/AccentRule';
 
 export default function Templates() {
   const { user } = useAuth();
@@ -75,7 +76,10 @@ export default function Templates() {
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center pb-6 border-b border-ink/20">
-        <h1 className="font-serif text-5xl italic font-black">Templates.</h1>
+        <div>
+          <AccentRule className="mb-4" />
+          <h1 className="font-serif text-5xl italic font-black">Templates.</h1>
+        </div>
         <Button onClick={() => { setIsAdding(true); setFormData({ id: '', name: '', subject: '', body: '' }); }} className="gap-2">
           <Plus size={16} /> New Template
         </Button>
