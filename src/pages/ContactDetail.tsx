@@ -8,11 +8,15 @@ import { Sparkles, ArrowLeft, Send, Calendar, MessageSquare, Tag } from 'lucide-
 import { getGemini } from '../lib/gemini';
 import { Input } from '../components/ui/Input';
 import Markdown from 'react-markdown';
+import { ContactIntelligence } from '../components/contact/ContactIntelligence';
+import { sendOutreach } from '../lib/integrations/gmail';
+import { useToast } from '../contexts/ToastContext';
 
 export default function ContactDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
   
   const [contact, setContact] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
@@ -273,10 +277,32 @@ Return the result in JSON format EXACTLY like this:
 
   const handleSendDraft = async () => {
     if (!currentDraft || !contact || !user) return;
-    
+
     const mailto = `mailto:${contact.email || ''}?subject=${encodeURIComponent(currentDraft.subject)}&body=${encodeURIComponent(currentDraft.body)}`;
     window.location.href = mailto;
-    
+
+    // Start tracking the thread. In mock mode this fabricates a Gmail-shaped
+    // thread id and records it for real, so "Tracked threads" lights up the
+    // moment you send — the payoff works identically in both modes.
+    try {
+       const result = await sendOutreach({
+         uid: user.uid,
+         contactId: id!,
+         contactName: contact.name || '',
+         to: contact.email || '',
+         subject: currentDraft.subject || '',
+         body: currentDraft.body || '',
+       });
+       toast(
+         result.mode === 'mock'
+           ? 'Tracking this thread (preview mode).'
+           : 'Sent. Tracking the thread.',
+         'success'
+       );
+    } catch {
+       toast('Sent, but thread tracking could not start.', 'error');
+    }
+
     // Log in tracker
     try {
        await addDoc(collection(db, `users/${user.uid}/outreaches`), {
@@ -356,8 +382,18 @@ Return the result in JSON format EXACTLY like this:
                )}
              </div>
            </div>
+
+           {user && id && (
+             <ContactIntelligence
+               uid={user.uid}
+               contactId={id}
+               contact={contact}
+               notes={notes}
+               outreaches={outreaches}
+             />
+           )}
          </div>
-         
+
          {/* Outreach Tracker & Notes */}
          <div className="xl:col-span-2">
             <div className="bg-white border border-ink">

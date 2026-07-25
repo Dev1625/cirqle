@@ -8,6 +8,12 @@ import { getGemini } from '../lib/gemini';
 import Markdown from 'react-markdown';
 import { seedSampleData } from '../lib/seed';
 import { getFollowUpQueueItems, getRecordTime } from '../lib/tracker';
+import { TodaysMeetings } from '../components/dashboard/TodaysMeetings';
+import { CommitmentsPanel } from '../components/dashboard/CommitmentsPanel';
+import { DormantDigest } from '../components/dashboard/DormantDigest';
+import { VoiceMemo } from '../components/voice/VoiceMemo';
+import { useCalendarEvents } from '../hooks/useCalendarEvents';
+import type { CalendarEvent } from '../lib/integrations/calendar';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -19,6 +25,11 @@ export default function Dashboard() {
   const [aiBrief, setAiBrief] = useState<string>('');
   const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
   const [isSeeding, setIsSeeding] = useState(false);
+
+  // Calendar (real or mock) drives the pre-meeting briefs and the
+  // post-meeting voice-memo prompt.
+  const calendar = useCalendarEvents(user?.uid);
+  const [memoFor, setMemoFor] = useState<CalendarEvent | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -221,6 +232,23 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {user && (
+        <TodaysMeetings
+          uid={user.uid}
+          events={calendar.events}
+          contacts={contacts}
+          syncedAt={calendar.syncedAt}
+          state={calendar.state}
+          error={calendar.error}
+          onRefresh={calendar.refresh}
+          onRecordMemo={setMemoFor}
+        />
+      )}
+
+      {user && <CommitmentsPanel uid={user.uid} />}
+
+      {user && <DormantDigest uid={user.uid} senderName={calendar.profile?.name || 'me'} />}
+
       {/* AI Briefing Card */}
       <div className="bg-ink text-paper p-6 shadow-[8px_8px_0px_0px_var(--tw-shadow-color)] shadow-ink/20">
          <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
@@ -291,6 +319,16 @@ export default function Dashboard() {
            ))
         )}
       </div>
+
+      {memoFor && user && memoFor.contactId && (
+        <VoiceMemo
+          uid={user.uid}
+          contactId={memoFor.contactId}
+          contactName={memoFor.contactName || 'this contact'}
+          meetingTitle={memoFor.title}
+          onClose={() => setMemoFor(null)}
+        />
+      )}
     </div>
   );
 }
