@@ -1,11 +1,23 @@
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { connectAuthEmulator, getAuth } from "firebase/auth";
+import { connectFirestoreEmulator, getFirestore } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Opt-in local emulator wiring for development/testing only — never active
+// unless VITE_USE_FIREBASE_EMULATOR is explicitly set, so production and
+// normal local dev against the live project are unaffected.
+if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true' && typeof window !== 'undefined') {
+  const globalAny = window as any;
+  if (!globalAny.__CIRQLE_EMULATOR_CONNECTED__) {
+    globalAny.__CIRQLE_EMULATOR_CONNECTED__ = true;
+    connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
+    connectFirestoreEmulator(db, '127.0.0.1', 8085);
+  }
+}
 
 export interface FirestoreErrorInfo {
   error: string;

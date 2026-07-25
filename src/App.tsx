@@ -2,6 +2,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
 import { TourProvider } from './contexts/TourContext';
+import { ToastProvider } from './contexts/ToastContext';
+import { ConfirmProvider } from './contexts/ConfirmContext';
 
 import LandingLayout from './layouts/LandingLayout';
 import AppLayout from './layouts/AppLayout';
@@ -28,7 +30,9 @@ const PlaceholderPage = ({ title }: { title: string }) => (
 export default function App() {
   return (
     <AuthProvider>
-      <TourProvider>
+      <ToastProvider>
+       <ConfirmProvider>
+        <TourProvider>
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<LandingLayout />}>
@@ -49,7 +53,9 @@ export default function App() {
             </Route>
           </Routes>
         </BrowserRouter>
-      </TourProvider>
+        </TourProvider>
+       </ConfirmProvider>
+      </ToastProvider>
     </AuthProvider>
   );
 }
