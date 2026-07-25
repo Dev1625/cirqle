@@ -8,6 +8,7 @@ import { Logo } from '../components/Logo';
 import { GlobalSearch } from '../components/GlobalNLSearch';
 import { useTour, TOURS } from '../contexts/TourContext';
 import { useCaptureDrain } from '../hooks/useCaptureDrain';
+import { COMPOSE_EVENT, ESCAPE_EVENT, useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
 
 const AppLayout = () => {
   const { user } = useAuth();
@@ -100,6 +101,22 @@ const AppLayout = () => {
 
   // Files any card taps that happened while the owner was away.
   useCaptureDrain(user?.uid, profile);
+
+  // `c` composes. On a contact record the page itself opens Draft Outreach;
+  // anywhere else there is nobody to draft to yet, so send them to pick one.
+  const onContactRecord = /^\/app\/directory\/[^/]+$/.test(location.pathname);
+  useKeyboardShortcuts({
+    onCompose: () => {
+      if (onContactRecord) window.dispatchEvent(new CustomEvent(COMPOSE_EVENT));
+      else navigate('/app/directory');
+    },
+  });
+
+  useEffect(() => {
+    const onEscape = () => setShowHelpMenu(false);
+    window.addEventListener(ESCAPE_EVENT, onEscape);
+    return () => window.removeEventListener(ESCAPE_EVENT, onEscape);
+  }, []);
 
   const handleLogout = async () => {
     await auth.signOut();
@@ -284,10 +301,25 @@ const AppLayout = () => {
 
                <div className="space-y-6">
                   <h3 className="font-mono text-[10px] uppercase tracking-widest font-bold text-subtle border-b border-ink/20 pb-2 mb-4">What's New in Cirqle</h3>
-                  <div className="border-l-2 border-ink pl-4 py-1">
-                     <h4 className="font-serif text-lg font-bold">Interactive Guided Tours</h4>
-                     <p className="font-mono text-xs mt-2 leading-relaxed text-ink/80">We've ripped out the static tutorial modals and replaced them with interactive spotlights that guide you through making an actual outreach or query. Available anytime dynamically under Help.</p>
+                  <div className="border-l-2 border-brand pl-4 py-1">
+                     <h4 className="font-serif text-lg font-bold">Your card, and everything it files back</h4>
+                     <p className="font-mono text-xs mt-2 leading-relaxed text-ink/80">Publish a tap-ready card page from Settings &rarr; Connections. When someone saves your contact, they land in your Directory automatically — with the event you were at already tagged. Preview the whole thing without any hardware.</p>
                      <p className="font-mono text-[10px] uppercase text-subtle mt-2">Just Now</p>
+                  </div>
+                  <div className="border-l-2 border-ink pl-4 py-1">
+                     <h4 className="font-serif text-lg font-bold">Briefs, memos and commitments</h4>
+                     <p className="font-mono text-xs mt-2 leading-relaxed text-ink/80">The Dashboard now reads you in before a meeting, takes a voice memo after it, and pulls out anything you promised. Relationship health explains itself instead of showing a bare number, and can be pinned so the quarterly relationships stop nagging.</p>
+                     <p className="font-mono text-[10px] uppercase text-subtle mt-2">Just Now</p>
+                  </div>
+                  <div className="border-l-2 border-ink pl-4 py-1">
+                     <h4 className="font-serif text-lg font-bold">Keyboard shortcuts</h4>
+                     <p className="font-mono text-xs mt-2 leading-relaxed text-ink/80"><span className="font-bold">/</span> focuses Ask AI, <span className="font-bold">c</span> starts a draft, <span className="font-bold">Esc</span> closes whatever is open.</p>
+                     <p className="font-mono text-[10px] uppercase text-subtle mt-2">Just Now</p>
+                  </div>
+                  <div className="border-l-2 border-ink/20 pl-4 py-1">
+                     <h4 className="font-serif text-lg font-bold opacity-70">Interactive Guided Tours</h4>
+                     <p className="font-mono text-xs mt-2 leading-relaxed text-ink/60">We've ripped out the static tutorial modals and replaced them with interactive spotlights that guide you through making an actual outreach or query. Available anytime dynamically under Help.</p>
+                     <p className="font-mono text-[10px] uppercase text-subtle mt-2 opacity-70">Earlier</p>
                   </div>
                   <div className="border-l-2 border-ink/20 pl-4 py-1">
                      <h4 className="font-serif text-lg font-bold opacity-70">Enhanced Filtering in Tracker</h4>

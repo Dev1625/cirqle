@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { Avatar } from '../components/ui/Avatar';
 import { Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
 import Markdown from 'react-markdown';
@@ -702,9 +703,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
               <div key={c.id} onClick={() => navigate(`/app/directory/${c.id}`)} className="tour-contact-item p-6 hover:bg-paper/30 transition-colors cursor-pointer group flex flex-col gap-4 relative">
                 <div className="flex flex-col md:flex-row md:justify-between items-start md:items-center gap-4">
                    <div className="flex items-center gap-4">
-                     <div className="w-10 h-10 rounded-full bg-ink flex flex-shrink-0 items-center justify-center text-paper font-serif text-lg group-hover:bg-zinc-800 transition-colors">
-                       {c.name?.charAt(0)}
-                     </div>
+                     <Avatar name={c.name} photoUrl={c.photoUrl} size="default" />
                      <div>
                        <h3 className="font-semibold text-xl group-hover:underline">{c.name}</h3>
                        <p className="font-mono text-[10px] uppercase tracking-widest text-subtle">

@@ -11,6 +11,7 @@ import Markdown from 'react-markdown';
 import { ContactIntelligence } from '../components/contact/ContactIntelligence';
 import { sendOutreach } from '../lib/integrations/gmail';
 import { useToast } from '../contexts/ToastContext';
+import { useComposeShortcut } from '../hooks/useKeyboardShortcuts';
 
 export default function ContactDetail() {
   const { id } = useParams<{ id: string }>();
@@ -332,6 +333,9 @@ Return the result in JSON format EXACTLY like this:
        handleFirestoreError(err, 'create', `users/${user.uid}/outreaches`);
     }
   };
+
+  // `c` from anywhere on this record opens Draft Outreach.
+  useComposeShortcut(startDrafting);
 
   if (!contact) return <div className="font-mono p-8">Loading...</div>;
 

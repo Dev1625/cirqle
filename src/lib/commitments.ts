@@ -52,12 +52,23 @@ export async function listCommitments(
   options: { contactId?: string; status?: CommitmentStatus } = {}
 ): Promise<Commitment[]> {
   const base = collection(db, `users/${uid}/commitments`);
-  const constraints = [];
-  if (options.contactId) constraints.push(where('contactId', '==', options.contactId));
-  if (options.status) constraints.push(where('status', '==', options.status));
 
-  const snap = await getDocs(constraints.length ? query(base, ...constraints) : base);
+  // Only ONE equality filter goes to Firestore; the other is applied in
+  // memory. Two equality filters on different fields require a composite
+  // index, which the emulator creates on demand but production Firestore
+  // rejects outright with "The query requires an index" — a failure that
+  // would only ever show up after deploy. The collection is per-user and
+  // small, so filtering the remainder client-side costs nothing.
+  const snap = await getDocs(
+    options.contactId ? query(base, where('contactId', '==', options.contactId)) : base
+  );
+
   return snap.docs
+    .filter((d) => {
+      const data = d.data() as any;
+      if (options.status && (data.status || 'open') !== options.status) return false;
+      return true;
+    })
     .map((d) => {
       const data = d.data() as any;
       return {

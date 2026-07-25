@@ -147,9 +147,10 @@ ${JSON.stringify(miniContacts)}
       {/* Input Bar */}
       <form onSubmit={handleSearch} className="pointer-events-auto flex items-center bg-white border border-ink relative shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] transition-transform focus-within:-translate-y-1 focus-within:-translate-x-1 focus-within:shadow-[12px_12px_0px_0px_rgba(26,26,26,1)]">
         <Sparkles className="absolute left-4 text-ink/40" size={18} />
-        <Input 
+        <Input
+          data-shortcut="global-search"
           className="flex-1 py-6 pl-12 pr-24 border-0 text-sm font-mono focus-visible:ring-0 placeholder:opacity-40 italic font-semibold text-ink bg-transparent"
-          placeholder="Ask AI: 'Who in PE can help with marketing?'"
+          placeholder="Ask AI: 'Who in PE can help with marketing?'   ( / )"
           value={queryStr}
           onChange={e => setQueryStr(e.target.value)}
         />
