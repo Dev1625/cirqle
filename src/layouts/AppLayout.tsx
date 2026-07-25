@@ -7,6 +7,7 @@ import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { Logo } from '../components/Logo';
 import { GlobalSearch } from '../components/GlobalNLSearch';
 import { useTour, TOURS } from '../contexts/TourContext';
+import { useCaptureDrain } from '../hooks/useCaptureDrain';
 
 const AppLayout = () => {
   const { user } = useAuth();
@@ -18,6 +19,9 @@ const AppLayout = () => {
 
   const [isInitializing, setIsInitializing] = useState(true);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  // Held here rather than per-page so a card tap files itself wherever the
+  // owner happens to land in the app.
+  const [profile, setProfile] = useState<any>(null);
   
   // Help Menu State
   const [showHelpMenu, setShowHelpMenu] = useState(false);
@@ -45,6 +49,7 @@ const AppLayout = () => {
            });
         } else {
            const data = docSnap.data();
+           setProfile(data);
            if (data && data.apiKey) {
              currentApiKey = data.apiKey;
            }
@@ -92,6 +97,9 @@ const AppLayout = () => {
       setIsInitializing(false);
     }
   }, [user]);
+
+  // Files any card taps that happened while the owner was away.
+  useCaptureDrain(user?.uid, profile);
 
   const handleLogout = async () => {
     await auth.signOut();

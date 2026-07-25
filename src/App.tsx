@@ -21,6 +21,7 @@ import Tracker from './pages/Tracker';
 import OutreachCalendar from './pages/OutreachCalendar';
 
 import Templates from './pages/Templates';
+import PublicCard from './pages/PublicCard';
 
 // Placeholder standard pages that will be built next
 const PlaceholderPage = ({ title }: { title: string }) => (
@@ -35,6 +36,11 @@ export default function App() {
         <TourProvider>
         <BrowserRouter>
           <Routes>
+            {/* Public NFC card page. Deliberately outside both layouts:
+                someone who tapped a chip should land on a card, not on a
+                product's chrome. No auth gate of any kind. */}
+            <Route path="/c/:cardId" element={<PublicCard />} />
+
             <Route path="/" element={<LandingLayout />}>
               <Route index element={<LandingPage />} />
               <Route path="login" element={<AuthPage />} />
