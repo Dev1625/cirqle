@@ -168,11 +168,18 @@ const AppLayout = () => {
   return (
     <div className="flex h-screen overflow-hidden bg-transparent relative">
       
-      {/* Mobile / Collapsed Menu Hamburger */}
+      {/* Mobile / Collapsed Menu Hamburger.
+          Carries an explicit label: below 1100px the sidebar starts collapsed,
+          so this is the *only* route to navigation, and an icon-only button
+          with no accessible name left screen-reader users on a phone with an
+          unlabelled control and no way in. It never surfaced in a desktop
+          audit because the button does not render at that width. */}
       {!isSidebarOpen && (
-         <button 
+         <button
            onClick={() => setIsSidebarOpen(true)}
-           className="absolute top-6 left-6 z-50 p-2 bg-rail border border-ink/25 rounded-card hover:bg-ink hover:text-white transition-colors"
+           aria-label="Open navigation"
+           aria-expanded={false}
+           className="absolute top-6 left-6 z-50 p-2 bg-rail border border-ink/25 rounded-card hover:bg-ink hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
          >
            <Menu size={20} />
          </button>
@@ -181,12 +188,21 @@ const AppLayout = () => {
       {/* Sidebar */}
       {isSidebarOpen && (
          <aside className="w-64 flex-shrink-0 border-r border-ink/25 bg-rail p-8 z-10 flex flex-col relative transition-all duration-300">
-           <div onClick={() => setIsSidebarOpen(false)} className="cursor-pointer group relative">
+           {/* A <button>, not a <div onClick>. As a div this was unreachable by
+               keyboard and invisible to assistive tech, so the sidebar could be
+               opened but never closed without a mouse. */}
+           <button
+             type="button"
+             onClick={() => setIsSidebarOpen(false)}
+             aria-label="Collapse navigation"
+             aria-expanded={true}
+             className="cursor-pointer group relative block w-full text-left rounded-card focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-rail"
+           >
              <Logo />
              <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 font-mono text-[10px] bg-ink text-white px-2 py-0.5 pointer-events-none transition-opacity">
                 Close
              </div>
-           </div>
+           </button>
            
            <ul className="space-y-6 flex-1 mt-8">
              {navItems.map((item) => {

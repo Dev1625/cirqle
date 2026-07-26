@@ -141,11 +141,18 @@ export default function PublicCard() {
             header block — one confident stripe, the card's only saturation. */}
         <div style={{ backgroundColor: accent }} className="h-1.5 rounded-t-card" />
 
-        <div className={compact ? 'p-7' : 'p-9'}>
-          <div className="flex items-start gap-4">
+        <div className={compact ? 'p-6 sm:p-7' : 'p-6 sm:p-9'}>
+          {/* Stacks below sm. Side-by-side, an 80px avatar eats a quarter of a
+              375px screen and forces the name to wrap — "Devarshi / Dalal"
+              broken across two lines is the first thing someone sees after
+              tapping a physical card, which is the worst possible place for it.
+              Stacked, the name gets the full width and stays on one line. */}
+          <div className="flex flex-col items-start gap-4 sm:flex-row">
             <Avatar name={card.name} size={compact ? 'lg' : 'xl'} tone={accent} />
-            <div className="min-w-0 flex-1 pt-1">
-              <h1 className={`font-serif ${compact ? 'text-3xl' : 'text-4xl'} font-black italic leading-tight`}>
+            <div className="min-w-0 flex-1 sm:pt-1">
+              <h1
+                className={`font-serif ${compact ? 'text-2xl sm:text-3xl' : 'text-3xl sm:text-4xl'} font-black italic leading-tight`}
+              >
                 {card.name || 'Unnamed'}
               </h1>
               {(card.role || card.company) && (
