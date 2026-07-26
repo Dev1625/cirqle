@@ -12,6 +12,7 @@ import {
   Flame,
   Link2,
   Network,
+  Pin,
   Radar,
   Search,
   Users
@@ -23,6 +24,7 @@ import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { TierBadge } from '../components/ui/TierBadge';
 import { AccentRule } from '../components/ui/AccentRule';
+import { computeHealth } from '../lib/health';
 
 type Tier = 'Strong' | 'Warm' | 'Cold' | 'Dormant';
 
@@ -85,6 +87,11 @@ type ContactInsight = {
   seniorityBucket: string;
   locationBucket: string;
   hasReferral: boolean;
+  /** From the shared scorer — the graph does not compute these itself. */
+  pinned: boolean;
+  neverContacted: boolean;
+  /** The explanation minus its leading score, since the panel shows /100. */
+  healthDetail: string;
 };
 
 type GraphNodeDatum = {
@@ -392,36 +399,47 @@ function buildAnalysis(params: {
       .sort((left, right) => (right as Date).getTime() - (left as Date).getTime())[0] as Date | null;
 
     const responseCount = contactOutreaches.filter((outreach) => lower(outreach.responseReceived) === 'yes').length;
-    const meetingCount = contactOutreaches.filter((outreach) => outreach.meetingHeld).length;
     const referralCount = contactOutreaches.filter((outreach) => outreach.referralGenerated).length;
-    const tier = getTier(contact.relationshipTier);
-    const interactionCount = contactNotes.length + contactOutreaches.length;
-    const lastTouchDays = daysSince(lastTouch);
     const responseRate = contactOutreaches.length > 0 ? responseCount / contactOutreaches.length : 0;
-    const score = clamp(
-      18
-        + (tier === 'Strong' ? 34 : tier === 'Warm' ? 25 : tier === 'Dormant' ? 10 : 16)
-        + interactionCount * 4.5
-        + responseCount * 4
-        + meetingCount * 5
-        + referralCount * 8
-        - (lastTouchDays > 120 ? 18 : lastTouchDays > 60 ? 9 : 0),
-      10,
-      100
-    );
+
+    // Scoring is delegated to lib/health.ts — the single implementation. This
+    // block used to carry its own copy of the same arithmetic, which is fine
+    // until the two drift and one contact reads 72 on the graph and 58 on
+    // their record.
+    //
+    // Two behaviour changes come with the switch, both deliberate:
+    //
+    // 1. `contact.updatedAt` is no longer treated as a "touch". The graph used
+    //    to count it, so renaming a contact or fixing a typo in their company
+    //    reset their decay clock — an edit is not a conversation. The shared
+    //    scorer only counts real signals: lastContactedAt, capturedAt, notes
+    //    and outreach. Expect recently-edited contacts to score lower here
+    //    than they did, which is the correct number, not a regression.
+    // 2. Pinned contacts stop decaying on the graph too, which is the whole
+    //    point of pinning and previously applied only on Contact Detail.
+    const health = computeHealth({
+      contact,
+      notes: contactNotes,
+      outreaches: contactOutreaches,
+    });
 
     insights[contact.id] = {
-      score,
-      radius: clamp(9 + score * 0.14, 10, 24),
+      score: health.score,
+      radius: clamp(9 + health.score * 0.14, 10, 24),
+      // The shared scorer reports "never contacted" as a large sentinel; the
+      // graph wants the real last-touch date it already computed for display.
       lastTouch,
-      lastTouchDays,
+      lastTouchDays: health.lastTouchDays,
       responseRate,
       outreachCount: contactOutreaches.length,
       notesCount: contactNotes.length,
-      recentPulse: lastTouchDays <= 7,
+      recentPulse: health.lastTouchDays <= 7,
       seniorityBucket: getSeniorityBucket(contact),
       locationBucket: getLocationBucket(contact.location),
-      hasReferral: referralCount > 0
+      hasReferral: referralCount > 0,
+      pinned: health.pinned,
+      neverContacted: health.neverContacted,
+      healthDetail: health.detail,
     };
   });
 
@@ -1528,7 +1546,10 @@ export default function NetworkGraph() {
               <div className="mb-4 bg-paper/50 border border-ink/10 p-4">
                 <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-subtle mb-2">
                   <span>Relationship Strength</span>
-                  <span>{Math.round(selectedInsight.score)}/100</span>
+                  <span className="flex items-center gap-1.5">
+                    {selectedInsight.pinned && <Pin size={10} className="text-brand" aria-hidden="true" />}
+                    {Math.round(selectedInsight.score)}/100
+                  </span>
                 </div>
                 <div className="h-2 bg-white border border-ink/10">
                   <div
@@ -1539,6 +1560,13 @@ export default function NetworkGraph() {
                     }}
                   />
                 </div>
+                {/* The number alone was the complaint that started the health
+                    work — "72" tells you nothing you can act on. Now that the
+                    graph shares the scorer, it can show the same one-line
+                    explanation the contact record does. */}
+                <p className="mt-2 font-mono text-[11px] leading-relaxed text-muted">
+                  {selectedInsight.healthDetail}
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3 mb-4">
