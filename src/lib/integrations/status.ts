@@ -63,8 +63,26 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/**
+ * 15s, not the 8s this originally shipped with.
+ *
+ * Measured against a throttled connection (3000ms RTT, 10kbps) a legitimate
+ * single-doc read completes in ~7.0s. An 8s bound left barely a second of
+ * headroom, so a user on a genuinely bad connection would have been shown a
+ * "Retry" for a read that was about to succeed — trading a rare hang for a
+ * common false alarm.
+ *
+ * This is a backstop against a read that never settles at all, not a latency
+ * budget: the honest "Checking…" state is what covers slowness, so the bound
+ * can afford to be generous.
+ */
+const STATUS_READ_TIMEOUT_MS = 15000;
+
 export async function readStatus(uid: string, provider: Provider): Promise<IntegrationStatus> {
-  const snap = await withTimeout(getDoc(doc(db, `users/${uid}/integrations/${provider}`)), 8000);
+  const snap = await withTimeout(
+    getDoc(doc(db, `users/${uid}/integrations/${provider}`)),
+    STATUS_READ_TIMEOUT_MS
+  );
   const data = snap.exists() ? (snap.data() as any) : {};
   return {
     provider,

@@ -220,7 +220,20 @@ function ContactCommitments({
         </Button>
       </div>
 
-      {items && items.length > 0 ? (
+      {/* Three states, not two. This previously rendered "Nothing outstanding"
+          whenever items was falsy — including while the read was still in
+          flight — so a contact with commitments claimed to have none for as
+          long as the fetch took. Same defect as the Connections row showing
+          "Connect" during a pending read: a confident answer given before the
+          answer is known. On a throttled connection a single read measured
+          ~7s, so this was not a hypothetical flicker.
+          Note the block itself must stay mounted while loading — it holds the
+          Voice memo button, which should not disappear and reappear. */}
+      {items === null ? (
+        <p className="mt-2.5 font-mono text-[11px] uppercase tracking-widest text-muted">
+          Checking…
+        </p>
+      ) : items.length > 0 ? (
         <ul className="mt-3 space-y-2">
           {items.map((commitment) => (
             <li key={commitment.id} className="flex items-start justify-between gap-3">
