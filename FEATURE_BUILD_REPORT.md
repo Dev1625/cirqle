@@ -8,11 +8,24 @@
 
 ---
 
-## ⚠️ Read this first: merge these branches one at a time
+## Status: design branch is merged, and the app has been driven in a browser
 
-This work is on its own branch off `main`, deliberately. There is a concurrent
-design pass on `polish/depth-pass-2026-07-24`. **Merge one, verify it, then
-merge the other. Do not merge both blind.**
+**Update (later the same day).** Two things changed after the section below was
+first written, and it is kept intact underneath because the *reasoning* still
+explains how the branch is put together.
+
+1. **`polish/depth-pass-2026-07-24` is now merged into this branch**, at the
+   owner's instruction. Six files conflicted; all resolved by taking the design
+   work as the base and re-applying the feature additions. There is no longer a
+   second branch to merge — this one contains everything.
+2. **Everything has now been verified in a real browser** against a live
+   emulator, which the first pass could not do. That found and fixed
+   **13 defects**. See [Verification](#verification--what-was-actually-driven)
+   at the end.
+
+The merge-order discussion below is therefore **historical**. What still
+matters from it: the eight foundation files were ported verbatim, which is
+*why* the merge came out clean.
 
 ### The thing you should know before you plan that merge
 
@@ -437,45 +450,113 @@ Written for someone returning after time away, in eight sections:
 
 ---
 
-## Verification — what was actually checked
+## Verification — what was actually driven
 
-**Passing:**
-- `npm run lint` (`tsc --noEmit`) — clean, at every commit.
-- `npm run build` — clean production build.
-- **15/15 Firestore rules tests**, run against a real emulator on isolated
-  ports. Covering: stranger can read a published card; stranger and
-  other-signed-in-user cannot overwrite it; owner can; stranger can leave one
-  capture; captures with empty name / 200-char name / an extra unexpected field
-  / pre-set `processed:true` are all rejected; neither a stranger nor another
-  user can enumerate captures; owner can; and existing user data
-  (`users/{uid}`, contacts) remains private throughout.
+Everything below was done in Chrome against a Firebase emulator on isolated
+ports (auth 9299 / firestore 8285 / vite 3200), with a test account created in
+the auth emulator and the Dashboard's own seed button. The temporary port
+patches to `firebase.json` and `src/config/firebase.ts` were reverted before
+committing, and both files are byte-identical to the polish branch again
+(verified with a line-ending-normalised `diff`, not assumed).
 
-**A bug this caught, worth flagging.** `listCommitments` originally used two
-equality filters on different fields, which requires a composite index. The
-emulator creates those on demand, so it would have passed every local test and
-failed *only after deploy* with "The query requires an index". Now one filter
-goes to Firestore and the rest is applied in memory. Fixed in `3764bd1`.
+### The definition of done, met end to end
 
-**Not verified — be aware:**
-- **No visual browser check was possible.** Chrome script injection timed out
-  against `localhost` in this environment on every attempt across two tabs and
-  two routes. The app compiles and builds, and the data layer is tested, but
-  **nobody has looked at these screens rendered.** Please click through
-  Settings → Connections and the Dashboard before trusting the layout.
-- The rules tests were run but **not committed** — they need
-  `@firebase/rules-unit-testing`, and adding a test dependency and harness
-  wasn't in scope. Worth adding properly; the throwaway file is reproducible
-  from the list above.
-- The Cloud Function half of Calendar/Gmail is unwritten by design, so live
-  mode is untested end to end.
+Filled in a profile → generated a card (AI route, which errored because no AI
+gateway runs locally, then took the **"Compose without AI"** fallback, which
+correctly composed an intro from the bio) → published → opened `/c/gbc4fw9uk2`
+in a second tab as a stranger → got the name prompt → saved the contact → and
+**the contact appeared in the owner's Directory**, with
+`summary: "Tapped your card 7/25/2026 at 10:01 PM"`, `capturedVia: nfc-card`,
+`connectionSource: NFC card`, and the pending capture drained to zero (no
+duplicate).
+
+Then, with **Event Mode** on: turned it on from the calendar auto-suggestion
+("Calendar says you're at SaaStr Annual 2026"), tapped again as a second
+visitor, and that contact landed carrying
+`capturedEventName: "SaaStr Annual 2026"`, a matching tag, and
+`summary: "…at SaaStr Annual 2026"`. Ending the window produced
+*"Your SaaStr Annual 2026 recap: 1 new contact, 0 suggested follow-ups."*
+
+### Also driven
+
+- Every route renders: Dashboard, Directory, Contact Detail, Network Graph
+  (canvas present), Tracker, Calendar, Templates, Settings, `/c/:cardId`, and
+  the retired-card state (*"No card here. This link is retired…"*).
+- All empty states before seeding, and populated states after.
+- Voice memo: opened, took the **type-it-instead** path, saved. The note landed
+  with `source: voice-memo`; `aiSummary` stayed null and zero commitments were
+  extracted because the gateway is down — i.e. the "write the note first and
+  unconditionally, enrich afterwards" design held under failure.
+- Every AI surface's **error state**, for free, since no gateway runs locally:
+  *"No answer from the model. The gateway may not be running."* with **Try
+  again** and **Show what we know anyway**.
+- Keyboard shortcuts: `/` focuses search, `c` drafts, and — tested by
+  dispatching on the focused element rather than on `window`, which is the only
+  way to test this correctly — neither fires while typing in an input or
+  textarea, and `Ctrl+C` is not swallowed.
+- Firestore rules: **15/15** passing (public card read; stranger and
+  other-user overwrite denied; owner allowed; malformed, oversized and
+  `processed:true` captures rejected; capture enumeration denied to everyone
+  but the owner; existing user data still private).
+- No horizontal overflow on Dashboard, Directory or Settings.
+- `prefers-reduced-motion` override confirmed present in the served CSS.
+- Zero unnamed interactive elements; zero ad-hoc radii or shadows in new code.
+
+### 13 defects found and fixed
+
+Nine in `0f57b84`, three in `e9d27d1`, one in `35dd743`. The ones worth
+knowing about:
+
+- **"999 days" leaked to users.** The dormant digest rendered *"a strong tie
+  gone quiet for 999 days"* — 999 is an internal stand-in for infinity — and
+  fed the same number to the model, which would have written an apology for a
+  three-year silence.
+- **Disabled brand buttons were indistinguishable from live ones** (full
+  oxblood, opacity 1). The card page's Continue button looked entirely
+  clickable while inert. Related: `disabled:pointer-events-none` silently
+  cancelled the `disabled:cursor-not-allowed` beside it.
+- **Placeholders used `text-subtle`**, near-identical to real input ink, so
+  *"Alex Rivera"* in the card's name prompt read as already typed.
+- **Publishing a card left you in the editor** with no confirmation and no
+  sight of the URL or QR.
+- **Three form controls set `outline-none` with no replacement** (Directory's
+  two filters, Tracker's search) — invisible to keyboard focus. And the Ask-AI
+  bar's placeholder sat at roughly 2.9:1, the exact pattern DESIGN.md §7 says
+  was removed for failing AA.
+- **Event Mode's auto-suggestion was undemoable after 6pm**, because the mock
+  conference was pinned to 09:00–18:00.
+
+### Still not verified — be aware
+
+- **Narrow-viewport rendering.** `resize_window` reported success but the
+  viewport never actually changed in this environment, so responsive layout is
+  **statically** audited (the new components use `sm:`/`lg:` stacking and
+  `flex-wrap` throughout) and confirmed overflow-free at 1394px, but has not
+  been *seen* at tablet or phone width.
+- **Live OAuth.** Untested by design — the Cloud Function half is unwritten,
+  and testing it needs a real Google client ID. Mock mode is fully exercised.
+- **Actual speech recognition.** The Web Speech API is available in this
+  Chrome, but I cannot speak into it; the manual fallback path was tested
+  instead.
+- **The rules tests are still not committed.** They need
+  `@firebase/rules-unit-testing` as a dev dependency and a test script, which
+  remains out of scope. Reproducible from the list above.
+- **One fix has an unproven root cause**, flagged honestly in `35dd743`: a
+  Connections status read that never settled, so the row showed "Connect" while
+  Firestore said connected. On that page dynamic imports also hung and
+  `setTimeout` did not fire, which points at background-tab throttling in this
+  environment rather than app logic. The fix (bounded read, explicit
+  Checking/Retry states) is worth having either way, since an unbounded read
+  rendering a confident wrong answer is a defect whatever stalls it.
 
 ---
 
 ## Follow-ups, in the order I'd do them
 
-1. **Click through the new screens** — see the verification caveat above.
+1. **Look at it at phone and tablet width** — the one thing I could not check
+   (see above).
 2. **Unify the two scores.** Point `NetworkGraph.buildAnalysis` at
-   `lib/health.ts` once the polish branch has landed.
+   `lib/health.ts`. The polish branch has now landed, so nothing blocks this.
 3. **Move capture draining to a Cloud Function.** It's client-side today so the
    whole flow demos with nothing deployed, which means a captured contact
    appears on the owner's *next app load* rather than instantly. An
