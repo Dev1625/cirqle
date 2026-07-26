@@ -12,5 +12,72 @@ service cloud.firestore {
         allow read, write: if isOwner(userId);
       }
     }
+
+    // ── OAuth refresh tokens: server-only, no exceptions ─────────────────
+    //
+    // Written and read exclusively by Cloud Functions via the Admin SDK,
+    // which bypasses these rules. Denying every client operation outright is
+    // belt-and-braces — an unmatched path is already denied by default — but
+    // it states the invariant where someone editing this file will see it.
+    //
+    // A refresh token is a standing key to a mailbox that outlives the user's
+    // password change. `users/{uid}/integrations/{provider}` is the
+    // client-readable half and holds status metadata only; nothing here is
+    // ever returned to a browser.
+    match /oauthTokens/{userId} {
+      allow read, write: if false;
+    }
+
+    // ── NFC card: the one deliberately public surface ────────────────────
+    //
+    // A card page has to be readable by a stranger who just tapped a chip,
+    // with no login. `cards/{cardId}` is therefore a denormalised, opt-in
+    // snapshot containing only what the owner chose to put on their card —
+    // never a window onto users/{uid}, which stays owner-only above.
+    //
+    // Card ids are 10 chars of a 31-symbol alphabet (~2^49), so the
+    // collection is not meaningfully enumerable by guessing.
+    match /cards/{cardId} {
+      allow read: if true;
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.ownerUid;
+      allow update: if request.auth != null
+                    && request.auth.uid == resource.data.ownerUid
+                    && request.resource.data.ownerUid == resource.data.ownerUid;
+      allow delete: if request.auth != null
+                    && request.auth.uid == resource.data.ownerUid;
+
+      // Reverse capture. An unauthenticated viewer may drop one record here
+      // when they save the contact — create-only, shape-checked, length-
+      // capped. They cannot read the subcollection, so a stranger can leave
+      // a card but can never enumerate who else has.
+      match /captures/{captureId} {
+        function validCapture() {
+          return request.resource.data.keys().hasOnly([
+                   'visitorName', 'visitorEmail', 'visitorCompany',
+                   'note', 'capturedAt', 'processed'
+                 ])
+                 && request.resource.data.visitorName is string
+                 && request.resource.data.visitorName.size() > 0
+                 && request.resource.data.visitorName.size() <= 120
+                 && (request.resource.data.visitorEmail == null
+                     || (request.resource.data.visitorEmail is string
+                         && request.resource.data.visitorEmail.size() <= 200))
+                 && (request.resource.data.visitorCompany == null
+                     || (request.resource.data.visitorCompany is string
+                         && request.resource.data.visitorCompany.size() <= 200))
+                 && (request.resource.data.note == null
+                     || (request.resource.data.note is string
+                         && request.resource.data.note.size() <= 500))
+                 && request.resource.data.processed == false;
+        }
+
+        allow create: if validCapture();
+        allow read, delete: if request.auth != null
+                            && request.auth.uid ==
+                               get(/databases/$(database)/documents/cards/$(cardId)).data.ownerUid;
+        allow update: if false;
+      }
+    }
   }
 }

@@ -1,0 +1,20 @@
+{
+  "_comment": "Separate from firebase.test.json on purpose. The rules suite seeds a capture document as a fixture; with functions running, onCardCapture would fire and delete that fixture out from under the assertions that read it. Rules tests and trigger tests therefore get their own emulators and their own ports.",
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": ["node_modules", ".git", "*.local"]
+    }
+  ],
+  "emulators": {
+    "firestore": { "port": 8591 },
+    "functions": { "port": 5011 },
+    "hub": { "port": 4491 },
+    "logging": { "port": 4591 },
+    "ui": { "enabled": false }
+  }
+}

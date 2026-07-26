@@ -4,11 +4,16 @@ import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { Avatar } from '../components/ui/Avatar';
+import { TierBadge } from '../components/ui/TierBadge';
 import { Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
 import Markdown from 'react-markdown';
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
 
 import { useNavigate } from 'react-router-dom';
+import { AccentRule } from '../components/ui/AccentRule';
 
 type ImportedContact = {
   name: string;
@@ -282,6 +287,8 @@ ${JSON.stringify(chunk)}`,
 export default function Directory() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { toast } = useToast();
+  const confirm = useConfirm();
   const [contacts, setContacts] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   
@@ -368,7 +375,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       });
     } catch (error) {
       console.error(error);
-      alert("Failed to parse. Please try again.");
+      toast("Failed to parse that text. Please try again or use manual entry.", 'error');
     } finally {
       setIsParsing(false);
     }
@@ -516,7 +523,12 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       return;
     }
 
-    const confirmed = window.confirm(`Clear ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all associated outreaches/notes? This cannot be undone.`);
+    const confirmed = await confirm({
+      title: 'Clear entire directory?',
+      message: `This deletes ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all associated outreaches and notes. This cannot be undone.`,
+      confirmLabel: 'Clear Directory',
+      tone: 'danger',
+    });
     if (!confirmed) return;
 
     setIsClearingDirectory(true);
@@ -554,7 +566,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
 
       localStorage.removeItem(`ai_brief_${user.uid}`);
       localStorage.removeItem(`ai_brief_time_${user.uid}`);
-      setImportFeedback(`Cleared ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all related outreach history.`);
+      toast(`Cleared ${contacts.length} contact${contacts.length === 1 ? '' : 's'} and all related outreach history.`, 'success');
     } catch (error) {
       handleFirestoreError(error, 'delete', `users/${user.uid}/contacts`);
     } finally {
@@ -566,8 +578,9 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
     <div className="space-y-6">
       <div className="flex justify-between items-center pb-6 border-b border-ink/20 flex-wrap gap-4">
         <div>
+           <AccentRule className="mb-4" />
            <h1 className="font-serif text-5xl italic font-black mb-2">Directory.</h1>
-           <p className="font-mono text-xs uppercase tracking-widest opacity-50">Filter, search, and skim through your network.</p>
+           <p className="font-mono text-xs uppercase tracking-widest text-muted">Filter, search, and skim through your network.</p>
         </div>
         <div className="flex flex-wrap gap-3 items-center justify-end">
           <input
@@ -584,7 +597,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
             type="button"
             onClick={() => fileInputRef.current?.click()}
             disabled={isImportingCsv || isClearingDirectory}
-            className="tour-csv-btn font-mono text-[10px] uppercase tracking-widest border border-ink px-3 py-1.5 hover:bg-ink hover:text-white transition-colors bg-white shadow-[2px_2px_0px_0px_rgba(26,26,26,1)] disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2"
+            className="tour-csv-btn font-mono text-[10px] uppercase tracking-widest border border-ink/15 rounded-card px-3 py-1.5 hover:bg-ink hover:text-white transition-colors bg-white disabled:cursor-not-allowed disabled:opacity-50 flex items-center gap-2"
           >
             <Upload size={14} />
             {isImportingCsv ? 'Importing...' : 'Import CSV'}
@@ -593,7 +606,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
             type="button"
             onClick={handleClearDirectory}
             disabled={contacts.length === 0 || isImportingCsv || isClearingDirectory}
-            className="font-mono text-[10px] uppercase tracking-widest border border-red-300 px-3 py-1.5 text-red-700 hover:bg-red-700 hover:text-white transition-colors bg-white shadow-[2px_2px_0px_0px_rgba(127,29,29,0.18)] disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
+            className="font-mono text-[10px] uppercase tracking-widest border border-red-300 px-3 py-1.5 text-red-700 hover:bg-red-700 hover:text-white transition-colors bg-white disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-2"
           >
             <Trash2 size={14} />
             {isClearingDirectory ? 'Clearing...' : 'Clear Directory'}
@@ -608,7 +621,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
       )}
 
       {isAddMode && (
-        <div className="bg-white border border-ink p-6 mb-8 group overflow-hidden">
+        <div className="bg-white border border-ink/25 rounded-card shadow-card p-6 mb-8 group overflow-hidden animate-fade-slide-up">
           <div className="flex justify-between items-start mb-6">
             <h2 className="font-serif text-2xl italic font-bold">New Contact</h2>
             <button onClick={() => { setIsAddMode(false); setFormData(null); setPasteText(''); }} className="text-xs font-mono uppercase tracking-widest opacity-60 hover:opacity-100 transition-opacity">Cancel</button>
@@ -618,7 +631,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
             <div className="space-y-4 tour-paste-btn">
               <label className="block text-xs uppercase tracking-widest text-subtle">Paste text (LinkedIn bio, signature, notes) to auto-fill</label>
               <textarea 
-                className="w-full h-32 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
+                className="w-full h-32 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
                 placeholder="John Doe is a VP at Goldman Sachs based in NY..."
                 value={pasteText}
                 onChange={(e) => setPasteText(e.target.value)}
@@ -656,9 +669,11 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
         </div>
       )}
 
-      {/* Directory Filters & List */}
-      <div className="tour-directory-list bg-white border border-ink">
-        <div className="p-4 border-b border-ink bg-paper/50 flex flex-col md:flex-row gap-4">
+      {/* Directory Filters & List — this screen's primary surface, so it takes
+          the stronger outer boundary + the one soft card lift. Its inner
+          dividers (filter bar, contact rows) stay at /15. */}
+      <div className="tour-directory-list bg-white border border-ink/25 rounded-card shadow-card">
+        <div className="p-4 border-b border-ink/15 bg-paper/50 flex flex-col md:flex-row gap-4">
            {/* Search */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle" size={16} />
@@ -672,8 +687,11 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
           
            {/* Filters */}
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase">
-             <select 
-               className="bg-white border border-ink px-3 py-2 text-ink outline-none"
+             {/* outline-none previously had no replacement, so these filters
+                 were entirely invisible to keyboard focus. Same brand ring
+                 the Input primitive uses. */}
+             <select
+               className="bg-white border border-ink/15 rounded-card px-3 py-2 text-ink focus-visible:outline-none focus-visible:border-brand/40 focus-visible:ring-2 focus-visible:ring-brand/30"
                value={selectedTier}
                onChange={(e) => setSelectedTier(e.target.value)}
              >
@@ -683,7 +701,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
              
              {uniqueIndustries.length > 0 && (
                <select 
-                 className="bg-white border border-ink px-3 py-2 text-ink outline-none max-w-[120px] truncate"
+                 className="bg-white border border-ink/15 rounded-card px-3 py-2 text-ink max-w-[120px] truncate focus-visible:outline-none focus-visible:border-brand/40 focus-visible:ring-2 focus-visible:ring-brand/30"
                  value={selectedIndustry}
                  onChange={(e) => setSelectedIndustry(e.target.value)}
                >
@@ -702,9 +720,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
               <div key={c.id} onClick={() => navigate(`/app/directory/${c.id}`)} className="tour-contact-item p-6 hover:bg-paper/30 transition-colors cursor-pointer group flex flex-col gap-4 relative">
                 <div className="flex flex-col md:flex-row md:justify-between items-start md:items-center gap-4">
                    <div className="flex items-center gap-4">
-                     <div className="w-10 h-10 rounded-full bg-ink flex flex-shrink-0 items-center justify-center text-paper font-serif text-lg group-hover:bg-zinc-800 transition-colors">
-                       {c.name?.charAt(0)}
-                     </div>
+                     <Avatar name={c.name} photoUrl={c.photoUrl} size="default" />
                      <div>
                        <h3 className="font-semibold text-xl group-hover:underline">{c.name}</h3>
                        <p className="font-mono text-[10px] uppercase tracking-widest text-subtle">
@@ -715,7 +731,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
                    
                    <div className="flex items-center gap-3">
                       {c.industry && <span className="text-[10px] uppercase tracking-widest font-mono border-b border-ink/20 pb-0.5">{c.industry}</span>}
-                      {c.relationshipTier && <span className="text-[10px] uppercase tracking-widest font-mono bg-accent px-2 py-1">{c.relationshipTier}</span>}
+                      <TierBadge tier={c.relationshipTier} />
                    </div>
                 </div>
 
@@ -726,7 +742,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
                        <Markdown>{c.summary}</Markdown>
                      </div>
                    ) : (
-                     <span className="italic opacity-50">No AI summary generated for this contact yet. Click to add context.</span>
+                     <span className="italic text-muted">No AI summary generated for this contact yet. Click to add context.</span>
                    )}
                 </div>
               </div>

@@ -6,11 +6,18 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Filter, Search, Table, Building, Briefcase, Calendar as CalendarIcon, ListTodo, Download, Sparkles, Trash2, Clock, CheckCircle2, Send, Users } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { getFollowUpQueueItems, getRecordDate, getRecordTime } from '../lib/tracker';
+import { TierBadge } from '../components/ui/TierBadge';
+import { ScrollFadeX } from '../components/ui/ScrollFadeX';
+import { useToast } from '../contexts/ToastContext';
+import { useConfirm } from '../contexts/ConfirmContext';
+import { AccentRule } from '../components/ui/AccentRule';
 
 type ViewMode = 'sheet' | 'firm' | 'industry' | 'recruiting' | 'calendar' | 'queue';
 
 export default function Tracker() {
   const { user } = useAuth();
+  const { toast } = useToast();
+  const confirm = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeView = (searchParams.get('mode') as ViewMode) || 'sheet';
 
@@ -130,7 +137,12 @@ export default function Tracker() {
   const handleClearTracker = async () => {
      if (!user || outreaches.length === 0) return;
 
-     const confirmed = window.confirm(`Clear ${outreaches.length} tracker record${outreaches.length === 1 ? '' : 's'}? This will remove outreach history but leave contacts and notes intact.`);
+     const confirmed = await confirm({
+        title: 'Clear tracker history?',
+        message: `This removes ${outreaches.length} tracker record${outreaches.length === 1 ? '' : 's'} but leaves contacts and notes intact. This cannot be undone.`,
+        confirmLabel: 'Clear Tracker',
+        tone: 'danger',
+     });
      if (!confirmed) return;
 
      setIsClearingTracker(true);
@@ -151,6 +163,7 @@ export default function Tracker() {
 
         localStorage.removeItem(`ai_brief_${user.uid}`);
         localStorage.removeItem(`ai_brief_time_${user.uid}`);
+        toast(`Cleared ${outreaches.length} tracker record${outreaches.length === 1 ? '' : 's'}.`, 'success');
      } catch (error) {
         handleFirestoreError(error, 'delete', `users/${user.uid}/outreaches`);
      } finally {
@@ -164,11 +177,12 @@ export default function Tracker() {
       {/* Header Area */}
       <div className="flex justify-between items-end pb-6 border-b border-ink/20 flex-wrap gap-4">
         <div>
+           <AccentRule className="mb-4" />
            <h1 className="font-serif text-5xl italic font-black mb-2 flex items-center gap-3">
-             <Sparkles className="text-ink" size={32} />
+             <Sparkles className="text-brand" size={32} />
              Tracker.
            </h1>
-           <p className="font-mono text-xs uppercase tracking-widest opacity-50">Global view of all relationship interactions.</p>
+           <p className="font-mono text-xs uppercase tracking-widest text-muted">Global view of all relationship interactions.</p>
         </div>
         <div className="flex gap-2">
            <button
@@ -179,17 +193,17 @@ export default function Tracker() {
               <Trash2 size={14} />
               {isClearingTracker ? 'Clearing...' : 'Clear Tracker'}
            </button>
-           <button onClick={handleExportCSV} className="px-4 py-2 border border-ink bg-white font-mono text-[10px] uppercase tracking-widest font-bold hover:bg-ink hover:text-white transition-colors flex items-center gap-2">
+           <button onClick={handleExportCSV} className="px-4 py-2 border border-ink/15 rounded-card bg-white font-mono text-[10px] uppercase tracking-widest font-bold hover:bg-ink hover:text-white transition-colors flex items-center gap-2">
               <Download size={14} /> Export CSV
            </button>
         </div>
       </div>
 
       {/* Control Bar (Tabs & Filters) */}
-      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white border border-ink p-2 shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] z-20 relative">
+      <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 bg-white border border-ink/25 rounded-card p-2 z-20 relative">
          
-         {/* Tabs */}
-         <div className="tour-tracker-modes flex overflow-x-auto no-scrollbar w-full xl:w-auto">
+         {/* Tabs — wraps to a second line rather than clipping/hiding overflow at narrow widths */}
+         <div className="tour-tracker-modes flex flex-wrap w-full xl:w-auto">
             {[
               { id: 'queue', label: 'Follow-Up Queue', icon: ListTodo },
               { id: 'sheet', label: 'Sheet', icon: Table },
@@ -216,7 +230,7 @@ export default function Tracker() {
                <select 
                   value={collapsedMode ? 'person' : 'all'}
                   onChange={e => setCollapsedMode(e.target.value === 'person')}
-                  className="bg-transparent border border-ink font-mono text-xs px-2 py-1 outline-none focus:ring-0 focus:border-ink cursor-pointer"
+                  className="bg-transparent border border-ink/15 rounded-card font-mono text-xs px-2 py-1 outline-none focus:ring-0 focus:border-ink cursor-pointer"
                >
                   <option value="all">Every Interaction</option>
                   <option value="person">Latest per Person</option>
@@ -225,16 +239,19 @@ export default function Tracker() {
             
             <div className="relative flex-1 xl:w-64">
                <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-subtle" size={14} />
-               <input 
+               {/* outline-none had no focus replacement, and the placeholder
+                   used opacity on readable text — the exact pattern
+                   DESIGN.md §7 removed for failing WCAG AA. */}
+               <input
                  value={searchQuery}
                  onChange={e => setSearchQuery(e.target.value)}
-                 className="w-full pl-8 pr-3 py-1 bg-transparent border border-ink font-mono text-xs outline-none placeholder:text-subtle/50"
+                 className="w-full pl-8 pr-3 py-1 bg-transparent border border-ink/15 rounded-card font-mono text-xs placeholder:text-muted focus-visible:outline-none focus-visible:border-brand/40 focus-visible:ring-2 focus-visible:ring-brand/30"
                  placeholder="Search tracker..."
                />
             </div>
             <button 
                onClick={() => setIsFilterPanelOpen(!isFilterPanelOpen)}
-               className={`tour-filter-btn p-1.5 border border-ink hover:bg-ink hover:text-white transition-colors relative ${isFilterPanelOpen ? 'bg-ink text-white' : ''}`}
+               className={`tour-filter-btn p-1.5 border border-ink/15 rounded-card hover:bg-ink hover:text-white transition-colors relative ${isFilterPanelOpen ? 'bg-ink text-white' : ''}`}
             >
                <Filter size={14} />
                {(filterStatuses.length > 0 || filterFirms.length > 0 || filterIndustries.length > 0) && (
@@ -246,12 +263,12 @@ export default function Tracker() {
 
       {/* Filter Panel Slide-Down */}
       {isFilterPanelOpen && (
-         <div className="bg-white border border-ink p-6 shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] z-10 animate-fade-in -mt-4 relative">
+         <div className="bg-white border border-ink/15 rounded-card p-6 z-10 animate-fade-in -mt-4 relative">
             <div className="flex justify-between items-center mb-6">
                <h3 className="font-serif text-xl italic font-bold">Advanced Filters</h3>
                <button 
                   onClick={() => { setFilterStatuses([]); setFilterFirms([]); setFilterIndustries([]); }}
-                  className="text-[10px] font-mono uppercase tracking-widest border border-ink px-2 py-1 hover:bg-ink hover:text-white transition-colors"
+                  className="text-[10px] font-mono uppercase tracking-widest border border-ink/15 rounded-card px-2 py-1 hover:bg-ink hover:text-white transition-colors"
                >
                   Clear All
                </button>
@@ -324,8 +341,12 @@ export default function Tracker() {
          </div>
       )}
 
-      {/* Main View Area */}
-      <div className="tour-tracker-sheet flex-1 min-h-[500px] border border-ink bg-white shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] overflow-hidden flex flex-col">
+      {/* Main View Area — this screen's primary surface. In the grouped Firm/
+          Industry modes it wraps a stack of nested firm cards, and with every
+          boundary previously at /15 the outer container simply vanished. It
+          takes the stronger boundary + card lift; the firm cards inside stay
+          at /15 so the nesting reads as nesting. */}
+      <div className="tour-tracker-sheet flex-1 min-h-[500px] border border-ink/25 rounded-card bg-white shadow-card overflow-hidden flex flex-col">
           {activeView === 'sheet' && <SheetView data={displayData} />}
           {activeView === 'firm' && <GroupedView data={displayData} groupBy="company" label="Firm" />}
           {activeView === 'industry' && <GroupedView data={displayData} groupBy="industry" label="Industry" />}
@@ -344,7 +365,9 @@ function formatRelativeDays(date: Date | null) {
    const days = differenceInDays(new Date(), date);
    if (days === 0) return 'Today';
    if (days === 1) return '1 day ago';
-   return `${days} days ago`;
+   if (days > 1) return `${days} days ago`;
+   if (days === -1) return 'In 1 day';
+   return `In ${Math.abs(days)} days`;
 }
 
 function getPipelineStage(row: any) {
@@ -397,7 +420,7 @@ function RecruitingPipelineView({ data }: { data: any[] }) {
 
    return (
       <div className="flex-1 overflow-auto bg-paper/20">
-         <div className="sticky top-0 z-10 grid grid-cols-2 lg:grid-cols-5 border-b border-ink bg-white">
+         <div className="sticky top-0 z-10 grid grid-cols-2 lg:grid-cols-5 border-b border-ink/15 bg-white">
             <PipelineMetric icon={Users} label="People" value={metrics.people} />
             <PipelineMetric icon={Send} label="Active" value={metrics.active} />
             <PipelineMetric icon={CalendarIcon} label="Meetings" value={metrics.meetings} />
@@ -516,7 +539,7 @@ function TimelineView({ data }: { data: any[] }) {
 
    return (
       <div className="flex-1 overflow-y-auto bg-paper/20">
-         <div className="grid grid-cols-2 border-b border-ink bg-white lg:grid-cols-4">
+         <div className="grid grid-cols-2 border-b border-ink/15 bg-white lg:grid-cols-4">
             <PipelineMetric icon={Clock} label="Events" value={metrics.total} />
             <PipelineMetric icon={Send} label="Replies" value={metrics.replies} />
             <PipelineMetric icon={CalendarIcon} label="Meetings" value={metrics.meetings} />
@@ -529,7 +552,7 @@ function TimelineView({ data }: { data: any[] }) {
 
                return (
                   <section key={dateKey} className="mb-8 last:mb-0">
-                     <div className="sticky top-0 z-10 mb-4 flex items-center justify-between border border-ink bg-white px-4 py-3 shadow-[3px_3px_0px_0px_rgba(26,26,26,0.12)]">
+                     <div className="sticky top-0 z-10 mb-4 flex items-center justify-between border border-ink/15 rounded-card bg-white px-4 py-3">
                         <div>
                            <h3 className="font-serif text-xl font-bold italic">
                               {date ? format(date, 'EEEE, MMMM d') : 'Undated'}
@@ -560,7 +583,7 @@ function TimelineItem({ row }: { row: any }) {
    const meeting = row.meetingHeld || row.status === 'Meeting Scheduled' || row.status === 'Meeting Complete';
 
    return (
-      <div className="relative border border-ink/15 bg-white p-4 shadow-[3px_3px_0px_0px_rgba(26,26,26,0.08)] before:absolute before:-left-[23px] before:top-5 before:h-3 before:w-3 before:rounded-full before:border before:border-ink before:bg-white">
+      <div className="relative border border-ink/15 bg-white p-4 before:absolute before:-left-[23px] before:top-5 before:h-3 before:w-3 before:rounded-full before:border before:border-ink before:bg-white">
          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div>
                <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -599,9 +622,9 @@ function SheetView({ data }: { data: any[] }) {
    if (data.length === 0) return <div className="p-8 text-center font-mono text-subtle">No interaction data matched your query.</div>;
 
    return (
-      <div className="overflow-auto flex-1">
+      <ScrollFadeX className="flex-1 overflow-y-auto">
          <table className="w-full text-left font-mono text-xs whitespace-nowrap">
-            <thead className="bg-paper border-b border-ink sticky top-0 z-10">
+            <thead className="bg-paper border-b border-ink/15 sticky top-0 z-10">
                <tr>
                   <th className="p-3 font-semibold uppercase tracking-wider border-r border-ink/20">Name</th>
                   <th className="p-3 font-semibold uppercase tracking-wider border-r border-ink/20">Firm</th>
@@ -623,9 +646,7 @@ function SheetView({ data }: { data: any[] }) {
                         <Link to={`/app/directory/${row.contactId}`} className="font-bold hover:underline">
                            {row.contact?.name || 'Unknown'}
                         </Link>
-                        {row.contact?.relationshipTier && (
-                           <span className="ml-2 px-1 py-0.5 border border-ink/20 text-[9px] uppercase">{row.contact.relationshipTier}</span>
-                        )}
+                        <TierBadge tier={row.contact?.relationshipTier} className="ml-2 !px-1.5 !py-0.5 !text-[9px]" />
                      </td>
                      <td className="p-3 border-r border-ink/10">
                         {row.contact?.company || '--'}
@@ -655,7 +676,7 @@ function SheetView({ data }: { data: any[] }) {
                )})}
             </tbody>
          </table>
-      </div>
+      </ScrollFadeX>
    );
 }
 
@@ -672,22 +693,30 @@ function GroupedView({ data, groupBy, label }: { data: any[], groupBy: string, l
 
    return (
       <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-paper/10">
-         {groups.map(([name, items]) => {
+         {groups.map(([name, items], groupIndex) => {
             const respondedCount = items.filter(i => i.responseReceived === 'Yes').length;
             const resRate = items.length ? Math.round((respondedCount / items.length) * 100) : 0;
             const meetingsCount = items.filter(i => i.meetingHeld).length;
             const meetRate = respondedCount ? Math.round((meetingsCount / respondedCount) * 100) : 0;
 
             return (
-               <div key={name} className="border border-ink bg-white shadow-[4px_4px_0px_0px_rgba(26,26,26,1)]">
+               <div
+                  key={name}
+                  style={{ animationDelay: `${Math.min(groupIndex, 8) * 45}ms` }}
+                  className="animate-fade-slide-up border border-ink/15 rounded-card bg-white"
+               >
                   <div className="p-4 border-b border-ink/20 flex justify-between items-center bg-paper/50 flex-wrap gap-4">
                      <h3 className="font-serif text-2xl font-bold flex items-center gap-3">
                         <Building size={20} className="text-subtle" /> {name}
                      </h3>
+                     {/* Numbers that matter get the serif, same as the
+                         Dashboard stat strip. These were quietly falling back
+                         to small bold sans, which read as a caption rather
+                         than a figure. */}
                      <div className="flex gap-6 font-mono text-xs uppercase tracking-widest text-subtle">
-                        <div className="flex flex-col"><span className="text-[9px]">Contacts</span><span className="text-ink font-bold text-sm">{items.length}</span></div>
-                        <div className="flex flex-col"><span className="text-[9px]">Response %</span><span className="text-ink font-bold text-sm">{resRate}%</span></div>
-                        <div className="flex flex-col"><span className="text-[9px]">Meeting %</span><span className="text-ink font-bold text-sm">{meetRate}%</span></div>
+                        <div className="flex flex-col gap-0.5"><span className="text-[9px]">Contacts</span><span className="font-serif text-2xl font-black leading-none text-ink">{items.length}</span></div>
+                        <div className="flex flex-col gap-0.5"><span className="text-[9px]">Response %</span><span className="font-serif text-2xl font-black leading-none text-ink">{resRate}%</span></div>
+                        <div className="flex flex-col gap-0.5"><span className="text-[9px]">Meeting %</span><span className="font-serif text-2xl font-black leading-none text-ink">{meetRate}%</span></div>
                      </div>
                   </div>
                   <div className="p-0">
@@ -711,7 +740,7 @@ function QueueView({ data }: { data: any[] }) {
 
    return (
       <div className="flex-1 overflow-y-auto bg-paper/20">
-         <div className="grid grid-cols-2 border-b border-ink bg-white lg:grid-cols-4">
+         <div className="grid grid-cols-2 border-b border-ink/15 bg-white lg:grid-cols-4">
             <PipelineMetric icon={ListTodo} label="Queue" value={queue.length} />
             <PipelineMetric icon={Clock} label="Overdue" value={overdueCount} />
             <PipelineMetric icon={Send} label="Replies" value={responseCount} />
@@ -722,10 +751,10 @@ function QueueView({ data }: { data: any[] }) {
          <h2 className="font-serif text-2xl italic font-bold mb-6 flex items-center gap-2"><ListTodo /> Action Items</h2>
          <div className="space-y-4">
             {queue.map(q => (
-               <div key={q.id} className="border border-ink bg-white p-4 hover:bg-accent/10 transition-colors flex flex-col gap-4 md:flex-row md:justify-between md:items-center group">
+               <div key={q.id} className="border border-ink/15 rounded-card bg-white p-4 hover:bg-accent/10 transition-colors flex flex-col gap-4 md:flex-row md:justify-between md:items-center group">
                   <div className="min-w-0">
                      <Link to={`/app/directory/${q.contactId}`} className="font-bold text-lg font-serif group-hover:underline">
-                        {q.contact?.name || 'Unknown'} <span className="text-sm font-mono text-subtle uppercase ml-2 select-none border border-ink px-1">{q.contact?.company}</span>
+                        {q.contact?.name || 'Unknown'} <span className="text-sm font-mono text-subtle uppercase ml-2 select-none border border-ink/15 rounded-card px-1">{q.contact?.company}</span>
                      </Link>
                      <div className="flex gap-3 text-xs font-mono mt-2 text-subtle uppercase tracking-widest">
                         <span className="text-orange-600 font-bold bg-orange-100 px-1">{q.status}</span>
@@ -738,7 +767,7 @@ function QueueView({ data }: { data: any[] }) {
                   <div className="flex shrink-0 gap-2">
                      <Link
                        to={`/app/directory/${q.contactId}`}
-                       className="px-4 py-2 border border-ink bg-white font-mono text-xs uppercase tracking-widest hover:bg-paper transition-colors"
+                       className="px-4 py-2 border border-ink/15 rounded-card bg-white font-mono text-xs uppercase tracking-widest hover:bg-paper transition-colors"
                      >
                        Open Contact
                      </Link>

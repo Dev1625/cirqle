@@ -12,6 +12,7 @@ import {
   Flame,
   Link2,
   Network,
+  Pin,
   Radar,
   Search,
   Users
@@ -21,6 +22,9 @@ import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
+import { TierBadge } from '../components/ui/TierBadge';
+import { AccentRule } from '../components/ui/AccentRule';
+import { computeHealth } from '../lib/health';
 
 type Tier = 'Strong' | 'Warm' | 'Cold' | 'Dormant';
 
@@ -83,6 +87,11 @@ type ContactInsight = {
   seniorityBucket: string;
   locationBucket: string;
   hasReferral: boolean;
+  /** From the shared scorer — the graph does not compute these itself. */
+  pinned: boolean;
+  neverContacted: boolean;
+  /** The explanation minus its leading score, since the panel shows /100. */
+  healthDetail: string;
 };
 
 type GraphNodeDatum = {
@@ -390,36 +399,47 @@ function buildAnalysis(params: {
       .sort((left, right) => (right as Date).getTime() - (left as Date).getTime())[0] as Date | null;
 
     const responseCount = contactOutreaches.filter((outreach) => lower(outreach.responseReceived) === 'yes').length;
-    const meetingCount = contactOutreaches.filter((outreach) => outreach.meetingHeld).length;
     const referralCount = contactOutreaches.filter((outreach) => outreach.referralGenerated).length;
-    const tier = getTier(contact.relationshipTier);
-    const interactionCount = contactNotes.length + contactOutreaches.length;
-    const lastTouchDays = daysSince(lastTouch);
     const responseRate = contactOutreaches.length > 0 ? responseCount / contactOutreaches.length : 0;
-    const score = clamp(
-      18
-        + (tier === 'Strong' ? 34 : tier === 'Warm' ? 25 : tier === 'Dormant' ? 10 : 16)
-        + interactionCount * 4.5
-        + responseCount * 4
-        + meetingCount * 5
-        + referralCount * 8
-        - (lastTouchDays > 120 ? 18 : lastTouchDays > 60 ? 9 : 0),
-      10,
-      100
-    );
+
+    // Scoring is delegated to lib/health.ts — the single implementation. This
+    // block used to carry its own copy of the same arithmetic, which is fine
+    // until the two drift and one contact reads 72 on the graph and 58 on
+    // their record.
+    //
+    // Two behaviour changes come with the switch, both deliberate:
+    //
+    // 1. `contact.updatedAt` is no longer treated as a "touch". The graph used
+    //    to count it, so renaming a contact or fixing a typo in their company
+    //    reset their decay clock — an edit is not a conversation. The shared
+    //    scorer only counts real signals: lastContactedAt, capturedAt, notes
+    //    and outreach. Expect recently-edited contacts to score lower here
+    //    than they did, which is the correct number, not a regression.
+    // 2. Pinned contacts stop decaying on the graph too, which is the whole
+    //    point of pinning and previously applied only on Contact Detail.
+    const health = computeHealth({
+      contact,
+      notes: contactNotes,
+      outreaches: contactOutreaches,
+    });
 
     insights[contact.id] = {
-      score,
-      radius: clamp(9 + score * 0.14, 10, 24),
+      score: health.score,
+      radius: clamp(9 + health.score * 0.14, 10, 24),
+      // The shared scorer reports "never contacted" as a large sentinel; the
+      // graph wants the real last-touch date it already computed for display.
       lastTouch,
-      lastTouchDays,
+      lastTouchDays: health.lastTouchDays,
       responseRate,
       outreachCount: contactOutreaches.length,
       notesCount: contactNotes.length,
-      recentPulse: lastTouchDays <= 7,
+      recentPulse: health.lastTouchDays <= 7,
       seniorityBucket: getSeniorityBucket(contact),
       locationBucket: getLocationBucket(contact.location),
-      hasReferral: referralCount > 0
+      hasReferral: referralCount > 0,
+      pinned: health.pinned,
+      neverContacted: health.neverContacted,
+      healthDetail: health.detail,
     };
   });
 
@@ -433,7 +453,7 @@ function buildAnalysis(params: {
     radius: 28,
     score: 100,
     lastTouchDays: 0,
-    initials: getInitials(profile?.name || 'You'),
+    initials: profile?.name ? getInitials(profile.name) : '◎',
     targetX: 0,
     targetY: 0,
     fx: 0,
@@ -783,7 +803,7 @@ function MetricCard({
   detail: string;
 }) {
   return (
-    <div className="border border-ink bg-white p-5 shadow-[4px_4px_0px_0px_rgba(26,26,26,0.12)]">
+    <div className="border border-ink/15 rounded-card bg-white p-5">
       <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
         <Icon size={14} />
         {label}
@@ -811,6 +831,26 @@ export default function NetworkGraph() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 960, height: 440 });
+
+  // Hover state: `hoverNode` drives the tooltip content (changes rarely, on
+  // enter/leave). The refs are read every frame inside the canvas render loop
+  // so the highlight fade can ease without triggering React re-renders.
+  const [hoverNode, setHoverNode] = useState<GraphNodeDatum | null>(null);
+  const hoverIdRef = useRef<string | null>(null);
+  const highlightSetRef = useRef<Set<string> | null>(null);
+  const hoverProgressRef = useRef(0);
+  const tooltipRef = useRef<HTMLDivElement>(null);
+
+  // Entrance assembly: a one-time flourish on load/refresh where the graph
+  // builds itself — "You" first, then the industry hubs, then each cluster's
+  // contacts, with links drawing in behind their endpoints. Deliberately NOT
+  // a persistent ambient animation: this is a working tool, and someone
+  // reading it doesn't want motion competing for attention. (The landing
+  // showcase graph is the one that gets continuous life — it's decorative.)
+  const assemblyStartRef = useRef<number | null>(null);
+  const assemblyProgressRef = useRef(1);
+  // id -> the fraction of the assembly window at which that node begins.
+  const assemblyOrderRef = useRef<Record<string, number>>({});
   const [analysis, setAnalysis] = useState<GraphAnalysis>({
     nodes: [],
     links: [],
@@ -947,6 +987,67 @@ export default function NetworkGraph() {
     return false;
   };
   const graphData = useMemo(() => ({ nodes: analysis.nodes, links: analysis.links }), [analysis.nodes, analysis.links]);
+
+  // (Re)schedule the entrance assembly whenever the underlying graph data
+  // changes — i.e. on load and on refresh. Filtering by industry or search
+  // does not land here, because those only change per-node flags, not the
+  // memoized graphData identity, so the graph doesn't re-assemble every time
+  // someone clicks a lane.
+  useEffect(() => {
+    const order: Record<string, number> = {};
+    if (analysis.nodes.length === 0) {
+      assemblyOrderRef.current = order;
+      return;
+    }
+
+    // Cluster order follows the industry hubs' own order, so the assembly
+    // sweeps around the ring the same way the layout reads.
+    const clusterIndex: Record<string, number> = {};
+    let nextCluster = 0;
+    analysis.nodes.forEach((node) => {
+      if (node.kind === 'industry' && node.industryKey && !(node.industryKey in clusterIndex)) {
+        clusterIndex[node.industryKey] = nextCluster;
+        nextCluster += 1;
+      }
+    });
+
+    const CLUSTER_STEP = 0.055;
+    const perClusterCount: Record<string, number> = {};
+
+    analysis.nodes.forEach((node) => {
+      if (node.kind === 'me') {
+        order[node.id] = 0;
+        return;
+      }
+      const ci = node.industryKey != null ? (clusterIndex[node.industryKey] ?? nextCluster) : nextCluster;
+      if (node.kind === 'industry') {
+        order[node.id] = 0.08 + ci * CLUSTER_STEP;
+        return;
+      }
+      const key = String(node.industryKey ?? '_');
+      const within = perClusterCount[key] || 0;
+      perClusterCount[key] = within + 1;
+      const base = node.kind === 'gap' ? 0.4 : 0.14;
+      // Cap so the last arrival still finishes inside the window.
+      order[node.id] = Math.min(0.72, base + ci * CLUSTER_STEP + within * 0.012);
+    });
+
+    assemblyOrderRef.current = order;
+
+    const reduce =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+    if (reduce) {
+      // Respect the user's preference: no build, just the finished graph.
+      assemblyStartRef.current = null;
+      assemblyProgressRef.current = 1;
+      return;
+    }
+
+    assemblyStartRef.current = null; // set on the first frame after this
+    assemblyProgressRef.current = 0;
+  }, [graphData, analysis.nodes]);
   const isLinkFaded = (link: GraphLinkDatum) => {
     const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
     const targetId = typeof link.target === 'string' ? link.target : link.target.id;
@@ -969,17 +1070,101 @@ export default function NetworkGraph() {
       ? analysis.clusterStats.find((cluster) => cluster.key === selectedNode.industryKey) || null
       : analysis.clusterStats[0] || null;
 
+  const handleNodeHover = (node: any) => {
+    const datum = node as GraphNodeDatum | null;
+    hoverIdRef.current = datum?.id ?? null;
+    setHoverNode(datum);
+    if (datum) {
+      // Highlight = the node itself plus everyone it links to (explicit links
+      // via adjacency, plus inferred same-firm/school/industry neighbors).
+      const set = new Set<string>([datum.id]);
+      (analysis.adjacency[datum.id] || []).forEach((edge) => set.add(edge.to));
+      (analysis.inferredNeighbors[datum.id] || []).forEach((id) => set.add(id));
+      highlightSetRef.current = set;
+    } else {
+      highlightSetRef.current = null;
+    }
+    if (containerRef.current) {
+      containerRef.current.style.cursor = datum ? 'pointer' : 'grab';
+    }
+  };
+
+  // How long the whole build takes, and how much of that window a single
+  // node/link spends fading in.
+  const ASSEMBLY_MS = 1250;
+  const NODE_SPAN = 0.28;
+  const LINK_SPAN = 0.22;
+  const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+
+  /** 0 → 1 arrival progress for one node, or 1 once assembly is finished. */
+  const nodeAssemblyT = (id: string) => {
+    const p = assemblyProgressRef.current;
+    if (p >= 1) return 1;
+    const start = assemblyOrderRef.current[id] ?? 0;
+    return easeOut(Math.max(0, Math.min(1, (p - start) / NODE_SPAN)));
+  };
+
+  /** A link starts drawing only once both of its endpoints have landed. */
+  const linkAssemblyT = (link: GraphLinkDatum) => {
+    const p = assemblyProgressRef.current;
+    if (p >= 1) return 1;
+    const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+    const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+    const start =
+      Math.max(assemblyOrderRef.current[sourceId] ?? 0, assemblyOrderRef.current[targetId] ?? 0) + 0.05;
+    return easeOut(Math.max(0, Math.min(1, (p - start) / LINK_SPAN)));
+  };
+
+  const advanceHoverFrame = () => {
+    // Drive the one-time entrance assembly off the same frame callback that
+    // already runs for the hover easing — no extra rAF loop.
+    if (assemblyProgressRef.current < 1) {
+      const now = performance.now();
+      if (assemblyStartRef.current === null) assemblyStartRef.current = now;
+      assemblyProgressRef.current = Math.min(1, (now - assemblyStartRef.current) / ASSEMBLY_MS);
+    }
+
+    const target = hoverIdRef.current ? 1 : 0;
+    // Eased approach toward the target each frame — no instant alpha snap.
+    hoverProgressRef.current += (target - hoverProgressRef.current) * 0.16;
+
+    const tip = tooltipRef.current;
+    const id = hoverIdRef.current;
+    if (tip && id && graphRef.current?.graph2ScreenCoords) {
+      const node = analysis.nodeById[id];
+      if (node && typeof node.x === 'number' && typeof node.y === 'number') {
+        const screen = graphRef.current.graph2ScreenCoords(node.x, node.y);
+        tip.style.transform = `translate(${Math.round(screen.x + 14)}px, ${Math.round(screen.y - 12)}px)`;
+      }
+    }
+  };
+
   const nodeCanvasObject = (
     node: GraphNodeDatum,
     context: CanvasRenderingContext2D,
     globalScale: number
   ) => {
+    // Entrance assembly: nodes fade and scale up in cluster order. Once the
+    // build has finished `at` is a constant 1, so this costs nothing on every
+    // subsequent frame.
+    const at = nodeAssemblyT(node.id);
+    if (at <= 0.001) return;
+
     const x = node.x || 0;
     const y = node.y || 0;
-    const radius = node.radius;
+    const radius = node.radius * (0.55 + 0.45 * at);
     const selected = selectedNodeId === node.id;
-    const alpha = isNodeFaded(node) ? 0.18 : 1;
-    const labelVisible = globalScale > 1.75 || selected || node.kind === 'me' || node.kind === 'industry';
+    const hovered = hoverIdRef.current === node.id;
+    const emphasized = selected || hovered;
+    const baseAlpha = isNodeFaded(node) ? 0.18 : 1;
+    const highlightSet = highlightSetRef.current;
+    const hp = hoverProgressRef.current;
+    const alpha =
+      (highlightSet && !highlightSet.has(node.id) ? baseAlpha * (1 - 0.82 * hp) : baseAlpha) * at;
+    // Labels would pop in at full opacity over a half-formed node; hold them
+    // until the node itself has essentially landed.
+    const labelVisible =
+      at > 0.9 && (globalScale > 1.75 || emphasized || node.kind === 'me' || node.kind === 'industry');
 
     context.save();
     context.globalAlpha = alpha;
@@ -1014,7 +1199,7 @@ export default function NetworkGraph() {
       context.font = `800 ${Math.max(10, radius * 0.75)}px Inter`;
       context.fillText(node.initials, x, y);
     } else {
-    if (node.kind === 'contact' && selected) {
+    if (node.kind === 'contact' && emphasized) {
       context.fillStyle = 'rgba(97, 118, 114, 0.14)';
       context.beginPath();
       context.arc(x, y, radius + 9, 0, Math.PI * 2);
@@ -1029,7 +1214,7 @@ export default function NetworkGraph() {
     context.strokeStyle = node.ringColor;
     context.lineWidth = node.kind === 'me'
       ? 3.5
-      : selected
+      : emphasized
         ? 3.2
         : detailMode && node.kind === 'contact'
           ? (node.score >= 75 ? 3.2 : node.score >= 55 ? 2.5 : 1.7)
@@ -1088,8 +1273,9 @@ export default function NetworkGraph() {
     <div className="space-y-6 pb-12">
       <div className="border-b border-ink/20 pb-6">
         <div>
+          <AccentRule className="mb-4" />
           <h1 className="font-serif text-5xl italic font-black mb-2">Network Graph.</h1>
-          <p className="font-mono text-xs uppercase tracking-widest opacity-50">
+          <p className="font-mono text-xs uppercase tracking-widest text-muted">
             You at the center, industry lanes around you, and contacts nested inside each lane.
           </p>
         </div>
@@ -1101,7 +1287,7 @@ export default function NetworkGraph() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <MetricCard
           icon={Radar}
           label="Network Strength"
@@ -1128,7 +1314,7 @@ export default function NetworkGraph() {
         />
       </div>
 
-      <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)] space-y-4">
+      <div className="bg-white border border-ink/15 rounded-card p-5 space-y-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="relative w-full max-w-xl">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle" size={16} />
@@ -1149,7 +1335,7 @@ export default function NetworkGraph() {
               >
                 Detail Overlay
               </button>
-              <div className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-20 hidden w-72 border border-ink/15 bg-[#F8F5EF] p-3 text-ink shadow-[4px_4px_0px_0px_rgba(26,26,26,0.08)] group-hover:block group-focus-within:block">
+              <div className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-20 hidden w-72 border border-ink/15 bg-[#F8F5EF] p-3 text-ink group-hover:block group-focus-within:block">
                 <div className="mb-2 font-mono text-[10px] uppercase tracking-widest text-subtle">Signal Overlay</div>
                 <div className="space-y-2 text-xs text-subtle">
                   <div className="flex items-center gap-2">
@@ -1198,7 +1384,7 @@ export default function NetworkGraph() {
       </div>
 
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_360px]">
-        <section className="self-start bg-white border border-ink shadow-[6px_6px_0px_0px_rgba(26,26,26,0.10)] overflow-hidden">
+        <section className="self-start bg-white border border-ink/15 rounded-card overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-ink/15 bg-[#F8F5EF] p-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="font-serif text-2xl italic font-bold">Live Network Surface</h2>
@@ -1241,17 +1427,52 @@ export default function NetworkGraph() {
                   context.arc(node.x || 0, node.y || 0, node.radius + 8, 0, Math.PI * 2);
                   context.fill();
                 }}
-                linkColor={(link: GraphLinkDatum) => {
-                  if (isLinkFaded(link)) return 'rgba(26,26,26,0.07)';
-                  if (link.kind === 'backbone') return 'rgba(26,26,26,0.24)';
-                  if (link.kind === 'membership') return 'rgba(26,26,26,0.13)';
-                  return 'rgba(26,26,26,0.18)';
+                /* Painted by hand rather than via linkColor/linkWidth/
+                   linkLineDash, because the entrance assembly needs each link
+                   to *extend* from its source toward its target rather than
+                   just fade in. The colour/width/dash rules below are the same
+                   ones those three props carried, including the eased hover
+                   highlight; once assembly finishes `lt` is a constant 1 and
+                   this draws the full line exactly as before. */
+                linkCanvasObject={(link: GraphLinkDatum, context: CanvasRenderingContext2D) => {
+                  const lt = linkAssemblyT(link);
+                  if (lt <= 0.001) return;
+
+                  const src = link.source as any;
+                  const tgt = link.target as any;
+                  if (typeof src?.x !== 'number' || typeof tgt?.x !== 'number') return;
+
+                  const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+                  const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+                  const hoverId = hoverIdRef.current;
+                  const hp = hoverProgressRef.current;
+
+                  let base = link.kind === 'backbone' ? 0.24 : link.kind === 'membership' ? 0.13 : 0.18;
+                  const faded = isLinkFaded(link);
+                  if (faded) base = 0.07;
+                  if (hoverId) {
+                    const touches = sourceId === hoverId || targetId === hoverId;
+                    base = touches ? base * (1 - hp) + 0.42 * hp : base * (1 - 0.85 * hp);
+                  }
+
+                  let width = link.weight;
+                  if (faded) width = 0.5;
+                  else if (hoverId && (sourceId === hoverId || targetId === hoverId)) {
+                    width = link.weight + 1.4 * hp;
+                  }
+
+                  context.save();
+                  context.strokeStyle = `rgba(26,26,26,${base.toFixed(3)})`;
+                  context.lineWidth = width;
+                  if (link.kind === 'explicit') context.setLineDash([5, 4]);
+                  context.beginPath();
+                  context.moveTo(src.x, src.y);
+                  context.lineTo(src.x + (tgt.x - src.x) * lt, src.y + (tgt.y - src.y) * lt);
+                  context.stroke();
+                  context.restore();
                 }}
-                linkWidth={(link: GraphLinkDatum) => {
-                  if (isLinkFaded(link)) return 0.5;
-                  return link.weight;
-                }}
-                linkLineDash={(link: GraphLinkDatum) => (link.kind === 'explicit' ? [5, 4] : undefined)}
+                onNodeHover={handleNodeHover}
+                onRenderFramePre={advanceHoverFrame}
                 warmupTicks={0}
                 onNodeClick={(node) => {
                   const datum = node as GraphNodeDatum;
@@ -1283,12 +1504,31 @@ export default function NetworkGraph() {
               />
             )}
 
+            {/* Hover tooltip — name + tier before committing to a click.
+                Positioned each frame from the node's live screen coords. */}
+            {hoverNode && (
+              <div ref={tooltipRef} className="pointer-events-none absolute left-0 top-0 z-20 will-change-transform">
+                <div className="animate-fade-in bg-white border border-ink/15 rounded-card shadow-float px-3 py-2 max-w-[230px]">
+                  <div className="flex items-center gap-2">
+                    <span className="font-serif text-sm font-bold leading-tight">{hoverNode.name}</span>
+                    {hoverNode.tier && <TierBadge tier={hoverNode.tier} className="!px-1.5 !py-0.5 !text-[8px]" />}
+                  </div>
+                  {hoverNode.subtitle && (
+                    <p className="mt-1 font-mono text-[9px] uppercase tracking-widest text-muted">{hoverNode.subtitle}</p>
+                  )}
+                  {hoverNode.kind === 'contact' && (
+                    <p className="mt-1.5 font-mono text-[9px] uppercase tracking-widest text-brand">Click to open</p>
+                  )}
+                </div>
+              </div>
+            )}
+
           </div>
         </section>
 
         <aside className="space-y-4">
           {selectedNode && selectedNode.kind === 'contact' && selectedInsight ? (
-            <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+            <div className="bg-white border border-ink/15 rounded-card p-5">
               <div className="mb-3 flex items-start justify-between gap-3">
                 <div>
                   <p className="font-mono text-[10px] uppercase tracking-widest text-subtle mb-1">Selected Contact</p>
@@ -1306,7 +1546,10 @@ export default function NetworkGraph() {
               <div className="mb-4 bg-paper/50 border border-ink/10 p-4">
                 <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-subtle mb-2">
                   <span>Relationship Strength</span>
-                  <span>{Math.round(selectedInsight.score)}/100</span>
+                  <span className="flex items-center gap-1.5">
+                    {selectedInsight.pinned && <Pin size={10} className="text-brand" aria-hidden="true" />}
+                    {Math.round(selectedInsight.score)}/100
+                  </span>
                 </div>
                 <div className="h-2 bg-white border border-ink/10">
                   <div
@@ -1317,6 +1560,13 @@ export default function NetworkGraph() {
                     }}
                   />
                 </div>
+                {/* The number alone was the complaint that started the health
+                    work — "72" tells you nothing you can act on. Now that the
+                    graph shares the scorer, it can show the same one-line
+                    explanation the contact record does. */}
+                <p className="mt-2 font-mono text-[11px] leading-relaxed text-muted">
+                  {selectedInsight.healthDetail}
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3 mb-4">
@@ -1362,7 +1612,7 @@ export default function NetworkGraph() {
               </div>
             </div>
           ) : (
-            <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+            <div className="bg-white border border-ink/15 rounded-card p-5">
               <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
                 <Network size={14} />
                 Cluster Intelligence
@@ -1390,7 +1640,7 @@ export default function NetworkGraph() {
             </div>
           )}
 
-          <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+          <div className="bg-white border border-ink/15 rounded-card p-5">
             <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
               <Link2 size={14} />
               Network Opportunities
@@ -1416,7 +1666,7 @@ export default function NetworkGraph() {
             </div>
           </div>
 
-          <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+          <div className="bg-white border border-ink/15 rounded-card p-5">
             <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
               <Search size={14} />
               How To Read It
@@ -1428,7 +1678,7 @@ export default function NetworkGraph() {
             </div>
           </div>
 
-          <div className="bg-white border border-ink p-5 shadow-[6px_6px_0px_0px_rgba(26,26,26,0.08)]">
+          <div className="bg-white border border-ink/15 rounded-card p-5">
             <div className="mb-3 flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
               <AlertTriangle size={14} />
               Live Alerts
