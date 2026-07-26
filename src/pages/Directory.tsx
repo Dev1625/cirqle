@@ -687,8 +687,11 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
           
            {/* Filters */}
           <div className="flex items-center gap-2 font-mono text-[10px] uppercase">
-             <select 
-               className="bg-white border border-ink/15 rounded-card px-3 py-2 text-ink outline-none"
+             {/* outline-none previously had no replacement, so these filters
+                 were entirely invisible to keyboard focus. Same brand ring
+                 the Input primitive uses. */}
+             <select
+               className="bg-white border border-ink/15 rounded-card px-3 py-2 text-ink focus-visible:outline-none focus-visible:border-brand/40 focus-visible:ring-2 focus-visible:ring-brand/30"
                value={selectedTier}
                onChange={(e) => setSelectedTier(e.target.value)}
              >
@@ -698,7 +701,7 @@ If a field is missing, leave it as an empty string (or empty array for tags).`;
              
              {uniqueIndustries.length > 0 && (
                <select 
-                 className="bg-white border border-ink/15 rounded-card px-3 py-2 text-ink outline-none max-w-[120px] truncate"
+                 className="bg-white border border-ink/15 rounded-card px-3 py-2 text-ink max-w-[120px] truncate focus-visible:outline-none focus-visible:border-brand/40 focus-visible:ring-2 focus-visible:ring-brand/30"
                  value={selectedIndustry}
                  onChange={(e) => setSelectedIndustry(e.target.value)}
                >

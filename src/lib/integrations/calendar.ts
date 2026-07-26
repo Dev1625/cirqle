@@ -128,9 +128,16 @@ export function buildMockEvents(
     });
   }
 
-  // One all-day-ish conference today, for Event Mode auto-suggestion.
-  const confStart = atTime(now, 0, 9);
-  const confEnd = atTime(now, 0, 18);
+  // One conference-shaped event, for Event Mode auto-suggestion.
+  //
+  // Deliberately anchored around *now* rather than a fixed 09:00–18:00. A
+  // hardcoded working-day window means anyone opening the app in the evening
+  // sees no suggestion at all, and Event Mode's auto-detect — one of the more
+  // convincing things to demo — silently looks broken. The whole point of the
+  // mock is to be demoable at any hour, so the window straddles the current
+  // time and only the *displayed* hours vary.
+  const confStart = new Date(now.getTime() - 3 * 3600 * 1000);
+  const confEnd = new Date(now.getTime() + 5 * 3600 * 1000);
   events.push({
     id: 'mock-evt-conference',
     title: MOCK_CONFERENCE.title,

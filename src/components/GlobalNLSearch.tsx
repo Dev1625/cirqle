@@ -149,7 +149,11 @@ ${JSON.stringify(miniContacts)}
         <Sparkles className="absolute left-4 text-ink/40" size={18} />
         <Input
           data-shortcut="global-search"
-          className="flex-1 py-6 pl-12 pr-24 border-0 text-sm font-mono focus-visible:ring-0 placeholder:opacity-40 italic font-semibold text-ink bg-transparent"
+          // placeholder:text-muted rather than placeholder:opacity-40. This is
+          // the app's most prominent input and its prompt was sitting at about
+          // 2.9:1 on paper — DESIGN.md §7 removed exactly this pattern
+          // elsewhere for failing WCAG AA; it survived here.
+          className="flex-1 py-6 pl-12 pr-24 border-0 text-sm font-mono focus-visible:ring-0 placeholder:text-muted italic font-semibold text-ink bg-transparent"
           placeholder="Ask AI: 'Who in PE can help with marketing?'   ( / )"
           value={queryStr}
           onChange={e => setQueryStr(e.target.value)}

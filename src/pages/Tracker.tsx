@@ -239,10 +239,13 @@ export default function Tracker() {
             
             <div className="relative flex-1 xl:w-64">
                <Search className="absolute left-2 top-1/2 -translate-y-1/2 text-subtle" size={14} />
-               <input 
+               {/* outline-none had no focus replacement, and the placeholder
+                   used opacity on readable text — the exact pattern
+                   DESIGN.md §7 removed for failing WCAG AA. */}
+               <input
                  value={searchQuery}
                  onChange={e => setSearchQuery(e.target.value)}
-                 className="w-full pl-8 pr-3 py-1 bg-transparent border border-ink/15 rounded-card font-mono text-xs outline-none placeholder:text-subtle/50"
+                 className="w-full pl-8 pr-3 py-1 bg-transparent border border-ink/15 rounded-card font-mono text-xs placeholder:text-muted focus-visible:outline-none focus-visible:border-brand/40 focus-visible:ring-2 focus-visible:ring-brand/30"
                  placeholder="Search tracker..."
                />
             </div>
