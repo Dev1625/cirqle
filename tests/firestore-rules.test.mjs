@@ -214,6 +214,20 @@ await it('the owner can write their own commitments', async () => {
   await assertSucceeds(addDoc(collection(owner, `users/${OWNER}/commitments`), { text: 'Send the deck' }));
 });
 
+describe('oauthTokens/{uid} — refresh tokens are server-only');
+
+await it('the token owner cannot read their own refresh token', async () => {
+  await assertFails(getDoc(doc(owner, `oauthTokens/${OWNER}`)));
+});
+
+await it('a stranger cannot read a refresh token', async () => {
+  await assertFails(getDoc(doc(anon, `oauthTokens/${OWNER}`)));
+});
+
+await it('nobody can write a refresh token from a client', async () => {
+  await assertFails(setDoc(doc(owner, `oauthTokens/${OWNER}`), { refreshToken: 'stolen' }));
+});
+
 await env.cleanup();
 
 console.log(`\n${passed} passed, ${failed} failed`);

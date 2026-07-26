@@ -6,6 +6,10 @@ import { getFirestore, FieldValue } from 'firebase-admin/firestore';
 initializeApp();
 const db = getFirestore();
 
+// The Gmail / Calendar OAuth half. Written but never run against Google —
+// there is no OAuth client yet. See the header of that file.
+export { oauthCallback, calendarUpcoming, gmailSend, gmailPoll } from './integrations.js';
+
 // europe/us choice is not meaningful yet; pinned so it does not silently
 // change when the default does.
 setGlobalOptions({ region: 'us-central1', maxInstances: 10 });

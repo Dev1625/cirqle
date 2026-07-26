@@ -13,6 +13,21 @@ service cloud.firestore {
       }
     }
 
+    // ── OAuth refresh tokens: server-only, no exceptions ─────────────────
+    //
+    // Written and read exclusively by Cloud Functions via the Admin SDK,
+    // which bypasses these rules. Denying every client operation outright is
+    // belt-and-braces — an unmatched path is already denied by default — but
+    // it states the invariant where someone editing this file will see it.
+    //
+    // A refresh token is a standing key to a mailbox that outlives the user's
+    // password change. `users/{uid}/integrations/{provider}` is the
+    // client-readable half and holds status metadata only; nothing here is
+    // ever returned to a browser.
+    match /oauthTokens/{userId} {
+      allow read, write: if false;
+    }
+
     // ── NFC card: the one deliberately public surface ────────────────────
     //
     // A card page has to be readable by a stranger who just tapped a chip,
