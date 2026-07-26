@@ -8,3 +8,4 @@ devserver.err
 graph-page-check.png
 .env*
 !.env.example
+firebase.local.json

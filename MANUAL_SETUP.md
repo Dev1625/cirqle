@@ -46,11 +46,49 @@ npm run dev
 ```
 
 The emulator uses auth `:9099` and firestore `:8085` (set in `firebase.json`).
-If those ports are busy — a second emulator from another checkout, usually —
-change them in `firebase.json` **and** in `src/config/firebase.ts`, which has
-them hard-coded.
 
 Seed test data from the **Seed Test Data** button on the Dashboard.
+
+### Running a second emulator (two worktrees at once)
+
+Those default ports only fit one emulator. If a second checkout is already
+running one, `emulators:start` fails with "port taken" — and the trap is that
+pointing the app at the *first* emulator appears to work while silently running
+against that branch's `firestore.rules`, which fails in confusing ways.
+
+Give the second instance its own ports. Create `firebase.local.json` (already
+gitignored):
+
+```json
+{
+  "firestore": { "rules": "firestore.rules" },
+  "emulators": {
+    "auth":      { "port": 9299 },
+    "firestore": { "port": 8285 },
+    "ui":        { "enabled": true, "port": 4600 },
+    "hub":       { "port": 4402 },
+    "logging":   { "port": 4602 }
+  }
+}
+```
+
+and a matching `.env.development.local`:
+
+```
+VITE_USE_FIREBASE_EMULATOR=true
+VITE_EMULATOR_AUTH_PORT=9299
+VITE_EMULATOR_FIRESTORE_PORT=8285
+```
+
+then:
+
+```bash
+npx firebase emulators:start --config firebase.local.json --only auth,firestore
+npm run dev -- --port 3200
+```
+
+The hub and logging ports matter too — the CLI aborts if either collides, even
+though neither is a service you use directly.
 
 ---
 
