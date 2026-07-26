@@ -70,6 +70,32 @@ taskkill //F //PID <pid>
 
 Nothing else uses port 8590, so anything holding it is a leftover test run.
 
+`npm test` runs the rules suite and the Cloud Function trigger suite in turn.
+They deliberately use separate emulators (`firebase.test.json` and
+`firebase.functions-test.json`): the rules tests seed a capture document as a
+fixture, and with functions running the trigger would delete that fixture out
+from under the assertions that read it.
+
+### Deploying the capture trigger
+
+`functions/index.js` holds `onCardCapture`, which files an NFC tap into the
+owner's Directory the moment it happens instead of on their next app load.
+
+```bash
+cd functions && npm install && cd ..
+npx firebase deploy --only functions
+```
+
+This needs the Blaze (pay-as-you-go) plan — Cloud Functions are not available
+on Spark. For a personal card the volume rounds to nothing, but the plan
+change is a real prerequisite, not a formality.
+
+**You do not have to deploy it.** The client-side drain in
+`src/hooks/useCaptureDrain.ts` still works and still ships; the only
+difference is that a captured contact appears on your next app load rather
+than instantly. Both paths claim each capture in a transaction, so running
+both at once cannot produce a duplicate contact.
+
 ### Running a second emulator (two worktrees at once)
 
 Those default ports only fit one emulator. If a second checkout is already

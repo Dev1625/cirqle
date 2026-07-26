@@ -9,8 +9,9 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",
-    "test": "firebase emulators:exec --config firebase.test.json --only firestore --project cirqle-rules-test \"node tests/firestore-rules.test.mjs\"",
-    "test:rules": "npm test"
+    "test": "npm run test:rules && npm run test:functions",
+    "test:rules": "firebase emulators:exec --config firebase.test.json --only firestore --project cirqle-rules-test \"node tests/firestore-rules.test.mjs\"",
+    "test:functions": "firebase emulators:exec --config firebase.functions-test.json --only firestore,functions --project cirqle-trigger-test \"node tests/capture-trigger.test.mjs\""
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

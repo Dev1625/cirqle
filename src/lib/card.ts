@@ -9,6 +9,7 @@ import {
   deleteDoc,
   query,
   orderBy,
+  runTransaction,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
@@ -244,12 +245,24 @@ export async function listPendingCaptures(cardId: string): Promise<PendingCaptur
 }
 
 /**
- * Drains pending captures into real contacts on the owner's next app load.
+ * Drains pending captures into real contacts.
  *
- * Doing this client-side keeps the whole feature demoable with no Cloud
- * Function deployed. The production shape is a Firestore onCreate trigger
- * doing the same write server-side so the contact appears instantly rather
- * than on next load — noted in FEATURE_BUILD_REPORT.md as the upgrade path.
+ * This is now the FALLBACK path. The primary is the `onCardCapture` Cloud
+ * Function (functions/index.js), which files a tap the instant it happens
+ * instead of on the owner's next app load. This stays because the whole
+ * feature has to keep working with nothing deployed — and because if the
+ * function errors, it deliberately leaves the capture in place for this to
+ * pick up.
+ *
+ * Both paths are therefore live at once and can race on the same capture. Each
+ * *claims* it in a transaction — read the capture, bail if it is already gone,
+ * then create the contact and delete the capture in one atomic commit. First
+ * one there wins; the other finds nothing and does nothing.
+ *
+ * That is why this uses a pre-generated ref with `transaction.set` instead of
+ * the more obvious `addDoc`: addDoc cannot take part in a transaction, and
+ * without one the check and the write are separate, which is exactly the gap
+ * that produces a duplicate contact.
  */
 export async function drainCaptures(params: {
   uid: string;
@@ -262,40 +275,50 @@ export async function drainCaptures(params: {
 
   let created = 0;
   for (const capture of pending) {
-    const when = capture.capturedAt || new Date();
-    const contextBits = [
-      `Tapped your card ${when.toLocaleDateString()} at ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`,
-      params.eventName ? `at ${params.eventName}` : null,
-      params.locationHint && !params.eventName ? `near ${params.locationHint}` : null,
-    ].filter(Boolean);
+    const captureRef = doc(db, `cards/${params.cardId}/captures/${capture.id}`);
 
-    await addDoc(collection(db, `users/${params.uid}/contacts`), {
-      userId: params.uid,
-      name: capture.visitorName,
-      company: capture.visitorCompany || null,
-      role: null,
-      industry: null,
-      relationshipTier: 'Cold',
-      summary: contextBits.join(' '),
-      whyTheyMatter: capture.note || null,
-      tags: params.eventName ? [params.eventName] : [],
-      location: params.locationHint || null,
-      email: capture.visitorEmail || null,
-      linkedinUrl: null,
-      subIndustry: null,
-      lastContactedAt: when,
-      seniority: null,
-      school: null,
-      connectionSource: 'NFC card',
-      capturedVia: 'nfc-card',
-      capturedAt: when,
-      capturedEventName: params.eventName || null,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
+    const filed = await runTransaction(db, async (tx) => {
+      const snap = await tx.get(captureRef);
+      if (!snap.exists()) return false; // the Cloud Function got here first
+
+      const when = capture.capturedAt || new Date();
+      const contextBits = [
+        `Tapped your card ${when.toLocaleDateString()} at ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`,
+        params.eventName ? `at ${params.eventName}` : null,
+        params.locationHint && !params.eventName ? `near ${params.locationHint}` : null,
+      ].filter(Boolean);
+
+      const contactRef = doc(collection(db, `users/${params.uid}/contacts`));
+      tx.set(contactRef, {
+        userId: params.uid,
+        name: capture.visitorName,
+        company: capture.visitorCompany || null,
+        role: null,
+        industry: null,
+        relationshipTier: 'Cold',
+        summary: contextBits.join(' '),
+        whyTheyMatter: capture.note || null,
+        tags: params.eventName ? [params.eventName] : [],
+        location: params.locationHint || null,
+        email: capture.visitorEmail || null,
+        linkedinUrl: null,
+        subIndustry: null,
+        lastContactedAt: when,
+        seniority: null,
+        school: null,
+        connectionSource: 'NFC card',
+        capturedVia: 'nfc-card',
+        capturedAt: when,
+        capturedEventName: params.eventName || null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+
+      tx.delete(captureRef);
+      return true;
     });
 
-    await deleteDoc(doc(db, `cards/${params.cardId}/captures/${capture.id}`));
-    created += 1;
+    if (filed) created += 1;
   }
 
   return created;
