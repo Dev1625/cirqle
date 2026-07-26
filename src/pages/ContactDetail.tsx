@@ -4,13 +4,14 @@ import { doc, onSnapshot, updateDoc, collection, query, addDoc, serverTimestamp,
 import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
+import { TierBadge } from '../components/ui/TierBadge';
 import { Sparkles, ArrowLeft, Send, Calendar, MessageSquare, Tag } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
 import { Input } from '../components/ui/Input';
 import Markdown from 'react-markdown';
+import { useToast } from '../contexts/ToastContext';
 import { ContactIntelligence } from '../components/contact/ContactIntelligence';
 import { sendOutreach } from '../lib/integrations/gmail';
-import { useToast } from '../contexts/ToastContext';
 import { useComposeShortcut } from '../hooks/useKeyboardShortcuts';
 
 export default function ContactDetail() {
@@ -18,7 +19,7 @@ export default function ContactDetail() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { toast } = useToast();
-  
+
   const [contact, setContact] = useState<any>(null);
   const [notes, setNotes] = useState<any[]>([]);
   const [outreaches, setOutreaches] = useState<any[]>([]);
@@ -66,6 +67,15 @@ export default function ContactDetail() {
 
     return () => { unsub(); unsubNotes(); unsubOutreaches(); };
   }, [user, id, navigate]);
+
+  useEffect(() => {
+    if (!isDrafting) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setIsDrafting(false); setCurrentDraft(null); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isDrafting]);
 
   const handleAddNote = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -164,7 +174,7 @@ export default function ContactDetail() {
         setActiveTab('note');
      } catch (err: any) {
         console.error(err);
-        alert("Failed to process reply.");
+        toast("Failed to process that reply. Please try again.", 'error');
      } finally {
         setIsProcessing(false);
      }
@@ -207,7 +217,7 @@ export default function ContactDetail() {
         setActiveTab('note');
      } catch (err) {
         console.error(err);
-        alert("Failed to parse conversation.");
+        toast("Failed to extract tags from that conversation. Please try again.", 'error');
      } finally {
         setIsProcessing(false);
      }
@@ -270,7 +280,7 @@ Return the result in JSON format EXACTLY like this:
       setCurrentDraft(parsed);
     } catch (err) {
       console.error(err);
-      alert("Failed to generate draft. Please try again.");
+      toast("Failed to generate the draft. Please try again.", 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -351,7 +361,7 @@ Return the result in JSON format EXACTLY like this:
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
          {/* Details Panel */}
          <div className="xl:col-span-1 space-y-6">
-           <div className="bg-white border border-ink p-8">
+           <div className="bg-white border border-ink/15 rounded-card p-8">
              <div className="flex justify-between items-start mb-6">
                <div>
                  <p className="font-mono text-lg">{contact.role}</p>
@@ -360,7 +370,10 @@ Return the result in JSON format EXACTLY like this:
              </div>
              
              <div className="flex flex-col gap-2 mb-6">
-                <span className="text-xs font-mono bg-ink/5 px-2 py-1 uppercase tracking-widest inline-block w-fit">{contact.relationshipTier} connection</span>
+                <div className="flex items-center gap-2 w-fit">
+                  <TierBadge tier={contact.relationshipTier} />
+                  <span className="text-xs font-mono text-subtle uppercase tracking-widest">connection</span>
+                </div>
                 {contact.email && <span className="text-sm font-mono text-subtle">{contact.email}</span>}
              </div>
              
@@ -400,7 +413,7 @@ Return the result in JSON format EXACTLY like this:
 
          {/* Outreach Tracker & Notes */}
          <div className="xl:col-span-2">
-            <div className="bg-white border border-ink">
+            <div className="bg-white border border-ink/15 rounded-card">
                <div className="border-b border-ink/20 flex divide-x divide-ink/20 bg-paper/30 font-mono text-[10px] uppercase tracking-widest font-bold">
                  <button onClick={() => setActiveTab('note')} className={`flex-1 py-3 hover:bg-paper transition-colors ${activeTab === 'note' ? 'bg-white border-b-2 border-b-ink' : ''}`}>Quick Note</button>
                  <button onClick={() => setActiveTab('meeting')} className={`flex flex-1 items-center justify-center gap-1 py-3 hover:bg-paper transition-colors ${activeTab === 'meeting' ? 'bg-white border-b-2 border-b-ink' : ''}`}><Calendar size={12}/> Log Meeting</button>
@@ -408,7 +421,7 @@ Return the result in JSON format EXACTLY like this:
                  <button onClick={() => setActiveTab('parse')} className={`flex flex-1 items-center justify-center gap-1 py-3 hover:bg-paper transition-colors ${activeTab === 'parse' ? 'bg-white border-b-2 border-b-ink' : ''}`}><Tag size={12}/> Add AI Tags <Sparkles size={10}/></button>
                </div>
                
-               <div className="p-6 border-b border-ink/20 bg-white">
+               <div key={activeTab} className="p-6 border-b border-ink/20 bg-white animate-fade-in">
                  {/* Quick Note */}
                  {activeTab === 'note' && (
                    <form onSubmit={handleAddNote} className="flex gap-2">
@@ -436,15 +449,15 @@ Return the result in JSON format EXACTLY like this:
                         </div>
                         <div className="col-span-2">
                           <label className="block text-[10px] uppercase tracking-widest text-subtle mb-1">What was discussed?</label>
-                          <textarea required className="w-full h-20 border border-ink p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.discussed} onChange={e => setMeetingData({...meetingData, discussed: e.target.value})}></textarea>
+                          <textarea required className="w-full h-20 border border-ink/15 rounded-card p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.discussed} onChange={e => setMeetingData({...meetingData, discussed: e.target.value})}></textarea>
                         </div>
                         <div className="col-span-2 md:col-span-1">
                           <label className="block text-[10px] uppercase tracking-widest text-subtle mb-1">What was promised / Action items?</label>
-                          <textarea className="w-full h-16 border border-ink p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.promised} onChange={e => setMeetingData({...meetingData, promised: e.target.value})}></textarea>
+                          <textarea className="w-full h-16 border border-ink/15 rounded-card p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.promised} onChange={e => setMeetingData({...meetingData, promised: e.target.value})}></textarea>
                         </div>
                         <div className="col-span-2 md:col-span-1">
                           <label className="block text-[10px] uppercase tracking-widest text-subtle mb-1">Next Steps for AI</label>
-                          <textarea className="w-full h-16 border border-ink p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.nextSteps} onChange={e => setMeetingData({...meetingData, nextSteps: e.target.value})}></textarea>
+                          <textarea className="w-full h-16 border border-ink/15 rounded-card p-3 bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" value={meetingData.nextSteps} onChange={e => setMeetingData({...meetingData, nextSteps: e.target.value})}></textarea>
                         </div>
                       </div>
                       <div className="flex justify-end pt-2">
@@ -457,7 +470,7 @@ Return the result in JSON format EXACTLY like this:
                  {activeTab === 'reply' && (
                    <form onSubmit={handleProcessReply} className="space-y-4">
                       <p className="font-mono text-xs text-subtle">Paste the unstructured email or message reply. The AI will summarize it, update context, and track the outreach as responded.</p>
-                      <textarea required className="w-full h-32 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" placeholder="Hi there, thanks for reaching out. Let's chat next week..." value={replyText} onChange={e => setReplyText(e.target.value)}></textarea>
+                      <textarea required className="w-full h-32 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" placeholder="Hi there, thanks for reaching out. Let's chat next week..." value={replyText} onChange={e => setReplyText(e.target.value)}></textarea>
                       <div className="flex justify-end pt-2">
                         <Button type="submit" disabled={isProcessing} className="gap-2">
                           {isProcessing ? 'Processing AI...' : 'Process Reply'} <Sparkles size={14}/>
@@ -470,7 +483,7 @@ Return the result in JSON format EXACTLY like this:
                  {activeTab === 'parse' && (
                    <form onSubmit={handleParseConversation} className="space-y-4">
                       <p className="font-mono text-xs text-subtle">Paste conversation notes or a raw transcript. The AI will extract "They Mentioned" structured tags like events, hiring, or personal news and attach to their profile context.</p>
-                      <textarea required className="w-full h-32 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" placeholder="Spoke to them. They mentioned they are moving to NY next month and will be looking for full-stack hires in Q3..." value={conversationLog} onChange={e => setConversationLog(e.target.value)}></textarea>
+                      <textarea required className="w-full h-32 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink" placeholder="Spoke to them. They mentioned they are moving to NY next month and will be looking for full-stack hires in Q3..." value={conversationLog} onChange={e => setConversationLog(e.target.value)}></textarea>
                       <div className="flex justify-end pt-2">
                         <Button type="submit" disabled={isProcessing} className="gap-2">
                           {isProcessing ? 'Extracting...' : 'Extract Tags'} <Sparkles size={14}/>
@@ -506,7 +519,7 @@ Return the result in JSON format EXACTLY like this:
                                   <div className="font-bold flex items-center gap-2">
                                     <Send size={14} className="text-subtle" />
                                     {item.type} Outreach
-                                    <span className="bg-accent/30 text-ink px-2 py-0.5 text-[10px] uppercase tracking-widest rounded-full ml-2">
+                                    <span className="bg-accent/30 text-ink px-2 py-0.5 text-[10px] uppercase tracking-widest ml-2">
                                       {item.status}
                                     </span>
                                   </div>
@@ -544,8 +557,11 @@ Return the result in JSON format EXACTLY like this:
 
       {/* Drafting Modal overlay */}
       {isDrafting && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/30 backdrop-blur-sm">
-            <div className="bg-white border border-ink w-full max-w-2xl max-h-[90vh] flex flex-col shadow-[16px_16px_0px_0px_rgba(26,26,26,1)]">
+         <div
+           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-ink/30 backdrop-blur-sm animate-fade-in"
+           onClick={(e) => { if (e.target === e.currentTarget) { setIsDrafting(false); setCurrentDraft(null); } }}
+         >
+            <div className="animate-fade-scale-in bg-white border border-ink/15 rounded-card w-full max-w-2xl max-h-[90vh] flex flex-col shadow-float">
                <div className="p-6 border-b border-ink/20 flex justify-between items-center bg-paper/50">
                   <h2 className="font-serif text-2xl flex items-center gap-2"><Sparkles size={24} /> AI Outreach Draft</h2>
                   <button onClick={() => { setIsDrafting(false); setCurrentDraft(null); }} className="text-xl font-bold font-mono hover:text-red-500 transition-colors">×</button>
@@ -583,7 +599,7 @@ Return the result in JSON format EXACTLY like this:
                        <div>
                          <label className="text-[10px] uppercase tracking-widest text-subtle block mb-1">Body</label>
                          <textarea 
-                           className="w-full h-64 border border-ink p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
+                           className="w-full h-64 border border-ink/15 rounded-card p-3 font-mono text-sm bg-paper/50 focus:outline-none focus:ring-1 focus:ring-ink"
                            value={currentDraft.body}
                            onChange={(e) => setCurrentDraft({...currentDraft, body: e.target.value})}
                          />

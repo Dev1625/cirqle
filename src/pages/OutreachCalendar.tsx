@@ -4,6 +4,7 @@ import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { startOfMonth, endOfMonth, startOfWeek, endOfWeek, addDays, format, isSameMonth, isSameDay, startOfDay } from 'date-fns';
+import { AccentRule } from '../components/ui/AccentRule';
 
 export default function OutreachCalendar() {
   const { user } = useAuth();
@@ -102,19 +103,20 @@ export default function OutreachCalendar() {
     <div className="space-y-6">
       <div className="flex justify-between items-center pb-6 border-b border-ink/20 flex-wrap gap-4">
          <div>
+            <AccentRule className="mb-4" />
             <h1 className="font-serif text-5xl italic font-black mb-2">Outreach Calendar.</h1>
-            <p className="font-mono text-xs uppercase tracking-widest opacity-50">Pace yourself. View upcoming planned follow-ups.</p>
+            <p className="font-mono text-xs uppercase tracking-widest text-muted">Pace yourself. View upcoming planned follow-ups.</p>
          </div>
          <div className="flex gap-2">
-            <button onClick={prevMonth} className="px-4 py-2 border border-ink bg-white font-mono text-xs hover:bg-paper uppercase tracking-widest">Prev</button>
-            <div className="px-6 py-2 border border-ink bg-white font-serif font-bold text-lg flex items-center justify-center min-w-[200px]">
+            <button onClick={prevMonth} className="px-4 py-2 border border-ink/15 rounded-card bg-white font-mono text-xs hover:bg-paper uppercase tracking-widest">Prev</button>
+            <div className="px-6 py-2 border border-ink/15 rounded-card bg-white font-serif font-bold text-lg flex items-center justify-center min-w-[200px]">
                {format(currentDate, "MMMM yyyy")}
             </div>
-            <button onClick={nextMonth} className="px-4 py-2 border border-ink bg-white font-mono text-xs hover:bg-paper uppercase tracking-widest">Next</button>
+            <button onClick={nextMonth} className="px-4 py-2 border border-ink/15 rounded-card bg-white font-mono text-xs hover:bg-paper uppercase tracking-widest">Next</button>
          </div>
       </div>
 
-      <div className="bg-white border-l border-t border-ink/20 border-r border-b-0 shadow-[8px_8px_0px_0px_rgba(26,26,26,1)]">
+      <div className="bg-white border-l border-t border-ink/20 border-r border-b-0">
          <div className="grid grid-cols-7 bg-paper/50 border-b border-ink/20">
             {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
                <div key={d} className="p-3 font-mono text-[10px] uppercase tracking-widest text-center border-r border-ink/20 font-bold">{d}</div>

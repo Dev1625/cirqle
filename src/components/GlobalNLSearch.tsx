@@ -99,7 +99,7 @@ ${JSON.stringify(miniContacts)}
       
       {/* Results Panel */}
       {isOpen && (
-        <div className="bg-white border border-ink p-6 mb-4 max-h-[60vh] overflow-y-auto pointer-events-auto transform transition-all shadow-[8px_8px_0px_0px_rgba(26,26,26,1)]">
+        <div className="animate-fade-slide-up bg-white border border-ink/15 rounded-card p-6 mb-4 max-h-[60vh] overflow-y-auto pointer-events-auto shadow-float">
           <div className="flex justify-between items-start mb-6">
             <h3 className="font-serif text-2xl italic font-bold flex items-center gap-2">
               <Sparkles size={20} /> AI Synthesis
@@ -108,7 +108,7 @@ ${JSON.stringify(miniContacts)}
           </div>
           
           {explanation && (
-            <div className="bg-accent border border-ink p-4 font-mono text-xs leading-relaxed mb-6">
+            <div className="bg-accent border border-ink/15 rounded-card p-4 font-mono text-xs leading-relaxed mb-6">
               {explanation}
             </div>
           )}
@@ -118,7 +118,7 @@ ${JSON.stringify(miniContacts)}
               {results.map(c => (
                 <div key={c.id} 
                      onClick={() => { closeSearch(); navigate(`/app/directory/${c.id}`); }}
-                     className="bg-paper border border-ink p-4 flex flex-col justify-between cursor-pointer group hover:bg-ink transition-colors">
+                     className="bg-paper border border-ink/15 rounded-card p-4 flex flex-col justify-between cursor-pointer group hover:bg-ink transition-colors">
                   <div>
                     <h4 className="font-bold font-serif text-lg group-hover:text-white transition-colors">{c.name}</h4>
                     <p className="font-mono text-[10px] uppercase text-subtle mb-3 group-hover:text-white/70 transition-colors">
@@ -138,14 +138,14 @@ ${JSON.stringify(miniContacts)}
           {isSearching && (
              <div className="py-12 flex flex-col items-center justify-center text-subtle animate-pulse">
                 <Activity size={32} className="mb-4" />
-                <span className="font-mono text-[10px] uppercase tracking-widest">Traversing Network...</span>
+                <span className="font-mono text-[10px] uppercase tracking-widest">Traversing network…</span>
              </div>
           )}
         </div>
       )}
 
       {/* Input Bar */}
-      <form onSubmit={handleSearch} className="pointer-events-auto flex items-center bg-white border border-ink relative shadow-[8px_8px_0px_0px_rgba(26,26,26,1)] transition-transform focus-within:-translate-y-1 focus-within:-translate-x-1 focus-within:shadow-[12px_12px_0px_0px_rgba(26,26,26,1)]">
+      <form onSubmit={handleSearch} className="pointer-events-auto flex items-center bg-white border border-ink/15 rounded-card relative transition-[transform,box-shadow] duration-200 focus-within:-translate-y-0.5 focus-within:border-brand/30 focus-within:shadow-float">
         <Sparkles className="absolute left-4 text-ink/40" size={18} />
         <Input
           data-shortcut="global-search"
@@ -158,8 +158,13 @@ ${JSON.stringify(miniContacts)}
           {queryStr && (
              <button type="button" onClick={() => setQueryStr('')} className="p-2 text-subtle hover:text-ink"><X size={14} /></button>
           )}
-          <Button type="submit" disabled={isSearching || !queryStr} size="sm" className="bg-ink text-paper h-8 rounded-none">
-            {isSearching ? '...' : 'Search'}
+          {/* Only disabled while a search is genuinely in flight. An empty
+              field is the *resting* state, not an error — disabling on it
+              left the app's single most visible accent permanently dimmed
+              (see the disabled treatment in Button). handleSearch already
+              no-ops on an empty query. */}
+          <Button type="submit" variant="brand" disabled={isSearching} size="sm" className="h-8">
+            {isSearching ? '…' : 'Search'}
           </Button>
         </div>
       </form>

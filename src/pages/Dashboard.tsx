@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { collection, query, onSnapshot, where } from 'firebase/firestore';
 import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
-import { Sparkles, ArrowRight, RefreshCw, Database, ListTodo, Clock, Send, Users } from 'lucide-react';
+import { Sparkles, ArrowRight, RefreshCw, Database, ListTodo, Clock, Send, Users, AlertTriangle } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
 import Markdown from 'react-markdown';
 import { seedSampleData } from '../lib/seed';
 import { getFollowUpQueueItems, getRecordTime } from '../lib/tracker';
+import { TierBadge, TierDot, tierMarkerColor } from '../components/ui/TierBadge';
+import { AccentRule } from '../components/ui/AccentRule';
 import { TodaysMeetings } from '../components/dashboard/TodaysMeetings';
 import { CommitmentsPanel } from '../components/dashboard/CommitmentsPanel';
 import { DormantDigest } from '../components/dashboard/DormantDigest';
@@ -15,16 +17,27 @@ import { VoiceMemo } from '../components/voice/VoiceMemo';
 import { useCalendarEvents } from '../hooks/useCalendarEvents';
 import type { CalendarEvent } from '../lib/integrations/calendar';
 
+const BRIEF_TIMEOUT_MS = 20000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => window.setTimeout(() => reject(new Error('timeout')), ms)),
+  ]);
+}
+
 export default function Dashboard() {
   const { user } = useAuth();
   const [contacts, setContacts] = useState<any[]>([]);
   const [outreaches, setOutreaches] = useState<any[]>([]);
   const [isHovered, setIsHovered] = useState<string | null>(null);
   const [firestoreIssue, setFirestoreIssue] = useState<string | null>(null);
-  
+
   const [aiBrief, setAiBrief] = useState<string>('');
   const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
+  const [briefError, setBriefError] = useState<string | null>(null);
   const [isSeeding, setIsSeeding] = useState(false);
+  const hasAttemptedBriefRef = useRef(false);
 
   // Calendar (real or mock) drives the pre-meeting briefs and the
   // post-meeting voice-memo prompt.
@@ -74,25 +87,27 @@ export default function Dashboard() {
 
   const fetchBrief = useCallback(async (force = false) => {
     if (!user || contacts.length === 0) return;
-    
+
     const cacheKey = `ai_brief_${user.uid}`;
     const timeKey = `ai_brief_time_${user.uid}`;
-    
+
     if (!force) {
       const cached = localStorage.getItem(cacheKey);
       const cachedTime = localStorage.getItem(timeKey);
-      
+
       if (cached && cachedTime) {
          const diffHours = (Date.now() - Number(cachedTime)) / (1000 * 60 * 60);
          // Refresh automatically every 24 hours
          if (diffHours < 24) {
             setAiBrief(cached);
+            setBriefError(null);
             return;
          }
       }
     }
 
     setIsGeneratingBrief(true);
+    setBriefError(null);
     try {
       // Pick the top 15 most recent/relevant ones to avoid token limits
       const miniTracker = [...outreaches].sort((a:any, b:any) => (b.sentAt?.toMillis() || 0) - (a.sentAt?.toMillis() || 0)).slice(0, 15).map((o: any) => {
@@ -108,31 +123,43 @@ export default function Dashboard() {
       });
 
       const ai = getGemini();
-      const response = await ai.models.generateContent({
-         model: "gemini-3-flash-preview",
-         contents: `You are an AI Executive Assistant managing my CRM pipeline. 
-         Here is a slice of my tracker data: ${JSON.stringify(miniTracker)}
-         Analyze this and write a very short "This Week's Priorities" brief. 
-         Be direct, professional, and slightly conversational. Maximum 3 bullet points.
-         Focus on who to follow up with, who to thank, and what's overdue.`
-      });
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: `You are an AI Executive Assistant managing my CRM pipeline.
+          Here is a slice of my tracker data: ${JSON.stringify(miniTracker)}
+          Analyze this and write a very short "This Week's Priorities" brief.
+          Be direct, professional, and slightly conversational. Maximum 3 bullet points.
+          Focus on who to follow up with, who to thank, and what's overdue.`
+        }),
+        BRIEF_TIMEOUT_MS
+      );
       const text = response.text || '';
       setAiBrief(text);
+      setBriefError(null);
       localStorage.setItem(cacheKey, text);
       localStorage.setItem(timeKey, Date.now().toString());
     } catch (e) {
       console.error(e);
+      setBriefError(
+        e instanceof Error && e.message === 'timeout'
+          ? "This is taking longer than expected — the AI service may be unreachable right now."
+          : "Couldn't generate your priorities brief right now."
+      );
     } finally {
       setIsGeneratingBrief(false);
     }
   }, [user, contacts, outreaches]);
 
   useEffect(() => {
-    // Attempt to load the brief once contacts are ready
-    if (contacts.length > 0 && !aiBrief && !isGeneratingBrief) {
+    // Attempt to load the brief once, the first time contacts are ready —
+    // not on every Firestore snapshot change (seeding 15 contacts used to
+    // fire 15 wasted AI calls here).
+    if (contacts.length > 0 && !hasAttemptedBriefRef.current) {
+       hasAttemptedBriefRef.current = true;
        fetchBrief(false);
     }
-  }, [contacts, fetchBrief, aiBrief, isGeneratingBrief]);
+  }, [contacts, fetchBrief]);
 
   const handleSeed = async () => {
     setIsSeeding(true);
@@ -142,7 +169,9 @@ export default function Dashboard() {
        localStorage.removeItem(`ai_brief_${user?.uid}`);
        localStorage.removeItem(`ai_brief_time_${user?.uid}`);
        setAiBrief('');
+       setBriefError(null);
        setFirestoreIssue(null);
+       hasAttemptedBriefRef.current = true;
        setTimeout(() => fetchBrief(true), 1000);
     } catch(e) {
        console.error("Seeding failed", e);
@@ -158,13 +187,14 @@ export default function Dashboard() {
     <div className="space-y-8">
       <div className="flex justify-between items-start flex-wrap gap-4">
         <div>
+          <AccentRule className="mb-4" />
           <h1 className="font-serif text-5xl italic font-black mb-2">Dashboard.</h1>
-          <p className="font-mono text-xs uppercase tracking-widest opacity-50">Pulse of your network. Skim your relationships.</p>
+          <p className="font-mono text-xs uppercase tracking-widest text-muted">Pulse of your network. Skim your relationships.</p>
         </div>
         <button 
            onClick={handleSeed}
            disabled={isSeeding}
-           className="flex items-center gap-2 px-4 py-2 border border-ink bg-white hover:bg-ink hover:text-white transition-colors font-mono text-[10px] uppercase tracking-widest font-bold disabled:opacity-50"
+           className="flex items-center gap-2 px-4 py-2 border border-ink/15 rounded-card bg-white hover:bg-ink hover:text-white transition-colors font-mono text-[10px] uppercase tracking-widest font-bold disabled:opacity-50"
         >
            <Database size={14} className={isSeeding ? "animate-pulse" : ""} />
            {isSeeding ? 'Seeding...' : 'Seed Test Data'}
@@ -177,20 +207,23 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="border border-ink bg-white shadow-[8px_8px_0px_0px_rgba(26,26,26,0.12)]">
+      {/* The dashboard's hero block. Outer boundary steps up to /25 and takes
+          the one soft card lift so it reads as a surface distinct from the
+          cream page; every divider *inside* it stays at /15 or lighter. */}
+      <div className="border border-ink/25 rounded-card bg-white shadow-card overflow-hidden">
         <div className="flex items-center justify-between gap-4 border-b border-ink/15 bg-[#F8F5EF] px-6 py-5 flex-wrap">
           <div>
             <h2 className="font-serif text-3xl italic font-bold flex items-center gap-2">
-              <ListTodo size={22} /> Follow-Up Queue
+              <ListTodo size={22} className="text-brand" /> Follow-Up Queue
             </h2>
             <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-subtle">Action-first view of the people who need you next.</p>
           </div>
-          <Link to="/app/tracker?mode=queue" className="inline-flex items-center gap-2 border border-ink px-3 py-2 font-mono text-[10px] uppercase tracking-widest font-bold hover:bg-ink hover:text-white transition-colors">
+          <Link to="/app/tracker?mode=queue" className="inline-flex items-center gap-2 border border-ink/15 rounded-card px-3 py-2 font-mono text-[10px] uppercase tracking-widest font-bold hover:bg-ink hover:text-white transition-colors">
             Open Full Queue <ArrowRight size={14} />
           </Link>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 border-b border-ink/10">
+        <div className="grid grid-cols-2 lg:grid-cols-4 border-b border-ink/10">
           <DashboardQueueMetric icon={ListTodo} label="Items" value={queueItems.length} />
           <DashboardQueueMetric icon={Clock} label="Overdue" value={queueItems.filter((item) => item._actionDate && item._actionDate.getTime() < Date.now()).length} />
           <DashboardQueueMetric icon={Send} label="Replies" value={queueItems.filter((item) => item.status === 'Responded').length} />
@@ -204,12 +237,25 @@ export default function Dashboard() {
             </div>
           ) : (
             <div className="space-y-3">
-              {queueItems.slice(0, 4).map((item) => (
-                <div key={item.id} className="border border-ink/15 bg-white p-4 hover:bg-paper transition-colors flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              {queueItems.slice(0, 4).map((item, index) => (
+                <div
+                  key={item.id}
+                  style={{
+                    animationDelay: `${index * 40}ms`,
+                    borderLeftColor: tierMarkerColor(item.contact?.relationshipTier),
+                  }}
+                  className="animate-fade-slide-up rounded-card border border-l-[3px] border-ink/15 bg-white p-4 hover:bg-paper transition-colors flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between"
+                >
                   <div className="min-w-0">
-                    <Link to={`/app/directory/${item.contactId}`} className="font-serif text-xl font-bold hover:underline">
-                      {item.contact?.name || 'Unknown'}
-                    </Link>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      <Link to={`/app/directory/${item.contactId}`} className="font-serif text-xl font-bold hover:underline">
+                        {item.contact?.name || 'Unknown'}
+                      </Link>
+                      {/* Relationship strength is Cirqle's whole pitch — the
+                          queue is the first surface a user sees, so it carries
+                          the same tier signal as Directory/Tracker. */}
+                      <TierBadge tier={item.contact?.relationshipTier} />
+                    </div>
                     <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
                       <span>{item.contact?.company || 'No firm'}</span>
                       <span>{item.status}</span>
@@ -218,7 +264,7 @@ export default function Dashboard() {
                     {item.nextAction && <p className="mt-3 font-mono text-sm leading-relaxed">{item.nextAction}</p>}
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    <Link to={`/app/directory/${item.contactId}`} className="px-4 py-2 border border-ink bg-white font-mono text-xs uppercase tracking-widest hover:bg-paper transition-colors">
+                    <Link to={`/app/directory/${item.contactId}`} className="px-4 py-2 border border-ink/15 rounded-card bg-white font-mono text-xs uppercase tracking-widest hover:bg-paper transition-colors">
                       Open
                     </Link>
                     <Link to={`/app/directory/${item.contactId}`} className="px-4 py-2 bg-ink text-white font-mono text-xs uppercase tracking-widest hover:bg-zinc-800 transition-colors">
@@ -250,9 +296,11 @@ export default function Dashboard() {
       {user && <DormantDigest uid={user.uid} senderName={calendar.profile?.name || 'me'} />}
 
       {/* AI Briefing Card */}
-      <div className="bg-ink text-paper p-6 shadow-[8px_8px_0px_0px_var(--tw-shadow-color)] shadow-ink/20">
+      <div className="bg-ink text-paper rounded-card p-6">
          <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
             <h2 className="font-serif text-2xl italic font-bold flex items-center gap-2">
+               {/* On the inverted ink card the oxblood would go muddy, so the
+                   AI sparkle keeps paper here. */}
                <Sparkles size={20} /> This Week's AI Priorities
             </h2>
             <button 
@@ -267,8 +315,21 @@ export default function Dashboard() {
          
          {isGeneratingBrief ? (
             <p className="font-mono text-sm opacity-50 animate-pulse">Reading tracker data and generating your brief...</p>
+         ) : briefError ? (
+            <div className="flex flex-col gap-3 items-start">
+               <p className="font-mono text-sm leading-relaxed flex items-start gap-2 max-w-2xl">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-400" />
+                  <span>{briefError} Your data is safe — this only affects the AI summary.</span>
+               </p>
+               <button
+                  onClick={() => fetchBrief(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 transition-colors font-mono text-[10px] uppercase tracking-widest"
+               >
+                  <RefreshCw size={12} /> Try Again
+               </button>
+            </div>
          ) : aiBrief ? (
-            <div className="font-mono text-sm leading-relaxed max-w-3xl">
+            <div className="font-mono text-sm leading-relaxed max-w-3xl animate-fade-in">
                <div className="markdown-body prose-invert prose-sm">
                  <Markdown>{aiBrief}</Markdown>
                </div>
@@ -278,23 +339,26 @@ export default function Dashboard() {
                   </Link>
                </div>
             </div>
+         ) : contacts.length === 0 ? (
+            <p className="font-mono text-sm opacity-50">Add a few contacts and log some outreach to get a personalized priorities brief.</p>
          ) : (
-            <p className="font-mono text-sm opacity-50">Not enough data to calculate priorities yet.</p>
+            <p className="font-mono text-sm opacity-50 animate-pulse">Preparing your brief...</p>
          )}
       </div>
 
       {/* Skimmable AI Rolodex */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {contacts.length === 0 ? (
-           <div className="col-span-2 p-12 text-center border border-ink bg-white font-mono text-sm">
+           <div className="col-span-2 p-12 text-center border border-ink/15 rounded-card bg-white font-mono text-sm">
              Your network is empty. Drop some contacts in the Directory.
            </div>
         ) : (
-           contacts.map(c => (
-             <Link 
-               to={`/app/directory/${c.id}`} 
-               key={c.id} 
-               className="group bg-white border border-ink p-6 hover:bg-ink transition-colors relative overflow-hidden flex flex-col justify-between min-h-[160px]"
+           contacts.map((c, index) => (
+             <Link
+               to={`/app/directory/${c.id}`}
+               key={c.id}
+               style={{ animationDelay: `${Math.min(index, 10) * 30}ms` }}
+               className="animate-fade-slide-up group bg-white border border-ink/15 rounded-card p-6 hover:bg-ink transition-colors relative overflow-hidden flex flex-col justify-between min-h-[160px]"
                onMouseEnter={() => setIsHovered(c.id)}
                onMouseLeave={() => setIsHovered(null)}
              >
@@ -307,13 +371,18 @@ export default function Dashboard() {
                   </p>
                   
                   <div className="font-mono text-sm leading-relaxed group-hover:text-white/90 line-clamp-3">
-                     {c.summary || <span className="opacity-50 italic">No AI summary generated for this contact.</span>}
+                     {c.summary || <span className="text-muted group-hover:text-white/70 italic transition-colors">No AI summary generated for this contact.</span>}
                   </div>
                </div>
                
                <div className={`mt-4 pt-4 border-t ${isHovered === c.id ? 'border-white/20' : 'border-ink/10'} font-mono text-[10px] uppercase flex justify-between group-hover:text-white/50 transition-colors`}>
                   <span>Explore Connection</span>
-                  <span>{c.relationshipTier}</span>
+                  {/* A dot rather than a TierBadge chip: these cards invert to
+                      ink on hover, which a pale chip background fights. */}
+                  <span className="flex items-center gap-1.5">
+                    <TierDot tier={c.relationshipTier} />
+                    {c.relationshipTier}
+                  </span>
                </div>
              </Link>
            ))

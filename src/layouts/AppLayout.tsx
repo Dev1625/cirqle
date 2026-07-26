@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { Outlet, Link, useLocation, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { motion } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { Network, Navigation, Settings, FileText, LogOut, Menu, HelpCircle, CheckCircle2, PlayCircle } from 'lucide-react';
 import { auth, db } from '../config/firebase';
@@ -19,11 +20,14 @@ const AppLayout = () => {
   const showGlobalSearch = location.pathname !== '/app/graph';
 
   const [isInitializing, setIsInitializing] = useState(true);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  // Start collapsed on narrower viewports (tablet widths) so the fixed
+  // 256px sidebar doesn't permanently eat a third of the content area.
+  const [isSidebarOpen, setIsSidebarOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 1100);
   // Held here rather than per-page so a card tap files itself wherever the
   // owner happens to land in the app.
   const [profile, setProfile] = useState<any>(null);
-  
+
+
   // Help Menu State
   const [showHelpMenu, setShowHelpMenu] = useState(false);
   const { startTour, completedTours } = useTour();
@@ -122,6 +126,15 @@ const AppLayout = () => {
     await auth.signOut();
   };
 
+  useEffect(() => {
+    if (!showHelpMenu) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowHelpMenu(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [showHelpMenu]);
+
   if (!user) {
     return <Navigate to="/login" />;
   }
@@ -159,7 +172,7 @@ const AppLayout = () => {
       {!isSidebarOpen && (
          <button 
            onClick={() => setIsSidebarOpen(true)}
-           className="absolute top-6 left-6 z-50 p-2 bg-paper border border-ink shadow-[4px_4px_0px_0px_rgba(26,26,26,1)] hover:bg-ink hover:text-white transition-colors"
+           className="absolute top-6 left-6 z-50 p-2 bg-rail border border-ink/25 rounded-card hover:bg-ink hover:text-white transition-colors"
          >
            <Menu size={20} />
          </button>
@@ -167,7 +180,7 @@ const AppLayout = () => {
 
       {/* Sidebar */}
       {isSidebarOpen && (
-         <aside className="w-64 flex-shrink-0 border-r border-ink bg-paper p-8 z-10 flex flex-col relative transition-all duration-300">
+         <aside className="w-64 flex-shrink-0 border-r border-ink/25 bg-rail p-8 z-10 flex flex-col relative transition-all duration-300">
            <div onClick={() => setIsSidebarOpen(false)} className="cursor-pointer group relative">
              <Logo />
              <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 font-mono text-[10px] bg-ink text-white px-2 py-0.5 pointer-events-none transition-opacity">
@@ -183,11 +196,13 @@ const AppLayout = () => {
                  <li key={item.path}>
                    <Link
                      to={item.path}
-                     className={`flex items-center gap-3 group cursor-pointer transition-opacity ${item.class} ${
-                       isActive ? 'opacity-100' : 'opacity-40 hover:opacity-100'
+                     className={`flex items-center gap-3 group cursor-pointer transition-colors ${item.class} ${
+                       isActive ? 'text-brand' : 'text-muted hover:text-ink'
                      }`}
                    >
-                     <div className={`w-2 h-2 ${isActive ? 'bg-ink' : 'bg-transparent border border-ink'}`}></div>
+                     {/* Active state carries the accent rather than plain ink —
+                         one more legitimate, restrained use of --color-brand. */}
+                     <div className={`w-2 h-2 transition-colors ${isActive ? 'bg-brand' : 'bg-transparent border border-current'}`}></div>
                      <span className="font-mono text-xs uppercase tracking-widest font-bold">{item.name}</span>
                    </Link>
                    
@@ -200,8 +215,8 @@ const AppLayout = () => {
                                <li key={sub.name}>
                                  <Link
                                     to={`${item.path}${sub.query}`}
-                                    className={`flex items-center gap-2 group cursor-pointer transition-opacity ${
-                                       isSubActive ? 'opacity-100 text-ink' : 'opacity-50 hover:opacity-100'
+                                    className={`flex items-center gap-2 group cursor-pointer transition-colors ${
+                                       isSubActive ? 'text-brand' : 'text-muted hover:text-ink'
                                     }`}
                                  >
                                     <span className={`font-mono text-[10px] uppercase tracking-widest ${isSubActive ? 'font-bold' : ''}`}>
@@ -219,15 +234,15 @@ const AppLayout = () => {
            </ul>
            
            <div className="mt-auto pt-6 border-t border-ink/20 space-y-4">
-             <button 
+             <button
                onClick={() => setShowHelpMenu(true)}
-               className="flex items-center gap-3 opacity-40 hover:opacity-100 transition-opacity w-full text-left font-mono text-xs uppercase tracking-widest font-bold"
+               className="flex items-center gap-3 text-muted hover:text-ink transition-colors w-full text-left font-mono text-xs uppercase tracking-widest font-bold"
              >
                <HelpCircle size={14} /> Help & Tours
              </button>
-             <button 
+             <button
                onClick={handleLogout}
-               className="flex items-center gap-3 opacity-40 hover:opacity-100 transition-opacity w-full text-left font-mono text-xs uppercase tracking-widest font-bold"
+               className="flex items-center gap-3 text-muted hover:text-ink transition-colors w-full text-left font-mono text-xs uppercase tracking-widest font-bold"
              >
                <LogOut size={14} /> Log Out
              </button>
@@ -238,14 +253,37 @@ const AppLayout = () => {
       {/* Main Content Area */}
       <div className="flex-1 relative flex flex-col overflow-hidden">
         <main className="flex-1 overflow-auto bg-transparent">
-          <div className={`p-8 max-w-6xl mx-auto w-full transition-all ${showGlobalSearch ? 'pb-48' : 'pb-8'} ${!isSidebarOpen ? 'pt-24' : ''}`}>
-            <Outlet />
-          </div>
+          {/* Keyed on the route so each view fades + slides in on navigation
+              instead of snapping. Sub-route query changes (e.g. Tracker
+              ?mode=) are intentionally excluded so in-page tab switches
+              don't re-trigger a full page transition. */}
+          <motion.div
+            key={location.pathname}
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            className={`p-8 max-w-6xl mx-auto w-full pb-8 ${!isSidebarOpen ? 'pt-24' : ''}`}
+          >
+            <Suspense
+              fallback={
+                <div className="flex items-center justify-center py-24 font-mono text-xs uppercase tracking-widest text-muted">
+                  Loading…
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </motion.div>
         </main>
-        
+
+        {/* Reserves real layout space (rather than floating over content) so
+            scrollable content can never render underneath/behind it. */}
         {showGlobalSearch && (
-          <div className="absolute bottom-8 left-8 right-8 z-40 pointer-events-none flex justify-center tour-global-search">
-            <div className="w-full max-w-5xl pointer-events-auto">
+          /* Same tinted tone as the sidebar: the two together read as one
+             frame of chrome around the paper canvas, which is what lets the
+             white cards on that canvas come forward. */
+          <div className="shrink-0 z-40 border-t border-ink/25 bg-rail/95 backdrop-blur-sm px-8 py-4 flex justify-center tour-global-search">
+            <div className="w-full max-w-5xl">
               <GlobalSearch />
             </div>
           </div>
@@ -254,8 +292,8 @@ const AppLayout = () => {
 
       {/* Embedded Help Menu Overlay */}
       {showHelpMenu && (
-         <div className="fixed inset-0 z-50 bg-ink/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) setShowHelpMenu(false); }}>
-            <div className="bg-paper border border-ink p-8 w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-[16px_16px_0px_0px_rgba(26,26,26,1)] animate-fade-in relative">
+         <div className="fixed inset-0 z-50 bg-ink/70 backdrop-blur-sm flex items-center justify-center p-4 animate-fade-in" onClick={(e) => { if (e.target === e.currentTarget) setShowHelpMenu(false); }}>
+            <div className="bg-paper border border-ink/15 rounded-card p-8 w-full max-w-2xl max-h-[85vh] overflow-y-auto shadow-float animate-fade-scale-in relative">
                <button onClick={() => setShowHelpMenu(false)} className="absolute top-6 right-6 font-mono text-xl hover:text-red-500 transition-colors">X</button>
                <h2 className="font-serif text-3xl font-bold mb-8">Guided Tours & Help</h2>
                
@@ -272,8 +310,8 @@ const AppLayout = () => {
                                 <PlayCircle size={18} className="text-subtle group-hover:text-ink" />
                               )}
                               <div>
-                                 <h4 className={`font-mono text-xs uppercase tracking-widest font-bold ${isDone ? 'text-ink/60' : 'text-ink'}`}>{tourDef.title}</h4>
-                                 <p className="font-mono text-[10px] text-subtle mt-1">{tourDef.steps.length} steps</p>
+                                 <h4 className={`font-mono text-xs uppercase tracking-widest font-bold ${isDone ? 'text-muted' : 'text-ink'}`}>{tourDef.title}</h4>
+                                 <p className="font-mono text-[10px] text-subtle mt-1">{tourDef.steps.length} step{tourDef.steps.length === 1 ? '' : 's'}</p>
                               </div>
                            </div>
                            <button 
@@ -290,7 +328,7 @@ const AppLayout = () => {
                                   startTour(tourId);
                                }, 150);
                              }}
-                             className="text-[10px] font-mono uppercase font-bold tracking-widest border border-ink px-3 py-1 hover:bg-ink hover:text-white transition-colors"
+                             className="text-[10px] font-mono uppercase font-bold tracking-widest border border-ink/15 rounded-card px-3 py-1 hover:bg-ink hover:text-white transition-colors"
                            >
                              Run Tour
                            </button>
@@ -322,9 +360,9 @@ const AppLayout = () => {
                      <p className="font-mono text-[10px] uppercase text-subtle mt-2 opacity-70">Earlier</p>
                   </div>
                   <div className="border-l-2 border-ink/20 pl-4 py-1">
-                     <h4 className="font-serif text-lg font-bold opacity-70">Enhanced Filtering in Tracker</h4>
-                     <p className="font-mono text-xs mt-2 leading-relaxed text-ink/60">You can now stack firm filters, kanban modes, and natural language queue queries seamlessly.</p>
-                     <p className="font-mono text-[10px] uppercase text-subtle mt-2 opacity-50">Last Week</p>
+                     <h4 className="font-serif text-lg font-bold text-muted">Enhanced Filtering in Tracker</h4>
+                     <p className="font-mono text-xs mt-2 leading-relaxed text-muted">You can now stack firm filters, kanban modes, and natural language queue queries seamlessly.</p>
+                     <p className="font-mono text-[10px] uppercase text-muted mt-2">Last Week</p>
                   </div>
                </div>
             </div>
