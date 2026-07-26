@@ -49,14 +49,23 @@ export function ConnectionRow({
 }) {
   const { toast } = useToast();
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
+  const [readState, setReadState] = useState<'loading' | 'error' | 'ready'>('loading');
   const [busy, setBusy] = useState(false);
   const copy = PROVIDER_COPY[provider];
   const Icon = copy.icon;
 
   const load = useCallback(() => {
+    setReadState('loading');
     readStatus(uid, provider)
-      .then(setStatus)
-      .catch(() => setStatus(null));
+      .then((s) => { setStatus(s); setReadState('ready'); })
+      .catch((err) => {
+        // Previously a silent setStatus(null), which renders identically to
+        // "not connected" — a failed read was indistinguishable from a
+        // deliberate disconnected state, with no way to tell and no retry.
+        console.error(`[connections] could not read ${provider} status`, err);
+        setStatus(null);
+        setReadState('error');
+      });
   }, [uid, provider]);
 
   useEffect(load, [load]);
@@ -126,10 +135,25 @@ export function ConnectionRow({
             not broken.
           </p>
         )}
+
+        {readState === 'error' && (
+          <p className="mt-2.5 flex items-start gap-2 font-mono text-[11px] leading-relaxed text-subtle">
+            <TriangleAlert size={12} className="mt-0.5 shrink-0 text-red-600" />
+            Couldn't check this connection. It may still be connected — this is about reading the
+            status, not the connection itself.
+          </p>
+        )}
       </div>
 
       <div className="shrink-0">
-        {status?.connected ? (
+        {readState === 'loading' ? (
+          <span className="font-mono text-[10px] uppercase tracking-widest text-muted">Checking…</span>
+        ) : readState === 'error' ? (
+          <Button variant="outline" size="sm" onClick={load}>
+            <RotateCw size={11} className="mr-1.5" />
+            Retry
+          </Button>
+        ) : status?.connected ? (
           <div className="flex gap-2">
             {stale && (
               <Button variant="brand" size="sm" onClick={handleConnect} disabled={busy}>

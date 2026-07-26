@@ -39,8 +39,32 @@ function toDate(value: any): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+/**
+ * Firestore reads can hang rather than reject — a wedged WebChannel leaves
+ * getDoc pending indefinitely, with no error to catch. Unbounded, that left
+ * the Connections rows rendering "Connect" forever, which looks exactly like
+ * a healthy disconnected state, so a broken read was indistinguishable from
+ * a deliberate one. Every read here is bounded and failures are surfaced.
+ */
+export class StatusUnavailableError extends Error {
+  constructor(message = 'Could not read the connection status.') {
+    super(message);
+    this.name = 'StatusUnavailableError';
+  }
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new StatusUnavailableError()), ms);
+    promise.then(
+      (v) => { window.clearTimeout(timer); resolve(v); },
+      (e) => { window.clearTimeout(timer); reject(e); }
+    );
+  });
+}
+
 export async function readStatus(uid: string, provider: Provider): Promise<IntegrationStatus> {
-  const snap = await getDoc(doc(db, `users/${uid}/integrations/${provider}`));
+  const snap = await withTimeout(getDoc(doc(db, `users/${uid}/integrations/${provider}`)), 8000);
   const data = snap.exists() ? (snap.data() as any) : {};
   return {
     provider,
