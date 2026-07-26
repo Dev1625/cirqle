@@ -117,10 +117,15 @@ export function CardSetup({
       return;
     }
     setPublishing(true);
+    const isFirstPublish = !existingConfig;
     try {
       await publishCard(uid, cardId, { ...config, published: true });
       onPublished(cardId, { ...config, published: true });
-      toast('Card published. Tap-ready.', 'success');
+      // Return to the published view. Staying in the editor left the user
+      // with no confirmation the card was live and no sight of its URL or
+      // QR — the two things they came here for.
+      setRoute('choose');
+      toast(isFirstPublish ? 'Card published. Tap-ready.' : 'Card updated.', 'success');
     } catch {
       toast('Could not publish the card. Try again.', 'error');
     } finally {
@@ -294,7 +299,7 @@ export function CardSetup({
           <Input
             value={config.email || ''}
             onChange={(e) => setConfig({ ...config, email: e.target.value })}
-            placeholder="Included in the saved contact"
+            placeholder="you@company.com"
           />
         </div>
       </div>

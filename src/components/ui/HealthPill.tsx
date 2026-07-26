@@ -33,8 +33,12 @@ export function HealthPill({ health, className = '' }: { health: HealthResult; c
       } ${className}`}
     >
       <Icon size={11} aria-hidden="true" />
-      {health.score}
-      <span className="sr-only"> — {health.summary}</span>
+      {/* The visible number is hidden from assistive tech and the whole
+          summary announced instead. Marking up both meant a screen reader
+          read "34, 34 and falling…" — the score twice, because the summary
+          opens with it. */}
+      <span aria-hidden="true">{health.score}</span>
+      <span className="sr-only">Relationship health: {health.summary}</span>
     </span>
   );
 }
@@ -69,7 +73,9 @@ export function HealthPanel({
               className={health.trend === 'falling' || health.trend === 'pinned' ? 'text-brand' : 'text-muted'}
             />
           </p>
-          <p className="mt-1 font-mono text-xs leading-relaxed text-subtle">{health.summary}</p>
+          {/* detail, not summary — the score is already set in 3xl serif
+              immediately above, and summary opens by repeating it. */}
+          <p className="mt-1 font-mono text-xs leading-relaxed text-subtle">{health.detail}</p>
         </div>
 
         {onTogglePin && (

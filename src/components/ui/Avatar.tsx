@@ -58,11 +58,19 @@ export function Avatar({
   name,
   photoUrl,
   size = 'default',
+  tone,
   className = '',
 }: {
   name?: string | null;
   photoUrl?: string | null;
   size?: 'sm' | 'default' | 'lg' | 'xl';
+  /**
+   * Overrides the name-derived colour. Used on the public card page, where
+   * the owner has explicitly chosen an accent and the largest circular
+   * element on the page ignoring that choice looked like a bug.
+   * Everywhere else the deterministic per-name tone is what you want.
+   */
+  tone?: string;
   className?: string;
 }) {
   const dimension = SIZES[size] || SIZES.default;
@@ -80,7 +88,7 @@ export function Avatar({
   return (
     <span
       aria-hidden="true"
-      style={{ backgroundColor: avatarTone(name) }}
+      style={{ backgroundColor: tone || avatarTone(name) }}
       className={`${dimension} inline-flex shrink-0 items-center justify-center rounded-full font-mono font-bold uppercase tracking-widest text-paper ${className}`}
     >
       {getInitials(name)}

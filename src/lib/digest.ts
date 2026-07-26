@@ -108,6 +108,19 @@ function buildReason(
   everReplied: boolean,
   whyTheyMatter?: string | null
 ): string {
+  // Never-contacted is a genuinely different situation from "quiet for a
+  // while", and it must be handled before any day count is formatted —
+  // lastTouchDays is a sentinel here, not a real measurement.
+  if (health.neverContacted) {
+    if (whyTheyMatter) {
+      return `Never actually contacted. You wrote: "${String(whyTheyMatter).slice(0, 80)}"`;
+    }
+    if (tier === 'Strong') {
+      return 'Marked a strong tie, but there is no contact on record at all. Worth an opener.';
+    }
+    return 'In your network, never contacted. Worth an opener, or let it go.';
+  }
+
   if (whyTheyMatter) {
     return `${health.lastTouchDays} days quiet. You wrote: "${String(whyTheyMatter).slice(0, 80)}"`;
   }
@@ -128,20 +141,27 @@ export async function draftRevivalNote(params: {
   reason: string;
   whyTheyMatter?: string | null;
   lastTouchDays: number;
+  neverContacted?: boolean;
   senderName: string;
 }): Promise<string> {
-  const prompt = `Write a short re-engagement message to ${params.contactName}${
+  // Same sentinel trap as buildReason: never send "999 days" to the model,
+  // or it will dutifully write a note apologising for a three-year silence.
+  const timingLine = params.neverContacted
+    ? '- They are in the sender\'s network but have never actually been contacted. This is a first approach, not a re-engagement.'
+    : `- It has been about ${params.lastTouchDays} days since last contact.`;
+
+  const prompt = `Write a short ${params.neverContacted ? 'opening' : 're-engagement'} message to ${params.contactName}${
     params.role ? `, ${params.role}` : ''
   }${params.company ? ` at ${params.company}` : ''}.
 
 Context:
-- It has been about ${params.lastTouchDays} days since last contact.
+${timingLine}
 - Why they matter to the sender: ${params.whyTheyMatter || '(not recorded)'}
 - Sender's name: ${params.senderName}
 
 Rules:
 - 3-4 sentences, maximum 80 words.
-- Acknowledge the gap once, lightly, without apologising twice or grovelling.
+- ${params.neverContacted ? 'Do not reference any past conversation or gap — there has not been one.' : 'Acknowledge the gap once, lightly, without apologising twice or grovelling.'}
 - Give one concrete reason for reaching out now. If you have nothing specific, ask a genuine question rather than inventing a pretext.
 - No "hope this finds you well", no "just circling back", no "touching base".
 - Sound like a person who has been busy, not like a CRM.

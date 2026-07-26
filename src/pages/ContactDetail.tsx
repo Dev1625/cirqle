@@ -364,8 +364,16 @@ Return the result in JSON format EXACTLY like this:
            <div className="bg-white border border-ink/15 rounded-card p-8">
              <div className="flex justify-between items-start mb-6">
                <div>
-                 <p className="font-mono text-lg">{contact.role}</p>
-                 <p className="font-mono text-subtle">{contact.company} • {contact.location}</p>
+                 {contact.role && <p className="font-mono text-lg">{contact.role}</p>}
+                 {/* Joined rather than interpolated with a literal bullet:
+                     contacts captured from an NFC tap have no role, company
+                     or location yet, and the old markup rendered a bare
+                     "•" hanging under the name. */}
+                 {(contact.company || contact.location) && (
+                   <p className="font-mono text-subtle">
+                     {[contact.company, contact.location].filter(Boolean).join(' • ')}
+                   </p>
+                 )}
                </div>
              </div>
              

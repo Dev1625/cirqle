@@ -143,7 +143,7 @@ export default function PublicCard() {
 
         <div className={compact ? 'p-7' : 'p-9'}>
           <div className="flex items-start gap-4">
-            <Avatar name={card.name} size={compact ? 'lg' : 'xl'} />
+            <Avatar name={card.name} size={compact ? 'lg' : 'xl'} tone={accent} />
             <div className="min-w-0 flex-1 pt-1">
               <h1 className={`font-serif ${compact ? 'text-3xl' : 'text-4xl'} font-black italic leading-tight`}>
                 {card.name || 'Unnamed'}

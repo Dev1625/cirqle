@@ -37,9 +37,25 @@ export interface HealthResult {
   trend: Trend;
   pinned: boolean;
   lastTouchDays: number;
+  /**
+   * True when there is no contact on record at all.
+   *
+   * Exposed rather than leaving callers to compare lastTouchDays against the
+   * sentinel: the first version of the dormant digest rendered "a strong tie
+   * gone quiet for 999 days", because 999 is an internal stand-in for
+   * infinity and it escaped straight into user-facing copy. Anything
+   * formatting a day count must branch on this first.
+   */
+  neverContacted: boolean;
   reasons: HealthReason[];
-  /** One dry sentence, ready to render. */
+  /** One dry sentence, ready to render. Opens with the score. */
   summary: string;
+  /**
+   * The same sentence without the leading score, for surfaces that already
+   * show the number in large type. HealthPanel rendered a 3xl "34" directly
+   * above "34 and steady — last contact today", which read as a stutter.
+   */
+  detail: string;
 }
 
 const NEVER = 999;
@@ -141,9 +157,21 @@ export function computeHealth(params: {
     trend,
     pinned,
     lastTouchDays,
+    neverContacted: lastTouchDays >= NEVER,
     reasons,
     summary: buildSummary(score, trend, lastTouchDays),
+    detail: buildDetail(trend, lastTouchDays),
   };
+}
+
+/** The summary minus its leading score, sentence-cased. */
+export function buildDetail(trend: Trend, lastTouchDays: number): string {
+  if (trend === 'pinned') return "Held. Pinned, so it won't decay.";
+  if (lastTouchDays >= NEVER) return 'No contact on record yet.';
+  const when = lastTouchDays === 0 ? 'today' : `${lastTouchDays} day${lastTouchDays === 1 ? '' : 's'} ago`;
+  if (trend === 'falling') return `Falling — last contact ${when}.`;
+  if (trend === 'rising') return `Rising — last contact ${when}.`;
+  return `Steady — last contact ${when}.`;
 }
 
 /**

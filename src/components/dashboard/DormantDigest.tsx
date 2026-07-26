@@ -64,7 +64,15 @@ export function DormantDigest({ uid, senderName }: { uid: string; senderName: st
             Worth reviving.
           </h2>
           <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted">
-            {digest ? `${digest.dormantCount} gone quiet · top ${digest.items.length}` : 'Scanning your network'}
+            {/* "0 gone quiet · top 0" is not a sentence anyone wants to read,
+                and showing "top N" when N equals the total is noise. */}
+            {!digest
+              ? 'Scanning your network'
+              : digest.dormantCount === 0
+                ? 'Nothing slipping'
+                : digest.items.length < digest.dormantCount
+                  ? `${digest.dormantCount} gone quiet · top ${digest.items.length}`
+                  : `${digest.dormantCount} gone quiet`}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -120,6 +128,7 @@ function DigestRow({
         role: item.role,
         reason: item.reason,
         lastTouchDays: item.health.lastTouchDays,
+        neverContacted: item.health.neverContacted,
         senderName,
       });
       setDraft(text);

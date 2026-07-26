@@ -56,6 +56,28 @@ export function TodaysMeetings({
   const meetings = useMemo(() => upcomingMeetings(events).slice(0, 4), [events]);
   const justEnded = useMemo(() => justEndedMeetings(events).slice(0, 1), [events]);
 
+  // The empty state has to name the *actual* blocker. Telling someone with
+  // an empty Directory to go connect a calendar sends them to fix the one
+  // thing that isn't the problem — a brief needs a contact to be about.
+  const emptyCopy =
+    contacts.length === 0
+      ? {
+          emptyLine: 'No contacts yet, so there is nobody to brief you on. Add a few and meetings with them show up here.',
+          emptyAction: (
+            <Link to="/app/directory">
+              <Button variant="outline" size="sm">Add contacts</Button>
+            </Link>
+          ),
+        }
+      : {
+          emptyLine: 'Nothing on the calendar with anyone in your network. Briefs show up here when there is.',
+          emptyAction: (
+            <Link to="/app/settings">
+              <Button variant="outline" size="sm">Check calendar connection</Button>
+            </Link>
+          ),
+        };
+
   return (
     <section className="rounded-card border border-ink/25 bg-white">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-ink/15 px-6 py-4">
@@ -82,12 +104,7 @@ export function TodaysMeetings({
           onRetry={onRefresh}
           loadingLine="Checking your calendar…"
           emptyIcon={CalendarClock}
-          emptyLine="Nothing on the calendar with anyone in your network. Briefs show up here when there is."
-          emptyAction={
-            <Link to="/app/settings">
-              <Button variant="outline" size="sm">Connect a calendar</Button>
-            </Link>
-          }
+          {...emptyCopy}
         >
           <div className="space-y-3">
             {justEnded.map((event) => (
