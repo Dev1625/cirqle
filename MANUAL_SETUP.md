@@ -49,6 +49,27 @@ The emulator uses auth `:9099` and firestore `:8085` (set in `firebase.json`).
 
 Seed test data from the **Seed Test Data** button on the Dashboard.
 
+### Running the security rules tests
+
+```bash
+npm test
+```
+
+Wraps `tests/firestore-rules.test.mjs` in `firebase emulators:exec`, so the
+emulator starts and stops on its own — no manual step. It uses its own ports
+(`firebase.test.json`) so it never collides with a dev emulator.
+
+**If it fails with "Could not start Firestore Emulator, port taken":** on
+Windows the emulator's Java process sometimes outlives `emulators:exec`,
+despite the CLI reporting a clean shutdown. Find and kill the stale one:
+
+```bash
+netstat -ano | grep ":8590" | grep LISTENING   # note the PID
+taskkill //F //PID <pid>
+```
+
+Nothing else uses port 8590, so anything holding it is a leftover test run.
+
 ### Running a second emulator (two worktrees at once)
 
 Those default ports only fit one emulator. If a second checkout is already
