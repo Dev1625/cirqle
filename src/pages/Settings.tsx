@@ -14,6 +14,7 @@ import { Input } from '../components/ui/Input';
 import { Upload } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { AccentRule } from '../components/ui/AccentRule';
+import { DevModePanel } from '../components/DevModePanel';
 
 export default function Settings() {
   const { user } = useAuth();
@@ -169,6 +170,10 @@ export default function Settings() {
            </div>
         </form>
       </div>
+
+      {/* Sits outside the profile form deliberately — it saves nothing and
+          submits nothing, it just looks at what the app is doing. */}
+      <DevModePanel />
     </div>
   );
 }

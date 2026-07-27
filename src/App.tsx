@@ -31,8 +31,11 @@ export default function App() {
       <AuthProvider>
         <ToastProvider>
           <ConfirmProvider>
-            <TourProvider>
-              <BrowserRouter>
+            {/* TourProvider sits *inside* BrowserRouter: tours navigate
+                between pages themselves (see the `route` on each step), which
+                means they need the router context. */}
+            <BrowserRouter>
+              <TourProvider>
                 <Routes>
                   <Route path="/" element={<LandingLayout />}>
                     <Route index element={<LandingPage />} />
@@ -51,8 +54,8 @@ export default function App() {
                     <Route path="settings" element={<Settings />} />
                   </Route>
                 </Routes>
-              </BrowserRouter>
-            </TourProvider>
+              </TourProvider>
+            </BrowserRouter>
           </ConfirmProvider>
         </ToastProvider>
       </AuthProvider>

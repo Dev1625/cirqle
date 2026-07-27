@@ -170,6 +170,46 @@ body::before {
   }
 }
 
+/* ── Landing page: the drifting follow-up queue row ─────────────────────
+   One copy of the list is translated out to the left while its duplicate
+   takes its place, so the row loops without a seam. -50% is exactly one
+   copy's width *only* because the cards carry their own right margin rather
+   than the track carrying a gap (see QueueMarquee). Paused on hover so a
+   card can be read; the prefers-reduced-motion block above stops it. */
+@keyframes marquee-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
+
+.marquee-track {
+  animation: marquee-drift 45s linear infinite;
+  will-change: transform;
+}
+
+.marquee-mask:hover .marquee-track,
+.marquee-mask:focus-within .marquee-track {
+  animation-play-state: paused;
+}
+
+/* Softens both cut edges so cards dissolve out of frame instead of being
+   sliced by an invisible boundary. */
+.marquee-mask {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--marquee-fade, 4rem),
+    #000 calc(100% - var(--marquee-fade, 4rem)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--marquee-fade, 4rem),
+    #000 calc(100% - var(--marquee-fade, 4rem)),
+    transparent 100%
+  );
+}
+
 /* Scrollbar styling for a premium feel */
 ::-webkit-scrollbar {
   width: 8px;

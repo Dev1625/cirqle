@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { Sparkles, ArrowRight, RefreshCw, Database, ListTodo, Clock, Send, Users, AlertTriangle } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
+import { AI_FEATURES } from '../lib/aiDebug';
 import Markdown from 'react-markdown';
 import { seedSampleData } from '../lib/seed';
 import { getFollowUpQueueItems, getRecordTime } from '../lib/tracker';
@@ -111,10 +112,10 @@ export default function Dashboard() {
         };
       });
 
-      const ai = getGemini();
+      const ai = getGemini('dashboardBrief');
       const response = await withTimeout(
         ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+          model: AI_FEATURES.dashboardBrief.model,
           contents: `You are an AI Executive Assistant managing my CRM pipeline.
           Here is a slice of my tracker data: ${JSON.stringify(miniTracker)}
           Analyze this and write a very short "This Week's Priorities" brief.
@@ -196,6 +197,60 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* AI Briefing Card.
+          This is the first thing on the dashboard by design: it is the one
+          block that tells you what to *do* today, so it should be read before
+          the queue it summarises rather than after it. */}
+      <div className="bg-ink text-paper rounded-card p-6">
+         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
+            <h2 className="font-serif text-2xl italic font-bold flex items-center gap-2">
+               {/* On the inverted ink card the oxblood would go muddy, so the
+                   AI sparkle keeps paper here. */}
+               <Sparkles size={20} /> This Week's AI Priorities
+            </h2>
+            <button
+               onClick={() => fetchBrief(true)}
+               disabled={isGeneratingBrief}
+               className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 transition-colors font-mono text-[10px] uppercase tracking-widest disabled:opacity-50"
+            >
+               <RefreshCw size={12} className={isGeneratingBrief ? "animate-spin" : ""} />
+               Refresh Brief
+            </button>
+         </div>
+
+         {isGeneratingBrief ? (
+            <p className="font-mono text-sm opacity-50 animate-pulse">Reading tracker data and generating your brief...</p>
+         ) : briefError ? (
+            <div className="flex flex-col gap-3 items-start">
+               <p className="font-mono text-sm leading-relaxed flex items-start gap-2 max-w-2xl">
+                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-400" />
+                  <span>{briefError} Your data is safe — this only affects the AI summary.</span>
+               </p>
+               <button
+                  onClick={() => fetchBrief(true)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 transition-colors font-mono text-[10px] uppercase tracking-widest"
+               >
+                  <RefreshCw size={12} /> Try Again
+               </button>
+            </div>
+         ) : aiBrief ? (
+            <div className="font-mono text-sm leading-relaxed max-w-3xl animate-fade-in">
+               <div className="markdown-body prose-invert prose-sm">
+                 <Markdown>{aiBrief}</Markdown>
+               </div>
+               <div className="mt-4 pt-4 border-t border-paper/20">
+                  <Link to="/app/tracker" className="inline-flex items-center gap-2 text-xs uppercase tracking-widest font-bold hover:opacity-70 transition-opacity">
+                     Open Tracker <ArrowRight size={14} />
+                  </Link>
+               </div>
+            </div>
+         ) : contacts.length === 0 ? (
+            <p className="font-mono text-sm opacity-50">Add a few contacts and log some outreach to get a personalized priorities brief.</p>
+         ) : (
+            <p className="font-mono text-sm opacity-50 animate-pulse">Preparing your brief...</p>
+         )}
+      </div>
+
       {/* The dashboard's hero block. Outer boundary steps up to /25 and takes
           the one soft card lift so it reads as a surface distinct from the
           cream page; every divider *inside* it stays at /15 or lighter. */}
@@ -265,57 +320,6 @@ export default function Dashboard() {
             </div>
           )}
         </div>
-      </div>
-
-      {/* AI Briefing Card */}
-      <div className="bg-ink text-paper rounded-card p-6">
-         <div className="flex justify-between items-center mb-4 flex-wrap gap-4">
-            <h2 className="font-serif text-2xl italic font-bold flex items-center gap-2">
-               {/* On the inverted ink card the oxblood would go muddy, so the
-                   AI sparkle keeps paper here. */}
-               <Sparkles size={20} /> This Week's AI Priorities
-            </h2>
-            <button 
-               onClick={() => fetchBrief(true)}
-               disabled={isGeneratingBrief}
-               className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 transition-colors font-mono text-[10px] uppercase tracking-widest disabled:opacity-50"
-            >
-               <RefreshCw size={12} className={isGeneratingBrief ? "animate-spin" : ""} />
-               Refresh Brief
-            </button>
-         </div>
-         
-         {isGeneratingBrief ? (
-            <p className="font-mono text-sm opacity-50 animate-pulse">Reading tracker data and generating your brief...</p>
-         ) : briefError ? (
-            <div className="flex flex-col gap-3 items-start">
-               <p className="font-mono text-sm leading-relaxed flex items-start gap-2 max-w-2xl">
-                  <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-400" />
-                  <span>{briefError} Your data is safe — this only affects the AI summary.</span>
-               </p>
-               <button
-                  onClick={() => fetchBrief(true)}
-                  className="flex items-center gap-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 transition-colors font-mono text-[10px] uppercase tracking-widest"
-               >
-                  <RefreshCw size={12} /> Try Again
-               </button>
-            </div>
-         ) : aiBrief ? (
-            <div className="font-mono text-sm leading-relaxed max-w-3xl animate-fade-in">
-               <div className="markdown-body prose-invert prose-sm">
-                 <Markdown>{aiBrief}</Markdown>
-               </div>
-               <div className="mt-4 pt-4 border-t border-paper/20">
-                  <Link to="/app/tracker" className="inline-flex items-center gap-2 text-xs uppercase tracking-widest font-bold hover:opacity-70 transition-opacity">
-                     Open Tracker <ArrowRight size={14} />
-                  </Link>
-               </div>
-            </div>
-         ) : contacts.length === 0 ? (
-            <p className="font-mono text-sm opacity-50">Add a few contacts and log some outreach to get a personalized priorities brief.</p>
-         ) : (
-            <p className="font-mono text-sm opacity-50 animate-pulse">Preparing your brief...</p>
-         )}
       </div>
 
       {/* Skimmable AI Rolodex */}

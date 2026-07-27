@@ -7,6 +7,7 @@ import { Input } from '../components/ui/Input';
 import { TierBadge } from '../components/ui/TierBadge';
 import { Plus, Search, Sparkles, Trash2, Upload } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
+import { AI_FEATURES } from '../lib/aiDebug';
 import Markdown from 'react-markdown';
 import { useToast } from '../contexts/ToastContext';
 import { useConfirm } from '../contexts/ConfirmContext';
@@ -211,7 +212,7 @@ function buildImportedContact(row: Record<string, string>): ImportedContact | nu
 async function parseContactsWithAi(rows: string[][]) {
   const headers = rows[0];
   const dataRows = rows.slice(1);
-  const ai = getGemini();
+  const ai = getGemini('csvImport');
   const contacts: ImportedContact[] = [];
   const chunkSize = 25;
 
@@ -229,7 +230,7 @@ async function parseContactsWithAi(rows: string[][]) {
     });
 
     const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash-lite",
+      model: AI_FEATURES.csvImport.model,
       contents: `You are importing contacts into a professional CRM. Convert these CSV rows into clean contact objects even if the column names are unusual, abbreviated, or messy.
 
 Return JSON only in this exact shape:
@@ -337,7 +338,7 @@ export default function Directory() {
     if (!pasteText.trim()) return;
     setIsParsing(true);
     try {
-      const ai = getGemini();
+      const ai = getGemini('contactParse');
       const prompt = `Parse the following text into structured contact information for a professional CRM.
 Text: ${pasteText}
 
@@ -357,7 +358,7 @@ Extract details into JSON. Use these keys exactly:
 If a field is missing, leave it as an empty string (or empty array for tags).`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash-lite",
+        model: AI_FEATURES.contactParse.model,
         contents: prompt,
         config: {
           responseMimeType: "application/json",

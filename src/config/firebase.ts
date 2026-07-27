@@ -16,6 +16,11 @@ if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === 'true' && typeof window !== '
     globalAny.__CIRQLE_EMULATOR_CONNECTED__ = true;
     connectAuthEmulator(auth, 'http://127.0.0.1:9099', { disableWarnings: true });
     connectFirestoreEmulator(db, '127.0.0.1', 8085);
+    // Emulator-only handle so local tooling (and manual console work) can sign
+    // a throwaway fixture user in without driving the login form. Guarded by
+    // the same flag as the emulator wiring itself, so it cannot exist in any
+    // build that talks to the real project.
+    globalAny.__CIRQLE_DEV__ = { auth, db };
   }
 }
 

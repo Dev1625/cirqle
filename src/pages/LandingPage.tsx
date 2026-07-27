@@ -1,10 +1,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { motion, useReducedMotion, useScroll, useTransform, type Variants } from 'motion/react';
-import { ArrowRight, Sparkles, Send, ListTodo, Network, Nfc, Mail, CalendarDays, Compass } from 'lucide-react';
+import { motion, useMotionValue, useReducedMotion, useTransform, type Variants } from 'motion/react';
+import { ArrowRight, Sparkles, Send, ListTodo, Network, Nfc, Mail, CalendarDays, Compass, Search } from 'lucide-react';
 import { CountUp } from '../components/landing/CountUp';
 import { Reveal, RevealGroup } from '../components/landing/motion';
 import { LandingGraph } from '../components/landing/LandingGraph';
+import { Logo, LogoMark } from '../components/Logo';
 
 const HOUSE_EASE = [0.22, 1, 0.36, 1] as const;
 // Ease-out-back — the single deliberate overshoot, used only on the hero's
@@ -211,23 +212,7 @@ export default function LandingPage() {
           </RevealGroup>
         </div>
 
-        {/* row deliberately wider than the viewport — last card runs off-frame */}
-        <RevealGroup className="mt-12 flex gap-4 px-6 md:px-8 max-w-none overflow-visible" stagger={0.09}>
-          {QUEUE.map((q) => (
-            <Reveal key={q.name} className="shrink-0 w-[290px]">
-              <div className="h-full bg-white border border-ink/15 rounded-card p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="font-serif text-lg font-bold">{q.name}</span>
-                  <span className={`rounded-card px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest font-bold ${q.tone}`}>
-                    {q.status}
-                  </span>
-                </div>
-                <p className="font-mono text-[10px] uppercase tracking-widest text-muted">{q.firm}</p>
-                <p className="mt-4 font-mono text-sm leading-relaxed text-subtle">{q.action}</p>
-              </div>
-            </Reveal>
-          ))}
-        </RevealGroup>
+        <QueueMarquee />
       </section>
 
       {/* ── Network graph showcase ─────────────────────────────── */}
@@ -269,9 +254,17 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Ask the network ───────────────────────────────────────
+          The original idea, and still the one that carries the product:
+          plain-English questions answered against your own directory. */}
+      <AskNetworkSection />
+
+      {/* The card ships, so it sits above the roadmap divider with the rest
+          of the built features — no Planned marker. */}
+      <NfcCardSection />
+
       {/* ── Roadmap: everything below here is explicitly NOT shipped ─── */}
       <RoadmapIntro />
-      <NfcCardSection />
       <RoadmapBeat
         icon={Mail}
         title="Your inbox, already filed."
@@ -319,6 +312,58 @@ export default function LandingPage() {
   );
 }
 
+/**
+ * The follow-up queue row, drifting.
+ *
+ * The copy says "the list keeps going" — a static row that merely ran off the
+ * right edge only implied that. Now it actually keeps going: the track holds
+ * two identical copies of the queue and translates by exactly one copy's
+ * width, so the loop is seamless and the row reads as endless rather than as
+ * five cards that happen to be cropped.
+ *
+ * Deliberately slow (~34px/s): this is ambient movement to be caught out of
+ * the corner of your eye while reading the heading, not a carousel demanding
+ * attention. It pauses on hover so a card can actually be read, and the
+ * global prefers-reduced-motion rule in index.css stops it outright.
+ *
+ * Spacing is `mr-4` on each card rather than `gap-4` on the track: with a gap,
+ * one copy's advance (5 cards + 5 gaps) and half the track width (10 cards +
+ * 9 gaps) differ by exactly one gap, and the loop visibly jumps every pass.
+ */
+function QueueMarquee() {
+  const track = [...QUEUE, ...QUEUE];
+
+  return (
+    <Reveal className="mt-12" y={24}>
+      <div
+        className="marquee-mask overflow-hidden"
+        style={{ ['--marquee-fade' as any]: '4rem' }}
+      >
+        <div className="marquee-track flex w-max">
+          {track.map((q, i) => (
+            <div
+              key={`${q.name}-${i}`}
+              aria-hidden={i >= QUEUE.length ? true : undefined}
+              className="mr-4 w-[290px] shrink-0"
+            >
+              <div className="h-full bg-white border border-ink/15 rounded-card p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-serif text-lg font-bold">{q.name}</span>
+                  <span className={`rounded-card px-2 py-0.5 font-mono text-[9px] uppercase tracking-widest font-bold ${q.tone}`}>
+                    {q.status}
+                  </span>
+                </div>
+                <p className="font-mono text-[10px] uppercase tracking-widest text-muted">{q.firm}</p>
+                <p className="mt-4 font-mono text-sm leading-relaxed text-subtle">{q.action}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </Reveal>
+  );
+}
+
 function FeatureBeat({
   eyebrow,
   icon: Icon,
@@ -360,6 +405,119 @@ function FeatureBeat({
   );
 }
 
+/**
+ * Ask the network — natural-language search over your own directory.
+ *
+ * This is the beat the whole product grew out of, so it gets a full-bleed
+ * centred treatment rather than the standard two-column FeatureBeat: the
+ * question sits alone at the top, the way it does in the app, and the answer
+ * assembles underneath it.
+ */
+function AskNetworkSection() {
+  return (
+    <section className="snap-section py-14 md:py-16 border-t border-ink/15 bg-white/40">
+      <div className="max-w-4xl mx-auto px-6 md:px-8 w-full">
+        <RevealGroup className="text-center">
+          <Reveal>
+            <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-brand mb-4 flex items-center justify-center gap-2">
+              <Search size={13} /> Ask your network
+            </p>
+          </Reveal>
+          <Reveal>
+            <h2 className="font-serif text-3xl md:text-5xl italic font-bold tracking-tight text-balance mx-auto max-w-[20ch]">
+              Ask a question. Get people, not rows.
+            </h2>
+          </Reveal>
+          <Reveal>
+            <p className="mt-5 font-mono text-sm leading-relaxed text-subtle max-w-[58ch] mx-auto">
+              Type the thing you'd actually say out loud. No filters to stack, no tags to
+              remember, no query language — just the handful of people who match, and why.
+            </p>
+          </Reveal>
+          <Reveal>
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
+              {ASK_EXAMPLES.map((q) => (
+                <span
+                  key={q}
+                  className="inline-block rounded-card border border-ink/15 bg-paper/70 px-3 py-1.5 font-mono text-[10px] text-muted"
+                >
+                  “{q}”
+                </span>
+              ))}
+            </div>
+          </Reveal>
+        </RevealGroup>
+
+        <Reveal y={24} className="mt-10">
+          <AskVisual />
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * A still of the global search bar and the synthesis panel it opens. Solid
+ * hairlines and the real oxblood accent — this one ships, so it uses the
+ * shipped-feature visual language, not the dashed roadmap one.
+ */
+function AskVisual() {
+  return (
+    <div className="mx-auto max-w-2xl">
+      {/* The query bar, mirroring the in-app GlobalSearch chrome. */}
+      <div className="flex items-center gap-3 rounded-card border border-ink/15 bg-white px-4 py-4">
+        <Sparkles size={17} className="shrink-0 text-brand" />
+        <span className="flex-1 truncate font-mono text-sm font-semibold italic text-ink">
+          Who in healthcare have I not spoken to since spring?
+        </span>
+        <span className="shrink-0 rounded-card bg-brand px-3 py-1.5 font-mono text-[10px] uppercase tracking-widest font-bold text-brand-on">
+          Ask
+        </span>
+      </div>
+
+      <div className="mt-2 flex justify-center text-muted">
+        <ArrowRight size={16} className="rotate-90 text-brand" />
+      </div>
+
+      {/* The synthesis panel. */}
+      <div className="mt-2 rounded-card border border-ink/15 bg-white overflow-hidden">
+        <div className="flex items-center gap-2 border-b border-ink/10 bg-paper/50 px-5 py-2.5 font-mono text-[10px] uppercase tracking-widest text-muted">
+          <Sparkles size={13} className="text-brand" /> AI synthesis · 214 contacts read
+        </div>
+        <div className="p-4">
+          <p className="rounded-card border border-ink/12 bg-accent/60 px-4 py-3 font-mono text-xs leading-relaxed">
+            Three healthcare contacts have gone quiet since March. Priya and Daniel both
+            owe you nothing — you owe them. Marcus replied and was never answered.
+          </p>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            {ASK_RESULTS.map((r) => (
+              <div key={r.name} className="rounded-card border border-ink/15 bg-paper/50 p-3.5">
+                <p className="font-serif text-base font-bold leading-tight">{r.name}</p>
+                <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted">
+                  {r.firm}
+                </p>
+                <p className="mt-2.5 font-mono text-[11px] leading-relaxed text-subtle">{r.why}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const ASK_EXAMPLES = [
+  'Who can introduce me at Sequoia?',
+  'List my pending action items',
+  'Which alumni are in product?',
+];
+
+const ASK_RESULTS = [
+  { name: 'Priya Nair', firm: 'UnitedHealth', why: 'Payer strategy · quiet 118 days' },
+  { name: 'Daniel Osei', firm: 'Mayo Clinic', why: 'Met at the panel · never followed up' },
+  { name: 'Marcus Chen', firm: 'Flatiron Health', why: 'Replied in March · unanswered' },
+];
+
 /* ────────────────────────────────────────────────────────────────────────
    Roadmap sections.
 
@@ -394,9 +552,9 @@ function RoadmapIntro() {
         </Reveal>
         <Reveal>
           <p className="mt-6 font-mono text-sm leading-relaxed text-subtle max-w-[52ch] mx-auto">
-            Everything above this line works today. Everything below it is where Cirqle is
-            headed — three pieces that close the loop between meeting someone, staying in
-            touch, and never having to write it down.
+            Everything above this line works today — including the card. Everything below
+            it is where Cirqle is headed: two integrations that close the last gap, so the
+            things you already do in your inbox and your calendar file themselves.
           </p>
         </Reveal>
         <Reveal>
@@ -415,18 +573,85 @@ function RoadmapIntro() {
  * flat hairline language everywhere else on the page — that contrast is the
  * point. It must not bleed into the surrounding sections.
  *
- * Scroll progress across the section maps to rotateY 0 -> 180 -> 360, so the
- * card turns through a full revolution showing a real front and back face,
- * with transformPerspective for actual depth rather than a flat spin.
+ * Scroll progress across the section drives rotateY 0 -> 180 -> 360, so the
+ * card turns through a full revolution showing a real front and back face.
+ *
+ * The mapping is *not* linear, and that matters. Linearly, rotateY hit 180°
+ * at exactly progress 0.5 — one single scroll position — so the back face was
+ * only ever square-on for a pixel. Everywhere else in the section the card was
+ * caught mid-turn: skewed on the way in, and already rotating back out before
+ * you had read it. The plateau below holds each face flat for a real stretch
+ * of scroll instead:
+ *
+ *   0    → 0.14   front, still
+ *   0.14 → 0.32   turns to the back as the card rises into full view
+ *   0.32 → 0.68   BACK, held. That band is exactly the window in which the
+ *                 card is fully inside the viewport, and it brackets the
+ *                 scroll-snap rest position (progress 0.5) by ~280px either
+ *                 way — wider than a single wheel gesture, so ordinary
+ *                 imprecise scrolling still comes to rest on the back face
+ *   0.68 → 0.86   turns back to the front as the section leaves
+ *   0.86 → 1      front, still
  */
+const CARD_FLIP_IN = [0, 0.14, 0.32, 0.68, 0.86, 1];
+const CARD_FLIP_OUT = [0, 0, 180, 180, 360, 360];
+
+/**
+ * How far a section has travelled through the viewport: 0 the instant its top
+ * touches the bottom of the screen, 1 the instant its bottom leaves the top.
+ *
+ * This deliberately does *not* use motion's `useScroll({ target })`. That hook
+ * measures the target's document offset once and caches it, and this page's
+ * layout keeps settling after mount — web fonts swap in, the force-graph
+ * canvas sizes itself, reveal animations resolve. Every one of those shifts
+ * the section without firing a resize, so the cached offset drifts: measured
+ * live, motion's progress was running ~400px behind the real scroll position,
+ * which is precisely why the card looked like it flipped before the section
+ * arrived and flipped back long after it should have.
+ *
+ * Reading getBoundingClientRect() on each scroll frame costs one layout read
+ * against an element that is already being composited, and it cannot go
+ * stale — whatever the page does above this section, the number is right.
+ */
+function useViewportProgress(ref: React.RefObject<HTMLElement | null>) {
+  const progress = useMotionValue(0);
+
+  React.useEffect(() => {
+    let frame = 0;
+
+    const measure = () => {
+      frame = 0;
+      const el = ref.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const viewport = window.innerHeight;
+      const range = rect.height + viewport;
+      if (range <= 0) return;
+      progress.set(Math.min(1, Math.max(0, (viewport - rect.top) / range)));
+    };
+
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+
+    measure();
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+    };
+  }, [ref, progress]);
+
+  return progress;
+}
+
 function NfcCardSection() {
   const ref = React.useRef<HTMLElement>(null);
   const reduce = useReducedMotion();
-  const { scrollYProgress } = useScroll({
-    target: ref,
-    offset: ['start end', 'end start'],
-  });
-  const rotateY = useTransform(scrollYProgress, [0, 0.5, 1], [0, 180, 360]);
+  const scrollProgress = useViewportProgress(ref);
+  const rotateY = useTransform(scrollProgress, CARD_FLIP_IN, CARD_FLIP_OUT);
 
   return (
     <section ref={ref} className="snap-section border-t border-ink/15 py-20 md:py-28">
@@ -451,14 +676,17 @@ function NfcCardSection() {
             </p>
           </Reveal>
           <Reveal>
-            <div className="mt-8">
-              <PlannedChip />
-            </div>
+            <p className="mt-6 font-mono text-[11px] uppercase tracking-widest text-muted">
+              Scroll to turn it over.
+            </p>
           </Reveal>
         </RevealGroup>
 
         <Reveal y={24}>
-          <div className="flex justify-center [perspective:1600px]">
+          {/* Perspective lives on the rotating element itself
+              (transformPerspective) — a second one on this wrapper would
+              compound and exaggerate the turn. */}
+          <div className="flex justify-center">
             <motion.div
               className="relative w-[320px] h-[202px] md:w-[380px] md:h-[240px]"
               style={
@@ -539,15 +767,14 @@ function NfcCardFace({ side }: { side: 'front' | 'back' }) {
   );
 }
 
-/** A static paper-on-black rendering of the sidebar logo's ring-"C" mark. */
+/**
+ * The real mark, on the card. It used to be re-drawn here with a hardcoded
+ * #141414 square faking the ring's gap — which only matched because the card
+ * gradient happens to pass near that value at that spot. Now that LogoMark
+ * draws a genuine gap it can simply be reused, inheriting `currentColor`.
+ */
 function RingMark() {
-  return (
-    <div aria-hidden="true" className="relative h-8 w-8">
-      <div className="absolute inset-0 rounded-full border-[2px] border-paper/85" />
-      <div className="absolute right-[-2px] top-1/2 h-3 w-3.5 -translate-y-1/2 bg-[#141414]" />
-      <div className="absolute right-[3px] top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-paper" />
-    </div>
-  );
+  return <LogoMark px={32} className="text-paper/85" />;
 }
 
 /** Same shape as FeatureBeat, plus the Planned marker. */
@@ -716,8 +943,8 @@ function LandingFooter() {
     <footer className="border-t border-ink/15 bg-white/50">
       <div className="max-w-6xl mx-auto px-6 md:px-8 py-16 grid grid-cols-2 md:grid-cols-4 gap-10">
         <div className="col-span-2 md:col-span-2">
-          <div className="font-serif text-2xl font-black italic tracking-tight">Cirqle</div>
-          <p className="mt-3 font-mono text-xs leading-relaxed text-muted max-w-[34ch]">
+          <Logo size="sm" kicker={null} />
+          <p className="mt-4 font-mono text-xs leading-relaxed text-muted max-w-[34ch]">
             The AI personal CRM for people who live off their relationships.
           </p>
         </div>

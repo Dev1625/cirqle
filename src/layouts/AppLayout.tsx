@@ -1,5 +1,5 @@
 import React, { Suspense, useEffect, useState } from 'react';
-import { Outlet, Link, useLocation, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Outlet, Link, useLocation, Navigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { useAuth } from '../contexts/AuthContext';
 import { Network, Navigation, Settings, FileText, LogOut, Menu, HelpCircle, CheckCircle2, PlayCircle } from 'lucide-react';
@@ -12,7 +12,6 @@ import { useTour, TOURS } from '../contexts/TourContext';
 const AppLayout = () => {
   const { user } = useAuth();
   const location = useLocation();
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const trackerMode = searchParams.get('mode') || 'sheet';
   const showGlobalSearch = location.pathname !== '/app/graph';
@@ -156,7 +155,7 @@ const AppLayout = () => {
       {isSidebarOpen && (
          <aside className="w-64 flex-shrink-0 border-r border-ink/25 bg-rail p-8 z-10 flex flex-col relative transition-all duration-300">
            <div onClick={() => setIsSidebarOpen(false)} className="cursor-pointer group relative">
-             <Logo />
+             <Logo className="mb-12" />
              <div className="absolute -right-2 top-0 opacity-0 group-hover:opacity-100 font-mono text-[10px] bg-ink text-white px-2 py-0.5 pointer-events-none transition-opacity">
                 Close
              </div>
@@ -291,16 +290,11 @@ const AppLayout = () => {
                            <button 
                              onClick={() => {
                                setShowHelpMenu(false);
-                               if (tourId === 'getting_started') navigate('/app');
-                               if (tourId === 'adding_contact') navigate('/app/directory');
-                               if (tourId === 'the_tracker') navigate('/app/tracker');
-                               if (tourId === 'network_graph') navigate('/app/graph');
-                               if (tourId === 'nl_search') navigate('/app');
-                               if (tourId === 'drafting_outreach') navigate('/app/directory');
-                               // TourContext waits for the destination selector; this just lets React commit navigation first.
-                               setTimeout(() => {
-                                  startTour(tourId);
-                               }, 150);
+                               // No route mapping here any more: each tour step
+                               // declares the page it belongs to and TourContext
+                               // navigates there itself, so this list can never
+                               // drift out of sync with the tours again.
+                               startTour(tourId);
                              }}
                              className="text-[10px] font-mono uppercase font-bold tracking-widest border border-ink/15 rounded-card px-3 py-1 hover:bg-ink hover:text-white transition-colors"
                            >

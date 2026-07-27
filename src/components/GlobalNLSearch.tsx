@@ -6,6 +6,7 @@ import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Search, Sparkles, X, Activity } from 'lucide-react';
 import { getGemini } from '../lib/gemini';
+import { AI_FEATURES } from '../lib/aiDebug';
 import { useNavigate } from 'react-router-dom';
 
 export function GlobalSearch() {
@@ -37,7 +38,7 @@ export function GlobalSearch() {
         return;
       }
 
-      const ai = getGemini();
+      const ai = getGemini('globalSearch');
       
       const miniContacts = contacts.map(c => ({
         id: c.id,
@@ -63,7 +64,7 @@ ${JSON.stringify(miniContacts)}
 }`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: AI_FEATURES.globalSearch.model,
         contents: prompt,
         config: { responseMimeType: "application/json" }
       });
