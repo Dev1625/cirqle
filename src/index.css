@@ -128,46 +128,57 @@ body::before {
   }
 }
 
-/* ── Landing page: section-at-a-time scrolling ──────────────────────────
-   CSS scroll-snap only — no wheel hijacking, so trackpad inertia, keyboard
-   paging, scrollbar dragging, find-in-page and screen-reader navigation all
-   keep working normally.
+/* ── Landing page: continuous scroll ────────────────────────────────────
+   CSS scroll-snap is gone. It cut the page into discrete slides, which is
+   the opposite of what the story needs: one unbroken read from the tap to
+   the drafted email. Smoothing is Lenis's job now (see StoryScroll.tsx),
+   and Lenis drives the real document scroll, so nothing below is hijacked.
 
-   `proximity` rather than `mandatory`: it settles a section into place once
-   you come to rest near one, but never yanks a user who is deliberately
-   scrolling somewhere else. Scoped to the landing route by a class that
-   LandingPage puts on <html> for its lifetime — the in-app views must not
-   inherit this.
+   `story-section` keeps the full-height rhythm the snap layout gave the
+   page, minus the snapping — sections are still viewport-scale beats, they
+   just flow past instead of clicking into place. `min-height` rather than
+   `height` so a section that genuinely overflows on a short viewport can
+   grow instead of clipping.
 
-   Snapping is deliberately switched OFF when the viewport is too small or
-   too short to hold a whole section: below that the 100svh sections
-   genuinely overflow, and snapping back to their start would strand the
-   overflow off-screen. It is also off under prefers-reduced-motion, since
-   the browser animates the snap itself. */
-.snap-section {
-  /* svh rather than vh: mobile browsers shrink the visual viewport as the
-     URL bar retracts, and vh would leave every section slightly taller than
-     the screen for the entire scroll. */
+   svh rather than vh: mobile browsers shrink the visual viewport as the URL
+   bar retracts, and vh would leave every section slightly taller than the
+   screen for the entire scroll. */
+.story-section {
   min-height: 100svh;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
-@media (min-width: 768px) and (min-height: 640px) {
-  @media (prefers-reduced-motion: no-preference) {
-    html.landing-snap {
-      scroll-snap-type: y proximity;
-      scroll-behavior: smooth;
-    }
+/* ── Lenis ──────────────────────────────────────────────────────────────
+   The library's required stylesheet, inlined rather than imported so it
+   sits inside the same Tailwind cascade as everything else. `lenis` and
+   `lenis-smooth` are put on <html> by Lenis itself while it's running, so
+   these rules are automatically scoped to the landing route's lifetime.
 
-    html.landing-snap .snap-section {
-      scroll-snap-align: start;
-      /* `normal`, not `always` — a fast flick should still be able to cross
-         more than one section. */
-      scroll-snap-stop: normal;
-    }
-  }
+   The `scroll-behavior: auto` override is the load-bearing one: native
+   smooth scrolling and Lenis both animating the same scroll position fight
+   each other, and the visible result is exactly the stutter this pass is
+   here to remove. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
 }
 
 /* ── Landing page: the drifting follow-up queue row ─────────────────────

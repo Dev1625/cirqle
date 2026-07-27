@@ -117,7 +117,14 @@ export function LandingGraph() {
                 key={`pulse-${link.id}`}
                 r={3.5}
                 fill="#7A2331"
-                initial={{ opacity: 0 }}
+                // cx/cy have to be seeded here as well as animated. Framer
+                // only writes an animated attribute once the animation runs,
+                // so without these the first paint puts literal "undefined"
+                // into cx/cy and SVG rejects it — twelve console errors on
+                // every load, one pair per pulse.
+                cx={link.x1}
+                cy={link.y1}
+                initial={{ opacity: 0, cx: link.x1, cy: link.y1 }}
                 animate={{
                   cx: [link.x1, link.x2],
                   cy: [link.y1, link.y2],

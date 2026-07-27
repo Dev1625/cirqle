@@ -5,6 +5,8 @@ import { ArrowRight, Sparkles, Send, ListTodo, Network, Nfc, Mail, CalendarDays,
 import { CountUp } from '../components/landing/CountUp';
 import { Reveal, RevealGroup } from '../components/landing/motion';
 import { LandingGraph } from '../components/landing/LandingGraph';
+import { StoryScrollProvider } from '../components/landing/StoryScroll';
+import { ScrollProbe } from '../components/landing/ScrollProbe';
 import { Logo, LogoMark } from '../components/Logo';
 
 const HOUSE_EASE = [0.22, 1, 0.36, 1] as const;
@@ -52,20 +54,21 @@ function HeroHeadline() {
 }
 
 export default function LandingPage() {
-  const reduce = useReducedMotion();
+  return (
+    <StoryScrollProvider>
+      <LandingStory />
+    </StoryScrollProvider>
+  );
+}
 
-  // Scroll-snap is opt-in per route: the class lives on <html> (the scroll
-  // container) only while this page is mounted, so navigating into the app
-  // can't inherit it. See the .snap-section block in index.css.
-  React.useEffect(() => {
-    document.documentElement.classList.add('landing-snap');
-    return () => document.documentElement.classList.remove('landing-snap');
-  }, []);
+function LandingStory() {
+  const reduce = useReducedMotion();
 
   return (
     <div className="w-full overflow-x-clip">
+      <ScrollProbe />
       {/* ── Hero ───────────────────────────────────────────────── */}
-      <section className="snap-section max-w-6xl mx-auto px-6 md:px-8 pt-16 pb-20 md:pt-24 md:pb-28">
+      <section className="story-section max-w-6xl mx-auto px-6 md:px-8 pt-16 pb-20 md:pt-24 md:pb-28">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
           <div className="lg:col-span-6">
             <motion.p
@@ -189,7 +192,7 @@ export default function LandingPage() {
       />
 
       {/* Out-of-frame beat: the queue row bleeds past the edge */}
-      <section className="snap-section py-20 md:py-28 border-t border-ink/15 overflow-x-clip">
+      <section className="story-section py-20 md:py-28 border-t border-ink/15 overflow-x-clip">
         <div className="max-w-6xl mx-auto px-6 md:px-8">
           <RevealGroup>
             <Reveal>
@@ -220,7 +223,7 @@ export default function LandingPage() {
           area* too, which would give this one section a snap position 6rem
           off from every other. The section is full-height with centred
           content, so the #network anchor lands correctly without it. */}
-      <section id="network" className="snap-section py-20 md:py-28 border-t border-ink/15 bg-white/40">
+      <section id="network" className="story-section py-20 md:py-28 border-t border-ink/15 bg-white/40">
         <div className="max-w-6xl mx-auto px-6 md:px-8 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
           <div className="lg:col-span-5">
             <RevealGroup>
@@ -281,7 +284,7 @@ export default function LandingPage() {
       />
 
       {/* ── Closing CTA ────────────────────────────────────────── */}
-      <section className="snap-section py-24 md:py-32 border-t border-ink/15">
+      <section className="story-section py-24 md:py-32 border-t border-ink/15">
         <RevealGroup className="max-w-3xl mx-auto px-6 text-center">
           <Reveal>
             <h2 className="font-serif text-4xl md:text-6xl italic font-black tracking-tight text-balance">
@@ -380,7 +383,7 @@ function FeatureBeat({
   visual: React.ReactNode;
 }) {
   return (
-    <section className="snap-section py-20 md:py-28 border-t border-ink/15">
+    <section className="story-section py-20 md:py-28 border-t border-ink/15">
       <div className="max-w-6xl mx-auto px-6 md:px-8 grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
         <RevealGroup className={reverse ? 'lg:order-2' : ''}>
           <Reveal>
@@ -415,7 +418,7 @@ function FeatureBeat({
  */
 function AskNetworkSection() {
   return (
-    <section className="snap-section py-14 md:py-16 border-t border-ink/15 bg-white/40">
+    <section className="story-section py-14 md:py-16 border-t border-ink/15 bg-white/40">
       <div className="max-w-4xl mx-auto px-6 md:px-8 w-full">
         <RevealGroup className="text-center">
           <Reveal>
@@ -538,7 +541,7 @@ function PlannedChip() {
 
 function RoadmapIntro() {
   return (
-    <section className="snap-section border-t border-ink/15 bg-white/30 py-20 md:py-28">
+    <section className="story-section border-t border-ink/15 bg-white/30 py-20 md:py-28">
       <RevealGroup className="max-w-3xl mx-auto px-6 text-center">
         <Reveal>
           <p className="font-mono text-[11px] uppercase tracking-[0.25em] text-brand mb-5 flex items-center justify-center gap-2">
@@ -602,7 +605,7 @@ function NfcCardSection() {
   const isSettled = useInView(ref, { amount: 0.5 });
 
   return (
-    <section ref={ref} className="snap-section border-t border-ink/15 py-20 md:py-28">
+    <section ref={ref} className="story-section border-t border-ink/15 py-20 md:py-28">
       <div className="max-w-6xl mx-auto px-6 md:px-8 grid grid-cols-1 lg:grid-cols-2 gap-14 lg:gap-16 items-center">
         <RevealGroup>
           <Reveal>
@@ -746,7 +749,7 @@ function RoadmapBeat({
   visual: React.ReactNode;
 }) {
   return (
-    <section className="snap-section py-20 md:py-28 border-t border-ink/15">
+    <section className="story-section py-20 md:py-28 border-t border-ink/15">
       <div className="max-w-6xl mx-auto px-6 md:px-8 grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
         <RevealGroup className={reverse ? 'lg:order-2' : ''}>
           <Reveal>
