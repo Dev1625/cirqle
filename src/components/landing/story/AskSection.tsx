@@ -1,7 +1,15 @@
 import React from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import { AnimatePresence, motion, useMotionValueEvent } from 'motion/react';
 import { Sparkles, CornerDownLeft } from 'lucide-react';
-import { StorySection, StoryHeading, StoryReveal, HOUSE_EASE } from './StorySection';
+import {
+  StorySection,
+  StoryHeading,
+  StoryReveal,
+  StoryAnchor,
+  HOUSE_EASE,
+  useSectionRange,
+} from './StorySection';
+import { useStoryScroll } from '../StoryScroll';
 import { STORY_CONTACT } from '../storyContact';
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -116,23 +124,64 @@ export function AskSection() {
   const [phase, setPhase] = React.useState<Phase>({ state: 'idle' });
   const timer = React.useRef<ReturnType<typeof setTimeout>>(undefined);
 
+  /* Fix 5 — the beat completes itself for someone scrolling straight past.
+     A visitor who never clicks Ask would otherwise leave this section having
+     seen only the question, which is the setup without the payoff. If the
+     scroll gets most of the way through the beat and nobody has touched
+     anything, run the same populate-then-ask sequence a click would.
+
+     `touched` is the guard, and it is deliberately a ref rather than state:
+     it must be readable from inside the scroll subscription without making
+     that subscription re-bind on every render. Once the visitor interacts —
+     picking a chip, typing, or pressing Ask — this never fires. */
+  const { progress, reduced } = useStoryScroll();
+  const [rangeStart, rangeEnd] = useSectionRange(2);
+  // Just past the beat's centre. It has to fire early enough that the
+  // populate-then-ask sequence *and* its 620ms of thinking still finish while
+  // the answer panel is on screen — firing three-quarters of the way through
+  // the window put the answer up as the ask bar was leaving the top of it.
+  const autoAt = rangeStart + (rangeEnd - rangeStart) * 0.55;
+  const touched = React.useRef(false);
+  const autoRan = React.useRef(false);
+
   React.useEffect(() => () => clearTimeout(timer.current), []);
 
-  const ask = React.useCallback(() => {
+  const ask = React.useCallback((question: string) => {
     clearTimeout(timer.current);
     setPhase({ state: 'thinking' });
     // A short, fixed beat. Not a fake network call — just enough that the
     // answer reads as having been worked out rather than pre-printed.
     timer.current = setTimeout(() => {
-      setPhase({ state: 'answered', script: resolve(query) });
+      setPhase({ state: 'answered', script: resolve(question) });
     }, 620);
-  }, [query]);
+  }, []);
 
   const pick = (question: string) => {
+    touched.current = true;
     clearTimeout(timer.current);
     setQuery(question);
     setPhase({ state: 'idle' });
   };
+
+  useMotionValueEvent(progress, 'change', (p) => {
+    if (autoRan.current || touched.current || p < autoAt) return;
+    autoRan.current = true;
+    const chosen = SCRIPTS[0];
+    setQuery(chosen.question);
+    // Populate, then ask — the same two steps, in the same order, with the
+    // same pause between them a person clicking would produce.
+    timer.current = setTimeout(() => ask(chosen.question), 450);
+  });
+
+  React.useEffect(() => {
+    if (!reduced) return;
+    // Reduced motion never scrubs, so the auto-run has nothing to hook onto.
+    // Show the answer outright instead of leaving the beat unfinished.
+    if (!touched.current && !autoRan.current) {
+      autoRan.current = true;
+      setPhase({ state: 'answered', script: SCRIPTS[0] });
+    }
+  }, [reduced]);
 
   return (
     <StorySection index={2} id="ask" className="bg-white/40">
@@ -171,14 +220,19 @@ export function AskSection() {
           <form
             onSubmit={(e) => {
               e.preventDefault();
-              ask();
+              touched.current = true;
+              ask(query);
             }}
-            className="flex items-center gap-3 rounded-card border border-ink/25 bg-white px-4 py-3"
+            className="relative flex items-center gap-3 rounded-card border border-ink/25 bg-white px-4 py-3"
           >
+            {/* The token lands on the ask bar — the thing this beat is about
+                and the thing the visitor is meant to reach for. */}
+            <StoryAnchor stage={2} className="-left-3 -top-3" />
             <Sparkles size={17} className="shrink-0 text-brand" />
             <input
               value={query}
               onChange={(e) => {
+                touched.current = true;
                 setQuery(e.target.value);
                 setPhase({ state: 'idle' });
               }}

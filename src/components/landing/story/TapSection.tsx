@@ -1,32 +1,43 @@
 import React from 'react';
-import { motion, useReducedMotion } from 'motion/react';
+import { motion, useReducedMotion, useTransform } from 'motion/react';
 import { Nfc } from 'lucide-react';
-import { StorySection, StoryHeading, StoryReveal, useSettledTrigger, HOUSE_EASE } from './StorySection';
+import { StorySection, StoryHeading, StoryReveal, StoryAnchor, useSectionRange } from './StorySection';
+import { useStoryScroll } from '../StoryScroll';
 import { STORY_CONTACT } from '../storyContact';
 import { LogoMark } from '../../Logo';
 
 /* ────────────────────────────────────────────────────────────────────────
    Beat 01 — the tap.
 
-   The card flip, specifically. The earlier version bound rotateY straight to
-   scroll position, so every scroll stutter was a visible rotation stutter,
-   and how much of the turn you saw depended entirely on how fast you
-   happened to be scrolling.
+   The card turn is scroll-linked again, and the distinction that makes that
+   safe is worth stating precisely: the original jitter came from binding
+   rotation to *raw, unsmoothed* scroll position, not from scroll-linking as
+   such. Every scroll stutter was a rotation stutter because there was
+   nothing between the browser's scroll events and the rotation.
 
-   The fix is to decouple trigger from playback. Entering view is the
-   trigger; the turn is then a fixed-duration animation on its own timeline.
-   `once: true` on the trigger means that once it has fired, scrolling —
-   fast, slow, backwards — cannot touch it again. Everyone sees the same
-   turn, at the same speed, exactly once.
+   It is now driven by the same Lenis-backed progress value everything else
+   on this page reads — the one measured at sub-pixel drift with a clean
+   momentum tail. And it is naturally reversible: scroll up and the card
+   turns back, which a one-shot triggered animation could never do.
+
+   The mapping is deliberately not linear. A straight 0→180 across the window
+   leaves the card at an awkward intermediate angle for most of the time it
+   is on screen, and edge-on for a good part of it. Instead: hold the front
+   for the first third of the window, turn through the middle third, hold the
+   back for the last third. Both faces get a proper look, and the turn
+   happens while the section is genuinely the thing on screen.
    ──────────────────────────────────────────────────────────────────────── */
 
-const TURN_DURATION = 1.15;
-
 export function TapSection() {
-  const cardRef = React.useRef<HTMLDivElement>(null);
-  // 0.6 — "most of it visible". Then a beat of stillness so the front face
-  // registers as a thing before it moves.
-  const turned = useSettledTrigger(cardRef, { amount: 0.6, delay: 1000 });
+  const { progress, reduced } = useStoryScroll();
+  const [from, to] = useSectionRange(0);
+  const span = to - from;
+
+  const rotateY = useTransform(
+    progress,
+    [from, from + span / 3, from + (span * 2) / 3, to],
+    [0, 0, 180, 180]
+  );
 
   return (
     <StorySection index={0} id="tap">
@@ -49,20 +60,23 @@ export function TapSection() {
         </StoryHeading>
 
         <StoryReveal y={24}>
-          <div ref={cardRef} className="flex justify-center">
+          <div className="flex justify-center">
             <div className="relative">
+              {/* The token lands just off the card's top-left corner, where
+                  there is clear space at every breakpoint it runs at. */}
+              <StoryAnchor stage={0} className="-left-3 -top-3" />
               <TapRipple />
               {/* Perspective lives on the rotating element itself — a second
                   one on a wrapper would compound and exaggerate the turn. */}
               <motion.div
                 className="relative h-[202px] w-[320px] md:h-[240px] md:w-[380px]"
-                style={{ transformPerspective: 1600, transformStyle: 'preserve-3d' }}
-                // No reduced-motion branch needed: the app-root MotionConfig
-                // runs reducedMotion="user", which settles straight on the end
-                // value — those readers still see the back face, without the
-                // rotation.
-                animate={{ rotateY: turned ? 180 : 0 }}
-                transition={{ duration: TURN_DURATION, ease: HOUSE_EASE }}
+                style={{
+                  transformPerspective: 1600,
+                  transformStyle: 'preserve-3d',
+                  // Reduced motion gets the back face without the turn: the
+                  // information is which side you end on, not the rotation.
+                  rotateY: reduced ? 180 : rotateY,
+                }}
               >
                 <CardFace side="front" />
                 <CardFace side="back" />

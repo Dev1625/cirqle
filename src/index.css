@@ -134,17 +134,25 @@ body::before {
    the drafted email. Smoothing is Lenis's job now (see StoryScroll.tsx),
    and Lenis drives the real document scroll, so nothing below is hijacked.
 
-   `story-section` keeps the full-height rhythm the snap layout gave the
-   page, minus the snapping — sections are still viewport-scale beats, they
-   just flow past instead of clicking into place. `min-height` rather than
-   `height` so a section that genuinely overflows on a short viewport can
-   grow instead of clipping.
+   Sections are content-driven now. They used to be a flat 100svh each, but
+   that height only ever existed to give scroll-snap a page-sized thing to
+   snap to — with the snapping gone it was just air, and on a tall desktop
+   viewport it was a lot of air: six beats of mostly empty cream between
+   short two-column blocks.
+
+   What replaces it is padding that scales with the viewport plus a floor
+   well under a full screen. Tall viewports get generous but finite spacing;
+   short ones still get a beat that fills enough of the screen to read as its
+   own moment. The floor also keeps the measured stops from bunching: beats
+   need to be far enough apart in scroll terms for their animation windows
+   not to overlap.
 
    svh rather than vh: mobile browsers shrink the visual viewport as the URL
    bar retracts, and vh would leave every section slightly taller than the
    screen for the entire scroll. */
 .story-section {
-  min-height: 100svh;
+  min-height: 62svh;
+  padding-block: clamp(3.5rem, 7.5vh, 6rem);
   display: flex;
   flex-direction: column;
   justify-content: center;

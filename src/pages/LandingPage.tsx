@@ -2,10 +2,10 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion, type Variants } from 'motion/react';
 import { ArrowRight, Sparkles, Mail, CalendarDays, Compass } from 'lucide-react';
-import { CountUp } from '../components/landing/CountUp';
 import { Reveal, RevealGroup } from '../components/landing/motion';
 import { StoryScrollProvider } from '../components/landing/StoryScroll';
-import { StoryRail, STORY_STAGES } from '../components/landing/StoryRail';
+import { StoryToken } from '../components/landing/StoryToken';
+import { STORY_STAGES } from '../components/landing/storyStages';
 import { ScrollProbe } from '../components/landing/ScrollProbe';
 import { STORY_COLUMN } from '../components/landing/story/StorySection';
 import { TapSection } from '../components/landing/story/TapSection';
@@ -53,7 +53,7 @@ function LandingStory() {
   return (
     <div className="w-full overflow-x-clip">
       <ScrollProbe />
-      <StoryRail />
+      <StoryToken />
 
       <Hero />
 
@@ -66,7 +66,6 @@ function LandingStory() {
       <DraftSection />
 
       {/* ── Everything below is outside the narrative ─────────────────── */}
-      <StatsStrip />
       <RoadmapIntro />
       <RoadmapBeat
         icon={Mail}
@@ -220,30 +219,13 @@ function HeroHeadline() {
 
 /* ── Non-narrative sections ───────────────────────────────────────────── */
 
-function StatsStrip() {
-  return (
-    <section className="border-y border-ink/15 bg-white/60">
-      <RevealGroup
-        className={`${STORY_COLUMN} grid grid-cols-1 divide-y divide-ink/12 sm:grid-cols-3 sm:divide-x sm:divide-y-0`}
-      >
-        {[
-          { value: 12000, suffix: '+', label: 'contacts parsed from raw text' },
-          { value: 40000, suffix: '+', label: 'follow-ups kept on time' },
-          { value: 3.4, suffix: '×', decimals: 1, label: 'more replies than cold sends' },
-        ].map((s) => (
-          <Reveal key={s.label} className="px-6 py-10 md:px-8">
-            <div className="font-serif text-4xl font-black leading-none md:text-5xl">
-              <CountUp value={s.value} suffix={s.suffix} decimals={s.decimals || 0} />
-            </div>
-            <p className="mt-3 max-w-[24ch] font-mono text-[11px] uppercase tracking-widest text-muted">
-              {s.label}
-            </p>
-          </Reveal>
-        ))}
-      </RevealGroup>
-    </section>
-  );
-}
+/* The stats strip that used to sit here has been deleted, not moved. It read
+   "12,000+ contacts parsed from raw text", "40,000+ follow-ups kept on time"
+   and "3.4× more replies than cold sends" — three unverifiable claims on a
+   page that now names a real person, which is a bad combination. If real
+   numbers ever exist, this is a three-item grid of <CountUp> inside a
+   bordered full-width band; CountUp itself is still in the tree (the health
+   ring's score is not it, but the component remains available). */
 
 /* Everything below the RoadmapIntro divider is a plan, not a feature. The
    copy stays in the future tense, each beat carries a visible "Planned"

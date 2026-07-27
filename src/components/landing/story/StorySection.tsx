@@ -1,20 +1,21 @@
 import React from 'react';
-import { motion, useInView, useReducedMotion, type Variants } from 'motion/react';
-import { useStoryStage } from '../StoryScroll';
-import { STORY_STAGES } from '../StoryRail';
+import { motion, useReducedMotion, useTransform, type MotionValue, type Variants } from 'motion/react';
+import { useStoryStage, useStoryAnchor, useStoryScroll, useSectionRange } from '../StoryScroll';
+import { STORY_STAGES } from '../storyStages';
 
 const HOUSE_EASE = [0.22, 1, 0.36, 1] as const;
 
 /**
  * The page's one content column. The left inset on xl is where the narrative
- * thread lives — every section on the page uses this, story beat or not, so
- * the column never jogs sideways as you scroll past a non-story section.
+ * token does most of its travelling — every section on the page uses this,
+ * story beat or not, so the column never jogs sideways as you scroll past a
+ * non-story section.
  */
-export const STORY_COLUMN = 'mx-auto w-full max-w-6xl px-6 md:px-8 xl:pl-[220px]';
+export const STORY_COLUMN = 'mx-auto w-full max-w-6xl px-6 md:px-8 xl:pl-[200px]';
 
 /**
  * One beat of the narrative. Registers itself with the scroll provider under
- * its story index, which is how the rail knows where each stop actually sits
+ * its story index, which is how the token knows where each stop actually sits
  * on the page rather than guessing at fractions.
  */
 export function StorySection({
@@ -36,7 +37,7 @@ export function StorySection({
     <section
       ref={ref}
       id={id}
-      className={`story-section overflow-x-clip border-t border-ink/15 py-20 md:py-28 ${className}`}
+      className={`story-section overflow-x-clip border-t border-ink/15 ${className}`}
     >
       <div className={STORY_COLUMN}>{children}</div>
       {bleed}
@@ -45,8 +46,36 @@ export function StorySection({
 }
 
 /**
- * The beat's heading block. The numbered eyebrow is the same number the rail
- * is showing at that moment, so the token and the copy agree about which
+ * A landing point for the narrative token. Zero-size on purpose: it marks a
+ * coordinate, it does not occupy space, so dropping one into a layout can
+ * never push anything around. Needs a positioned ancestor.
+ */
+export function StoryAnchor({
+  stage,
+  order = 0,
+  className = '',
+  style,
+}: {
+  stage: number;
+  order?: number;
+  className?: string;
+  /** For anchors placed by percentage, e.g. a node inside a fluid SVG. */
+  style?: React.CSSProperties;
+}) {
+  const ref = useStoryAnchor(stage, order);
+  return (
+    <span
+      ref={ref}
+      aria-hidden="true"
+      style={style}
+      className={`pointer-events-none absolute block h-0 w-0 ${className}`}
+    />
+  );
+}
+
+/**
+ * The beat's heading block. The numbered eyebrow is the same number the token
+ * is carrying at that moment, so the token and the copy agree about which
  * chapter the visitor is in.
  */
 export function StoryHeading({
@@ -79,8 +108,12 @@ export function StoryHeading({
 }
 
 /**
- * Fade + rise on entry. Transform and opacity only; under reduced motion the
- * rise is dropped and the content simply reveals in place.
+ * Fade + rise on entry, for static copy. Transform and opacity only; under
+ * reduced motion the rise is dropped and the content reveals in place.
+ *
+ * Deliberately NOT scroll-scrubbed. Headings and body copy that fade back out
+ * when you scroll up read as broken rather than as responsive — scrubbing is
+ * for the beats' demonstrations, not for the prose around them.
  */
 export function StoryReveal({
   children,
@@ -111,81 +144,104 @@ export function StoryReveal({
   );
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+   Scroll-scrubbed reveals.
+
+   Every beat's demonstration — fields filling in, an email assembling, a
+   queue arriving — is mapped to that beat's own scroll window rather than
+   fired once on a timer when the section is first seen. Scrolling forward
+   reveals more, scrolling back hides it again: the scroll is the mechanism
+   doing the work, not a trigger for something that then plays out on its own
+   regardless of what the visitor does next.
+   ──────────────────────────────────────────────────────────────────────── */
+
+/** 0 → 1 across a beat's window. The input every scrubbed reveal reads. */
+export function useScrub(index: number, spread?: number) {
+  const { progress } = useStoryScroll();
+  const range = useSectionRange(index, spread);
+  return useTransform(progress, range, [0, 1]);
+}
+
 /**
- * Text that assembles a word at a time.
+ * Reveals one item within a scrub, given its slot. `share` narrows the item
+ * to a slice of the beat, so several sequences can share one window without
+ * having to know about each other.
+ */
+export function useSlotOpacity(
+  scrub: MotionValue<number>,
+  slot: number,
+  count: number,
+  share: [number, number] = [0, 1]
+) {
+  const span = share[1] - share[0];
+  const step = span / Math.max(count, 1);
+  const start = share[0] + slot * step;
+  // Items finish in 0.75 of a step, so they overlap slightly — that reads as
+  // a sequence rather than as a series of discrete flashes.
+  return useTransform(scrub, [start, start + step * 0.75], [0, 1]);
+}
+
+/**
+ * Text that assembles a word at a time, scrubbed by scroll.
  *
  * The whole string is always in the DOM at full size — only per-word opacity
- * animates. A real typewriter appends characters, which reflows the
- * paragraph on every frame and is exactly the layout-thrashing this pass
- * bans; this reserves the final layout up front and reveals into it, so the
- * effect is compositor-only and nothing below it ever shifts.
+ * animates. A real typewriter appends characters, which reflows the paragraph
+ * on every frame and is exactly the layout-thrashing this page bans; this
+ * reserves the final layout up front and reveals into it, so the effect is
+ * compositor-only and nothing below it ever shifts.
  */
-export function AssemblingText({
+export function ScrubbedText({
   text,
-  active,
+  scrub,
+  share = [0, 1],
   className = '',
-  startDelay = 0,
-  perWord = 0.05,
-  onDone,
 }: {
   text: string;
-  active: boolean;
+  scrub: MotionValue<number>;
+  share?: [number, number];
   className?: string;
-  startDelay?: number;
-  perWord?: number;
-  onDone?: () => void;
 }) {
-  const reduce = useReducedMotion();
+  const { reduced } = useStoryScroll();
   const words = React.useMemo(() => text.split(' '), [text]);
-
-  React.useEffect(() => {
-    if (!active || !onDone) return;
-    const ms = reduce ? 0 : (startDelay + words.length * perWord + 0.35) * 1000;
-    const id = setTimeout(onDone, ms);
-    return () => clearTimeout(id);
-  }, [active, onDone, reduce, startDelay, perWord, words.length]);
 
   return (
     <span className={className}>
       {words.map((word, i) => (
-        <motion.span
+        <ScrubWord
           key={`${word}-${i}`}
-          className="inline-block whitespace-pre"
-          initial={{ opacity: 0 }}
-          animate={active ? { opacity: 1 } : { opacity: 0 }}
-          transition={{
-            duration: reduce ? 0 : 0.28,
-            delay: reduce ? 0 : startDelay + i * perWord,
-            ease: 'easeOut',
-          }}
-        >
-          {word}
-          {i < words.length - 1 ? ' ' : ''}
-        </motion.span>
+          word={word + (i < words.length - 1 ? ' ' : '')}
+          scrub={scrub}
+          slot={i}
+          count={words.length}
+          share={share}
+          reduced={reduced}
+        />
       ))}
     </span>
   );
 }
 
-/**
- * Fires once the element is properly on screen, after a settle delay. Used
- * by every beat that plays a fixed-duration animation rather than scrubbing
- * one: the trigger is "you have arrived", the playback is its own timeline.
- */
-export function useSettledTrigger(
-  ref: React.RefObject<Element | null>,
-  { amount = 0.5, delay = 600 }: { amount?: number; delay?: number } = {}
-) {
-  const inView = useInView(ref, { amount, once: true });
-  const [fired, setFired] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!inView) return;
-    const id = setTimeout(() => setFired(true), delay);
-    return () => clearTimeout(id);
-  }, [inView, delay]);
-
-  return fired;
+function ScrubWord({
+  word,
+  scrub,
+  slot,
+  count,
+  share,
+  reduced,
+}: {
+  word: string;
+  scrub: MotionValue<number>;
+  slot: number;
+  count: number;
+  share: [number, number];
+  reduced: boolean;
+}) {
+  const opacity = useSlotOpacity(scrub, slot, count, share);
+  return (
+    <motion.span className="inline-block whitespace-pre" style={{ opacity: reduced ? 1 : opacity }}>
+      {word}
+    </motion.span>
+  );
 }
 
-export { HOUSE_EASE };
+export { HOUSE_EASE, useSectionRange };

@@ -1,23 +1,44 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import { useTransform } from 'motion/react';
 import { ArrowRight } from 'lucide-react';
-import { StorySection, StoryHeading, StoryReveal } from './StorySection';
-import { LandingGraph } from '../LandingGraph';
+import { StorySection, StoryHeading, StoryReveal, StoryAnchor, useScrub } from './StorySection';
+import { useStoryScroll } from '../StoryScroll';
+import { LandingGraph, GRAPH_ANCHORS } from '../LandingGraph';
 import { STORY_CONTACT } from '../storyContact';
 
 /* ────────────────────────────────────────────────────────────────────────
    Beat 04 — the map.
 
-   The contact from beats 1–3 is now a node you can find: same oxblood, same
-   ring, sitting in the Venture lane with a callout on it. That is the whole
-   argument of this beat — the person you tapped four sections ago has a
-   place in the shape of your network now.
+   This beat's version of "the token arrives at the anchor" is the literal
+   one. The graph starts with **no node for the story contact at all** — he
+   does not exist in it yet. As the section scrolls, the token travels down
+   the You → Venture branch, the same route the graph's own ambient signal
+   pulses take, and becomes his node at the end of the run.
+
+   That is why this beat registers three anchors rather than one: the centre
+   node, the Venture hub, and the point where the contact will be. The token
+   visits them in order across the beat's window, so it reads as a signal
+   moving through the network rather than an icon sliding over a picture of
+   one. His node, its link and its callout all fade up together as the token
+   lands on the third anchor.
+
+   The anchors are positioned as percentages of the graph container because
+   the SVG scales fluidly — a percentage marker tracks the node it stands for
+   at every width, which fixed offsets would not.
    ──────────────────────────────────────────────────────────────────────── */
 
 const primaryCta =
   'inline-flex items-center justify-center gap-2 rounded-card bg-brand text-brand-on px-7 py-3.5 font-mono text-xs uppercase tracking-widest font-bold hover:bg-[#8E2A3A] active:bg-[#661D29] active:scale-[0.98] transition-[transform,background-color] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper';
 
 export function MapSection() {
+  const { reduced } = useStoryScroll();
+  const scrub = useScrub(3);
+
+  // He appears over the last stretch of the token's run down the branch —
+  // as it reaches the third anchor, not before it sets off.
+  const arrival = useTransform(scrub, [0.62, 0.82], [0, 1]);
+
   return (
     <StorySection index={3} id="network" className="bg-white/40">
       <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-12">
@@ -29,8 +50,8 @@ export function MapSection() {
               <>
                 You sit at the center. Industry lanes fan out around you, each holding the
                 people inside it — sized and shaded by how warm the relationship is.
-                {' '}{STORY_CONTACT.firstName} is in the {STORY_CONTACT.industry} lane, one hop
-                out, exactly where you'd look for him.
+                {' '}{STORY_CONTACT.firstName} arrives down the {STORY_CONTACT.industry} lane,
+                one hop out, exactly where you'd look for him.
               </>
             }
           >
@@ -43,7 +64,14 @@ export function MapSection() {
         </div>
         <div className="lg:col-span-7 lg:-mr-10 xl:-mr-16">
           <StoryReveal y={24}>
-            <LandingGraph />
+            <div className="relative">
+              {/* The branch the token flies: centre → hub → new contact. */}
+              <StoryAnchor stage={3} order={0} style={GRAPH_ANCHORS.me} />
+              <StoryAnchor stage={3} order={1} style={GRAPH_ANCHORS.hub} />
+              <StoryAnchor stage={3} order={2} style={GRAPH_ANCHORS.story} />
+
+              <LandingGraph arrival={reduced ? undefined : arrival} />
+            </div>
           </StoryReveal>
         </div>
       </div>
