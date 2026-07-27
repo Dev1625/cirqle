@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { motion, useMotionValue, useReducedMotion, useTransform, type Variants } from 'motion/react';
+import { motion, useInView, useReducedMotion, type Variants } from 'motion/react';
 import { ArrowRight, Sparkles, Send, ListTodo, Network, Nfc, Mail, CalendarDays, Compass, Search } from 'lucide-react';
 import { CountUp } from '../components/landing/CountUp';
 import { Reveal, RevealGroup } from '../components/landing/motion';
@@ -573,85 +573,33 @@ function RoadmapIntro() {
  * flat hairline language everywhere else on the page — that contrast is the
  * point. It must not bleed into the surrounding sections.
  *
- * Scroll progress across the section drives rotateY 0 -> 180 -> 360, so the
- * card turns through a full revolution showing a real front and back face.
+ * The turn is driven by the section *entering the viewport*, not by scroll
+ * position — and that distinction is the whole fix.
  *
- * The mapping is *not* linear, and that matters. Linearly, rotateY hit 180°
- * at exactly progress 0.5 — one single scroll position — so the back face was
- * only ever square-on for a pixel. Everywhere else in the section the card was
- * caught mid-turn: skewed on the way in, and already rotating back out before
- * you had read it. The plateau below holds each face flat for a real stretch
- * of scroll instead:
+ * Coupling rotateY to scroll progress cannot work on this page. The sections
+ * are 100svh with CSS scroll-snap, so a reader does not sweep through a range
+ * of scroll positions here; they arrive at essentially one. Whatever angle the
+ * mapping assigns to that position is the only angle they ever see. Tuned so
+ * the back faces them at rest, the card has already finished turning before it
+ * settles — it "flips too early", because the flip happened somewhere above
+ * the fold. Tuned so it turns later, they scroll away before it does. There is
+ * no mapping that makes a scroll-coupled turn watchable under snap scrolling.
  *
- *   0    → 0.14   front, still
- *   0.14 → 0.32   turns to the back as the card rises into full view
- *   0.32 → 0.68   BACK, held. That band is exactly the window in which the
- *                 card is fully inside the viewport, and it brackets the
- *                 scroll-snap rest position (progress 0.5) by ~280px either
- *                 way — wider than a single wheel gesture, so ordinary
- *                 imprecise scrolling still comes to rest on the back face
- *   0.68 → 0.86   turns back to the front as the section leaves
- *   0.86 → 1      front, still
+ * So: the card holds its front face until the section is properly on screen,
+ * waits a beat so the front actually registers, then turns over once, at a
+ * readable speed, and stays on the back. The turn is always witnessed, from
+ * any scroll speed, and both faces get a good long look. Scrolling away and
+ * back replays it.
  */
-const CARD_FLIP_IN = [0, 0.14, 0.32, 0.68, 0.86, 1];
-const CARD_FLIP_OUT = [0, 0, 180, 180, 360, 360];
-
-/**
- * How far a section has travelled through the viewport: 0 the instant its top
- * touches the bottom of the screen, 1 the instant its bottom leaves the top.
- *
- * This deliberately does *not* use motion's `useScroll({ target })`. That hook
- * measures the target's document offset once and caches it, and this page's
- * layout keeps settling after mount — web fonts swap in, the force-graph
- * canvas sizes itself, reveal animations resolve. Every one of those shifts
- * the section without firing a resize, so the cached offset drifts: measured
- * live, motion's progress was running ~400px behind the real scroll position,
- * which is precisely why the card looked like it flipped before the section
- * arrived and flipped back long after it should have.
- *
- * Reading getBoundingClientRect() on each scroll frame costs one layout read
- * against an element that is already being composited, and it cannot go
- * stale — whatever the page does above this section, the number is right.
- */
-function useViewportProgress(ref: React.RefObject<HTMLElement | null>) {
-  const progress = useMotionValue(0);
-
-  React.useEffect(() => {
-    let frame = 0;
-
-    const measure = () => {
-      frame = 0;
-      const el = ref.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const viewport = window.innerHeight;
-      const range = rect.height + viewport;
-      if (range <= 0) return;
-      progress.set(Math.min(1, Math.max(0, (viewport - rect.top) / range)));
-    };
-
-    const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(measure);
-    };
-
-    measure();
-    window.addEventListener('scroll', schedule, { passive: true });
-    window.addEventListener('resize', schedule);
-    return () => {
-      if (frame) cancelAnimationFrame(frame);
-      window.removeEventListener('scroll', schedule);
-      window.removeEventListener('resize', schedule);
-    };
-  }, [ref, progress]);
-
-  return progress;
-}
+const CARD_TURN_DELAY = 0.65;
+const CARD_TURN_DURATION = 1.25;
 
 function NfcCardSection() {
   const ref = React.useRef<HTMLElement>(null);
-  const reduce = useReducedMotion();
-  const scrollProgress = useViewportProgress(ref);
-  const rotateY = useTransform(scrollProgress, CARD_FLIP_IN, CARD_FLIP_OUT);
+  // 0.5 rather than something higher: the section is exactly one viewport
+  // tall, so it is never much more than half-visible until it has essentially
+  // settled. Waiting for more would delay the turn past the reader's arrival.
+  const isSettled = useInView(ref, { amount: 0.5 });
 
   return (
     <section ref={ref} className="snap-section border-t border-ink/15 py-20 md:py-28">
@@ -677,7 +625,7 @@ function NfcCardSection() {
           </Reveal>
           <Reveal>
             <p className="mt-6 font-mono text-[11px] uppercase tracking-widest text-muted">
-              Scroll to turn it over.
+              Matte black. NFC on the back.
             </p>
           </Reveal>
         </RevealGroup>
@@ -689,11 +637,17 @@ function NfcCardSection() {
           <div className="flex justify-center">
             <motion.div
               className="relative w-[320px] h-[202px] md:w-[380px] md:h-[240px]"
-              style={
-                reduce
-                  ? undefined
-                  : { rotateY, transformPerspective: 1600, transformStyle: 'preserve-3d' }
-              }
+              style={{ transformPerspective: 1600, transformStyle: 'preserve-3d' }}
+              // No reduced-motion branch needed: the MotionConfig at the app
+              // root runs reducedMotion="user", which skips the tween and
+              // settles straight on the end value — so those readers still
+              // get to see the back face, just without the rotation.
+              animate={{ rotateY: isSettled ? 180 : 0 }}
+              transition={{
+                duration: CARD_TURN_DURATION,
+                delay: isSettled ? CARD_TURN_DELAY : 0,
+                ease: HOUSE_EASE,
+              }}
             >
               <NfcCardFace side="front" />
               <NfcCardFace side="back" />

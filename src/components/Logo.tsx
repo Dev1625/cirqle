@@ -11,13 +11,23 @@ import React from 'react';
  * whatever sits behind the mark shows through and the background color stops
  * mattering. Strokes are `currentColor`, so it also inherits inverted text.
  *
- * Geometry (36-unit box): ring outer radius 18, stroke 2 → centerline r = 17.
- * The dash pattern leaves a 19-unit gap centered on 3 o'clock, and the dot
- * sits inside that gap at (30, 18) — the original proportions, preserved.
+ * Geometry is derived from the original, not eyeballed. That version masked
+ * the ring with a 14px-tall rectangle at the right edge, so on a centerline
+ * radius of 17 the gap subtends 2·asin(7/17) ≈ 48.6° — an arc of ≈14.5 units
+ * out of a ≈106.8 circumference — centered on 3 o'clock. The dot keeps its
+ * original center of (30, 18) with r = 3.
+ *
+ * The dash offset must be NEGATIVE half a gap. `stroke-dashoffset` is the
+ * distance *into* the pattern at which the path starts, and an SVG <circle>
+ * starts at 3 o'clock; a positive half-gap therefore starts the path half a
+ * gap into the dash and pushes the gap most of the way around to 12 o'clock,
+ * which is what made the mark look rotated with the dot stranded on solid
+ * stroke. Negative pulls the pattern back so the gap straddles 3 o'clock,
+ * putting it around the dot where it belongs.
  */
 const R = 17;
 const CIRCUMFERENCE = 2 * Math.PI * R; // ≈ 106.81
-const GAP = 19;
+const GAP = 2 * R * Math.asin(7 / R); // ≈ 14.5 — the original mask's arc
 
 const EASE = 'ease-[cubic-bezier(0.22,1,0.36,1)]';
 
@@ -80,7 +90,7 @@ export function LogoMark({ px = 36, className = '' }: { px?: number; className?:
         stroke="currentColor"
         strokeWidth="2"
         strokeDasharray={`${CIRCUMFERENCE - GAP} ${GAP}`}
-        strokeDashoffset={GAP / 2}
+        strokeDashoffset={-GAP / 2}
         className={`origin-center transition-all duration-500 ${EASE} group-hover:rotate-90 group-hover:opacity-0`}
       />
 
