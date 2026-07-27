@@ -205,20 +205,33 @@ html.lenis body {
 /* Softens both cut edges so cards dissolve out of frame instead of being
    sliced by an invisible boundary. */
 .marquee-mask {
+  --marquee-fade-left: 4rem;
+  --marquee-fade-right: 4rem;
   -webkit-mask-image: linear-gradient(
     to right,
     transparent 0,
-    #000 var(--marquee-fade, 4rem),
-    #000 calc(100% - var(--marquee-fade, 4rem)),
+    #000 var(--marquee-fade-left),
+    #000 calc(100% - var(--marquee-fade-right)),
     transparent 100%
   );
   mask-image: linear-gradient(
     to right,
     transparent 0,
-    #000 var(--marquee-fade, 4rem),
-    #000 calc(100% - var(--marquee-fade, 4rem)),
+    #000 var(--marquee-fade-left),
+    #000 calc(100% - var(--marquee-fade-right)),
     transparent 100%
   );
+}
+
+/* xl is where the narrative thread appears, pinned over the left gutter.
+   This row is deliberately full-bleed, so it runs underneath it — widen the
+   *left* fade past the thread so cards dissolve before they reach the token
+   rather than sliding out from behind it. The right edge is untouched: that
+   one is the intended "content continues past the frame" bleed. */
+@media (min-width: 1280px) {
+  .marquee-mask {
+    --marquee-fade-left: 15rem;
+  }
 }
 
 /* Scrollbar styling for a premium feel */

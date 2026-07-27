@@ -1,5 +1,6 @@
 import React, { useMemo, useRef } from 'react';
 import { motion, useInView, useReducedMotion } from 'motion/react';
+import { STORY_CONTACT, STORY_INITIALS } from './storyContact';
 
 // Echoes the real NetworkGraph industry palette so the landing showcase and
 // the in-app graph read as the same system.
@@ -25,7 +26,7 @@ type Node = {
   color: string;
   ring?: string;
   label?: string;
-  kind: 'me' | 'hub' | 'contact';
+  kind: 'me' | 'hub' | 'contact' | 'story';
 };
 type Link = { id: string; x1: number; y1: number; x2: number; y2: number; strong?: boolean };
 
@@ -57,14 +58,36 @@ function build() {
     }
   });
 
-  return { nodes, links };
+  // The story contact joins the Venture lane as a real node, not an overlay.
+  // Placed deliberately rather than by the generic fan-out above: it needs
+  // clear space to its right for the callout, and it needs to be the node
+  // your eye lands on first when the section arrives.
+  const venture = nodes.find((n) => n.id === 'hub-Venture')!;
+  // Pulled in from the hub rather than fanned out like the generic contacts:
+  // the callout that follows needs ~120 units of clear space to its right,
+  // and the viewBox is only 760 wide.
+  const sx = venture.x + 46;
+  const sy = venture.y + 34;
+  nodes.push({
+    id: 'story',
+    x: sx,
+    y: sy,
+    r: 11,
+    color: '#7A2331',
+    ring: '#7A2331',
+    kind: 'story',
+    label: STORY_INITIALS,
+  });
+  links.push({ id: 'l-venture-story', x1: venture.x, y1: venture.y, x2: sx, y2: sy, strong: true });
+
+  return { nodes, links, story: { x: sx, y: sy } };
 }
 
 export function LandingGraph() {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: '-20% 0px' });
   const reduce = useReducedMotion();
-  const { nodes, links } = useMemo(build, []);
+  const { nodes, links, story } = useMemo(build, []);
 
   const show = inView || reduce;
 
@@ -75,7 +98,7 @@ export function LandingGraph() {
         className="w-full h-auto"
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="An illustration of a personal network: you at the center, connected to industry clusters, each holding individual contacts."
+        aria-label={`An illustration of a personal network: you at the center, connected to industry clusters, each holding individual contacts. ${STORY_CONTACT.name} is highlighted in the ${STORY_CONTACT.industry} cluster.`}
       >
         {/* faint grid to match the in-app graph surface */}
         <defs>
@@ -158,7 +181,7 @@ export function LandingGraph() {
                 animate={reduce ? {} : { y: [0, node.kind === 'contact' ? -5 : -3, 0] }}
                 transition={reduce ? {} : { duration: floatDur, repeat: Infinity, ease: 'easeInOut', delay: i * 0.15 }}
               >
-                {node.kind === 'me' && (
+                {(node.kind === 'me' || node.kind === 'story') && (
                   <motion.circle
                     cx={node.x}
                     cy={node.y}
@@ -168,7 +191,18 @@ export function LandingGraph() {
                     strokeWidth={1.5}
                     initial={{ opacity: 0.5, scale: 1 }}
                     animate={reduce ? { opacity: 0.35 } : { opacity: [0.5, 0.12, 0.5], scale: [1, 1.18, 1] }}
-                    transition={reduce ? {} : { duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+                    transition={
+                      reduce
+                        ? {}
+                        : {
+                            duration: 3.2,
+                            repeat: Infinity,
+                            ease: 'easeInOut',
+                            // Offset from "You" so the two halos breathe out
+                            // of phase rather than pulsing in lockstep.
+                            delay: node.kind === 'story' ? 1.1 : 0,
+                          }
+                    }
                     style={{ transformOrigin: `${node.x}px ${node.y}px` }}
                   />
                 )}
@@ -184,7 +218,7 @@ export function LandingGraph() {
                     dominantBaseline="central"
                     fontFamily="Inter, sans-serif"
                     fontWeight={node.kind === 'me' ? 700 : 800}
-                    fontSize={node.kind === 'me' ? 11 : 10}
+                    fontSize={node.kind === 'me' ? 11 : node.kind === 'story' ? 9 : 10}
                     fill={node.kind === 'me' ? '#F5F0E8' : '#FFFFFF'}
                   >
                     {node.label}
@@ -194,6 +228,45 @@ export function LandingGraph() {
             </motion.g>
           );
         })}
+
+        {/* The callout that makes the story contact findable rather than
+            merely present. It lands last, after the constellation has drawn
+            itself, so the eye is pulled to it once the shape has registered. */}
+        <motion.g
+          initial={reduce ? { opacity: 1 } : { opacity: 0, x: -6 }}
+          animate={show ? { opacity: 1, x: 0 } : {}}
+          transition={{ duration: 0.6, delay: reduce ? 0 : 1.5, ease: [0.22, 1, 0.36, 1] }}
+        >
+          <line
+            x1={story.x + 14}
+            y1={story.y}
+            x2={story.x + 30}
+            y2={story.y}
+            stroke="#7A2331"
+            strokeWidth={1}
+            opacity={0.5}
+          />
+          <text
+            x={story.x + 36}
+            y={story.y - 5}
+            fontFamily="Playfair Display, Georgia, serif"
+            fontWeight={700}
+            fontSize={15}
+            fill="#1A1A1A"
+          >
+            {STORY_CONTACT.name}
+          </text>
+          <text
+            x={story.x + 36}
+            y={story.y + 10}
+            fontFamily="Inconsolata, monospace"
+            fontSize={9.5}
+            letterSpacing="1.4"
+            fill="#5C5850"
+          >
+            {STORY_CONTACT.company.toUpperCase()} · {STORY_CONTACT.industry.toUpperCase()}
+          </text>
+        </motion.g>
       </svg>
     </div>
   );
