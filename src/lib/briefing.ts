@@ -134,5 +134,5 @@ Rules:
 - Dry and useful. No pep talk, no "be sure to build rapport", no restating their job title back.
 - If the record is genuinely thin, say that in one bullet rather than padding.`;
 
-  return generateText(prompt, { model: 'reasoning', timeoutMs: 25000 });
+  return generateText(prompt, { tier: 'reasoning', timeoutMs: 25000 });
 }

@@ -76,7 +76,7 @@ And pick a layout: "compact" if their details are thin, "expanded" if there is e
 Return JSON exactly: {"intro": "...", "accent": "...", "layout": "..."}`;
 
   const raw = await generateJSON<{ intro?: string; accent?: string; layout?: string }>(prompt, {
-    model: 'reasoning',
+    tier: 'draft',
   });
 
   const allowedAccents = ['oxblood', 'slate', 'moss', 'brass', 'clay', 'ink'];

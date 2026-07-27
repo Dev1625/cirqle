@@ -30,6 +30,72 @@ Google project), digest email ~15 min.
 
 ---
 
+## 0. AI models and where the keys go
+
+### Where to put your DeepSeek key — the short answer
+
+**One place: `litellm-proxy/.env`** (gitignored, never deployed to Vercel).
+
+```bash
+cd litellm-proxy
+cp .env.template .env          # if you have not already
+# then set:
+DEEPSEEK_API_KEY=sk-your-real-key
+```
+
+Then restart the proxy so it picks the key up:
+
+```bash
+docker compose up -d --build
+```
+
+If your proxy runs on Railway rather than locally, set `DEEPSEEK_API_KEY` as a
+Railway service variable instead — same variable name, same effect.
+
+**Before it will work**, confirm two model ids in `litellm-proxy/config.yaml`.
+The aliases (`deepseek-v4-flash`, `deepseek-v4-pro`) are correct; the `model:`
+values underneath them are a best guess I could not verify. Check DeepSeek's
+current model list and edit those two lines. Nothing else changes.
+
+### Which model each feature uses
+
+The app never names a model. It asks for one of three **tiers**, mapped in
+`src/lib/aiConfig.ts`:
+
+| Tier | Default model | Used by |
+|---|---|---|
+| `fast` | `gemini-2.5-flash-lite` | CSV import, Add AI Tags, magic paste-to-contact, voice-memo summary |
+| `reasoning` | `deepseek-v4-flash` | Ask-AI search, Dashboard priorities, pre-meeting brief, process reply, commitment extraction, dormant-digest note |
+| `draft` | `deepseek-v4-pro` | Draft Outreach, AI card intro |
+
+**To change a model**, edit one line in `src/lib/aiConfig.ts` — or override per
+deploy with `VITE_AI_MODEL_FAST` / `_REASONING` / `_DRAFT`. To change what an
+alias actually runs on, edit `litellm-proxy/config.yaml` and restart the proxy;
+no app rebuild needed.
+
+**If you rename an alias, three files must agree** or you get a 401/403 that
+looks like an auth bug:
+1. `src/lib/aiConfig.ts`
+2. `model_name:` in `litellm-proxy/config.yaml`
+3. the `models: [...]` allowlist in `api/register-user.js` — virtual keys are
+   scoped per model
+
+### Key hygiene — what lives where
+
+| Secret | Lives in | Never in |
+|---|---|---|
+| `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | `litellm-proxy/.env` or Railway vars | git, Vercel, the browser |
+| `LITELLM_MASTER_KEY` | Vercel env var (used by `api/register-user.js`) **and** the proxy | git, the browser |
+| Per-user virtual key | minted server-side, held in Firestore + `localStorage` | — |
+
+**Nothing prefixed `VITE_` is secret.** Vite inlines those into the browser
+bundle at build time, so a real key there is published to every visitor
+permanently. The old client had a `VITE_GEMINI_API_KEY` fallback; it has been
+removed and must not come back. The only `VITE_` AI variables now are the
+gateway URL and model alias names, neither of which is sensitive.
+
+---
+
 ## 1. Running it locally
 
 ```bash

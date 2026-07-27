@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from './ui/Button';
 import { Input } from './ui/Input';
 import { Search, Sparkles, X, Activity } from 'lucide-react';
-import { getGemini } from '../lib/gemini';
+import { generateJSON } from '../lib/ai';
 import { useNavigate } from 'react-router-dom';
 
 export function GlobalSearch() {
@@ -37,8 +37,6 @@ export function GlobalSearch() {
         return;
       }
 
-      const ai = getGemini();
-      
       const miniContacts = contacts.map(c => ({
         id: c.id,
         name: c.name,
@@ -62,14 +60,10 @@ ${JSON.stringify(miniContacts)}
   "contactIds": ["id1", "id2"]
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: { responseMimeType: "application/json" }
+      const parsed = await generateJSON<{ explanation?: string; contactIds?: string[] }>(prompt, {
+        tier: 'reasoning',
       });
-      
-      const parsed = JSON.parse(response.text || "{}");
-      
+
       setExplanation(parsed.explanation || '');
       if (parsed.contactIds && Array.isArray(parsed.contactIds)) {
         const matched = parsed.contactIds.map(id => contacts.find(c => c.id === id)).filter(Boolean);

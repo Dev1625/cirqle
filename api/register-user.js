@@ -37,7 +37,22 @@ export default async function handler(req, res) {
     max_budget: 5.00,
     reset_value: 5.00,
     reset_period: "month",
-    models: ["gemini-2.5-flash-lite", "gpt-5-mini", "gemini-3-flash-preview", "gemini-flash", "gemini-3.1-pro-preview", "openai-mini"]
+    // Virtual keys are scoped to an explicit model allowlist. An alias missing
+    // from this array is rejected at request time with a 401/403 that looks
+    // like an auth problem rather than a config one — so this list MUST stay
+    // in sync with src/lib/aiConfig.ts and litellm-proxy/config.yaml.
+    models: [
+      // Tiers the app actually asks for
+      "deepseek-v4-flash",      // reasoning
+      "deepseek-v4-pro",        // draft
+      "gemini-2.5-flash-lite",  // fast
+      // Retained so keys issued before the DeepSeek switch keep working
+      "gemini-3-flash-preview",
+      "gemini-flash",
+      "gemini-3.1-pro-preview",
+      "gpt-5-mini",
+      "openai-mini"
+    ]
   };
 
   try {
