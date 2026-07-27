@@ -156,7 +156,7 @@ Return JSON: {"commitments": [{"text": "...", "dueHint": "..." or null, "owedBy"
 If there are none, return {"commitments": []}. Returning an empty list is a correct and expected answer.`;
 
   const result = await generateJSON<{ commitments?: ExtractedCommitment[] }>(prompt, {
-    model: 'reasoning',
+    tier: 'reasoning',
   });
 
   return (result.commitments || [])

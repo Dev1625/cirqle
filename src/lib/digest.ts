@@ -168,7 +168,7 @@ Rules:
 
 Return only the message body. No subject line, no signature block.`;
 
-  return generateText(prompt, { model: 'reasoning' });
+  return generateText(prompt, { tier: 'reasoning' });
 }
 
 /**

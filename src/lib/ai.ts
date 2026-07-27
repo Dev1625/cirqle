@@ -1,69 +1,40 @@
-import { getGemini } from './gemini';
+import { chat, AIUnavailableError, AIKeyMissingError } from './aiClient';
+import { modelFor, type ModelTier } from './aiConfig';
 
 /**
- * Shared wrapper for the AI surfaces added in this pass.
+ * The only way the app talks to a model.
  *
- * Exists because the same three things were being reimplemented at every call
- * site, and the first polish pass had to go back and fix a Dashboard brief
- * that had none of them:
+ * Callers name a *tier* ('fast' | 'reasoning' | 'draft'), never a model. That
+ * is what makes a model swap a one-line change in aiConfig.ts instead of a
+ * twelve-file search-and-replace, and it is why the tier names describe the
+ * job rather than the vendor — 'reasoning' stays meaningful when the model
+ * behind it changes.
  *
- *   1. A timeout. The gateway may simply be absent in local dev (lib/gemini.ts
- *      falls back to a placeholder key against localhost:4000), and a fetch
- *      against nothing hangs rather than rejecting. Without this, "loading"
- *      is forever and the user cannot tell it from slow.
- *   2. Honest error text. Callers get a short, dry sentence they can put
- *      straight into AISurface's error state, not a raw stack.
- *   3. Tolerant JSON parsing. Models fence JSON in ``` often enough that
- *      not handling it is a bug, not a nicety.
+ * Everything routed through here gets, for free:
+ *   - a real timeout that aborts the request rather than abandoning it
+ *   - honest error text, ready to drop into AISurface's error state
+ *   - tolerant JSON parsing, because models fence JSON in ``` often enough
+ *     that not handling it is a bug rather than a nicety
  */
 
-const MODEL_FAST = 'gemini-2.5-flash-lite';
-const MODEL_REASONING = 'gemini-3-flash-preview';
+export { AIUnavailableError, AIKeyMissingError };
 
-export class AIUnavailableError extends Error {
-  constructor(message = 'No answer from the model. The gateway may not be running.') {
-    super(message);
-    this.name = 'AIUnavailableError';
-  }
+export interface GenerateOptions {
+  /** Defaults to 'fast' — the cheap tier. Opt *up*, never accidentally. */
+  tier?: ModelTier;
+  timeoutMs?: number;
+  temperature?: number;
+  maxTokens?: number;
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = window.setTimeout(
-      () => reject(new AIUnavailableError('The model took too long. Try again.')),
-      ms
-    );
-    promise.then(
-      (value) => {
-        window.clearTimeout(timer);
-        resolve(value);
-      },
-      (error) => {
-        window.clearTimeout(timer);
-        reject(error);
-      }
-    );
+export async function generateText(prompt: string, options: GenerateOptions = {}): Promise<string> {
+  return chat({
+    model: modelFor(options.tier ?? 'fast'),
+    prompt,
+    timeoutMs: options.timeoutMs,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
   });
-}
-
-export async function generateText(
-  prompt: string,
-  options: { model?: 'fast' | 'reasoning'; timeoutMs?: number } = {}
-): Promise<string> {
-  const model = options.model === 'reasoning' ? MODEL_REASONING : MODEL_FAST;
-  try {
-    const ai = getGemini();
-    const response = await withTimeout(
-      ai.models.generateContent({ model, contents: prompt }),
-      options.timeoutMs ?? 20000
-    );
-    const text = (response as any)?.text?.trim();
-    if (!text) throw new AIUnavailableError('The model returned nothing.');
-    return text;
-  } catch (error) {
-    if (error instanceof AIUnavailableError) throw error;
-    throw new AIUnavailableError();
-  }
 }
 
 /** Strips ``` fences and pulls the first balanced JSON value out of a reply. */
@@ -84,26 +55,14 @@ export function parseLooseJSON<T>(raw: string): T {
   }
 }
 
-export async function generateJSON<T>(
-  prompt: string,
-  options: { model?: 'fast' | 'reasoning'; timeoutMs?: number } = {}
-): Promise<T> {
-  const model = options.model === 'reasoning' ? MODEL_REASONING : MODEL_FAST;
-  try {
-    const ai = getGemini();
-    const response = await withTimeout(
-      ai.models.generateContent({
-        model,
-        contents: prompt,
-        config: { responseMimeType: 'application/json' },
-      }),
-      options.timeoutMs ?? 20000
-    );
-    const text = (response as any)?.text?.trim();
-    if (!text) throw new AIUnavailableError('The model returned nothing.');
-    return parseLooseJSON<T>(text);
-  } catch (error) {
-    if (error instanceof AIUnavailableError) throw error;
-    throw new AIUnavailableError();
-  }
+export async function generateJSON<T>(prompt: string, options: GenerateOptions = {}): Promise<T> {
+  const raw = await chat({
+    model: modelFor(options.tier ?? 'fast'),
+    prompt,
+    json: true,
+    timeoutMs: options.timeoutMs,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+  });
+  return parseLooseJSON<T>(raw);
 }

@@ -4,7 +4,7 @@ import { db, handleFirestoreError } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Link } from 'react-router-dom';
 import { Sparkles, ArrowRight, RefreshCw, Database, ListTodo, Clock, Send, Users, AlertTriangle } from 'lucide-react';
-import { getGemini } from '../lib/gemini';
+import { generateText, AIUnavailableError } from '../lib/ai';
 import Markdown from 'react-markdown';
 import { seedSampleData } from '../lib/seed';
 import { getFollowUpQueueItems, getRecordTime } from '../lib/tracker';
@@ -18,13 +18,6 @@ import { useCalendarEvents } from '../hooks/useCalendarEvents';
 import type { CalendarEvent } from '../lib/integrations/calendar';
 
 const BRIEF_TIMEOUT_MS = 20000;
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => window.setTimeout(() => reject(new Error('timeout')), ms)),
-  ]);
-}
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -122,28 +115,28 @@ export default function Dashboard() {
         };
       });
 
-      const ai = getGemini();
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: `You are an AI Executive Assistant managing my CRM pipeline.
+      // The wrapper owns the timeout now (and actually aborts the request
+      // rather than abandoning it), so the local withTimeout is gone.
+      const text = await generateText(
+        `You are an AI Executive Assistant managing my CRM pipeline.
           Here is a slice of my tracker data: ${JSON.stringify(miniTracker)}
           Analyze this and write a very short "This Week's Priorities" brief.
           Be direct, professional, and slightly conversational. Maximum 3 bullet points.
-          Focus on who to follow up with, who to thank, and what's overdue.`
-        }),
-        BRIEF_TIMEOUT_MS
+          Focus on who to follow up with, who to thank, and what's overdue.`,
+        { tier: 'reasoning', timeoutMs: BRIEF_TIMEOUT_MS }
       );
-      const text = response.text || '';
       setAiBrief(text);
       setBriefError(null);
       localStorage.setItem(cacheKey, text);
       localStorage.setItem(timeKey, Date.now().toString());
     } catch (e) {
       console.error(e);
+      // The wrapper already produces user-facing text (timeout, rate limit,
+      // rejected key, gateway down), so use it rather than flattening every
+      // cause into one generic line.
       setBriefError(
-        e instanceof Error && e.message === 'timeout'
-          ? "This is taking longer than expected — the AI service may be unreachable right now."
+        e instanceof AIUnavailableError
+          ? e.message
           : "Couldn't generate your priorities brief right now."
       );
     } finally {

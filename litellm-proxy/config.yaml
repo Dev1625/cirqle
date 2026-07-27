@@ -1,17 +1,56 @@
+# =========================================================================
+# THE ALIASES THE APP ASKS FOR
+#
+# src/lib/aiConfig.ts maps three semantic tiers to the alias names below:
+#   fast      -> gemini-2.5-flash-lite
+#   reasoning -> deepseek-v4-flash
+#   draft     -> deepseek-v4-pro
+#
+# The app never names an upstream model. To change what a tier actually runs
+# on, change the `model:` line here and restart the proxy — no app rebuild,
+# no redeploy of the frontend.
+#
+# If you rename an alias, three files must agree: this one,
+# src/lib/aiConfig.ts, and the `models: [...]` allowlist in
+# api/register-user.js (virtual keys are scoped per model; an alias missing
+# from that list is rejected at request time).
+# =========================================================================
 model_list:
+  # ---- DeepSeek: the cost-driven default for anything writing prose -------
+  #
+  # ⚠️ CONFIRM THE UPSTREAM MODEL IDS BELOW BEFORE DEPLOYING.
+  # `deepseek-v4-flash` / `deepseek-v4-pro` are the *aliases the app uses* and
+  # are correct as written. The `model:` values are my best guess at the
+  # provider ids and I could not verify them — check DeepSeek's current model
+  # list and edit the two `model:` lines to match. Nothing else needs to change.
+  - model_name: deepseek-v4-flash
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: "os.environ/DEEPSEEK_API_KEY"
+
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: deepseek/deepseek-reasoner
+      api_key: "os.environ/DEEPSEEK_API_KEY"
+
+  # ---- Google ------------------------------------------------------------
   # 1. Google Gemini Flash Endpoint
   - model_name: gemini-flash
     litellm_params:
       model: gemini/gemini-1.5-flash
       api_key: "os.environ/GEMINI_API_KEY"
 
-  # 2. Google Gemini 3 Flash Preview Alias (routes to stable 1.5-flash)
+  # 2. Retained so any cached client or older build still resolves. Nothing in
+  #    the app requests this any more — the reasoning tier is DeepSeek now.
+  #    NOTE: this alias never pointed at Gemini 3; it has always resolved to
+  #    gemini-1.5-flash, so it was not the source of a large bill.
   - model_name: gemini-3-flash-preview
     litellm_params:
       model: gemini/gemini-1.5-flash
       api_key: "os.environ/GEMINI_API_KEY"
 
-  # 3. Google Gemini 2.5 Flash Lite Alias (routes to stable 1.5-flash)
+  # 3. The `fast` tier. Kept on Gemini deliberately — it is already cheap and
+  #    good at bulk structured extraction (CSV import, tagging, summaries).
   - model_name: gemini-2.5-flash-lite
     litellm_params:
       model: gemini/gemini-1.5-flash

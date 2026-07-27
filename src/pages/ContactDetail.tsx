@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { TierBadge } from '../components/ui/TierBadge';
 import { Sparkles, ArrowLeft, Send, Calendar, MessageSquare, Tag } from 'lucide-react';
-import { getGemini } from '../lib/gemini';
+import { generateJSON, generateText } from '../lib/ai';
 import { Input } from '../components/ui/Input';
 import Markdown from 'react-markdown';
 import { useToast } from '../contexts/ToastContext';
@@ -141,15 +141,9 @@ export default function ContactDetail() {
      if (!user || !id || !replyText) return;
      setIsProcessing(true);
      try {
-        const ai = getGemini();
         const prompt = `Analyze this email/message reply from ${contact.name}:\n\n"${replyText}"\n\nProvide a very short 1-2 sentence summary of what they said. Identify if a follow-up is needed and what we should do next. Return JSON EXACTLY like this: {"summary": "Brief summary", "suggestedAction": "Suggested next step"}`;
         
-        const response = await ai.models.generateContent({
-           model: "gemini-3-flash-preview",
-           contents: prompt,
-           config: { responseMimeType: "application/json" }
-        });
-        const parsed = JSON.parse(response.text || "{}");
+        const parsed = await generateJSON<{ summary?: string; suggestedAction?: string }>(prompt, { tier: 'reasoning' });
         const content = `**Reply Received:** ${parsed.summary}\n**AI Suggestion:** ${parsed.suggestedAction}\n\n*Original:* "${replyText.substring(0, 150)}${replyText.length > 150 ? '...' : ''}"`;
         
         await addDoc(collection(db, `users/${user.uid}/notes`), {
@@ -185,15 +179,9 @@ export default function ContactDetail() {
      if (!user || !id || !conversationLog) return;
      setIsProcessing(true);
      try {
-        const ai = getGemini();
         const prompt = `Analyze the following conversation notes/log with ${contact.name}:\n\n"${conversationLog}"\n\nExtract key life events, facts, or things they mentioned (e.g., "Moving to NY", "Looking for hires", "Launching a podcast"). Return them as an array of short tag strings. Return JSON EXACTLY like this: {"tags": ["Mentioned: Moving cities", "Mentioned: Hiring engineers"]}`;
         
-        const response = await ai.models.generateContent({
-           model: "gemini-2.5-flash-lite",
-           contents: prompt,
-           config: { responseMimeType: "application/json" }
-        });
-        const parsed = JSON.parse(response.text || "{}");
+        const parsed = await generateJSON<{ tags?: string[] }>(prompt, { tier: 'fast' });
         const newTags = parsed.tags || [];
 
         if (newTags.length > 0) {
@@ -241,7 +229,6 @@ export default function ContactDetail() {
       const profSnap = await getDoc(doc(db, `users/${user.uid}`));
       const profile = profSnap.data() || {};
       
-      const ai = getGemini();
       const prompt = `You are an expert executive assistant drafting an email.
 Write a personalized email to ${contact.name}.
 Their Role: ${contact.role} at ${contact.company}
@@ -270,13 +257,9 @@ Return the result in JSON format EXACTLY like this:
   "body": "The full email body"
 }`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: { responseMimeType: "application/json" }
-      });
-      
-      const parsed = JSON.parse(response.text || "{}");
+      // 'draft' tier: this output is the product — the user sends it to a real
+      // person — so it is one of the few places worth paying more for.
+      const parsed = await generateJSON<{ subject: string; body: string }>(prompt, { tier: 'draft' });
       setCurrentDraft(parsed);
     } catch (err) {
       console.error(err);
