@@ -40,8 +40,11 @@ export default function App() {
       <AuthProvider>
         <ToastProvider>
           <ConfirmProvider>
-            <TourProvider>
-              <BrowserRouter>
+            {/* TourProvider sits *inside* BrowserRouter: tours navigate
+                between pages themselves (see the `route` on each step), which
+                means they need the router context. */}
+            <BrowserRouter>
+              <TourProvider>
                 <Routes>
                   {/* Public NFC card page. Deliberately outside both layouts:
                       someone who tapped a chip should land on a card, not on
@@ -65,8 +68,8 @@ export default function App() {
                     <Route path="settings" element={<Settings />} />
                   </Route>
                 </Routes>
-              </BrowserRouter>
-            </TourProvider>
+              </TourProvider>
+            </BrowserRouter>
           </ConfirmProvider>
         </ToastProvider>
       </AuthProvider>

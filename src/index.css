@@ -128,46 +128,160 @@ body::before {
   }
 }
 
-/* ── Landing page: section-at-a-time scrolling ──────────────────────────
-   CSS scroll-snap only — no wheel hijacking, so trackpad inertia, keyboard
-   paging, scrollbar dragging, find-in-page and screen-reader navigation all
-   keep working normally.
+/* ── Landing page: continuous scroll, pinned beats ─────────────────────
+   CSS scroll-snap is gone. It cut the page into discrete slides, which is
+   the opposite of what the story needs: one unbroken read from the tap to
+   the drafted email. Smoothing is Lenis's job (see StoryScroll.tsx), and
+   Lenis drives the real document scroll, so nothing is hijacked.
 
-   `proximity` rather than `mandatory`: it settles a section into place once
-   you come to rest near one, but never yanks a user who is deliberately
-   scrolling somewhere else. Scoped to the landing route by a class that
-   LandingPage puts on <html> for its lifetime — the in-app views must not
-   inherit this.
+   Beats are now *pinned*, and that is the fix for a specific complaint: the
+   animations started as a section entered the bottom of the screen and
+   finished as it left the top, so nothing ever played while you were
+   actually looking at it. That was not a timing bug — it was geometry. A
+   1062px section in a 900px viewport has only ~340px of scroll during which
+   its content is properly framed, and the beats needed four times that.
 
-   Snapping is deliberately switched OFF when the viewport is too small or
-   too short to hold a whole section: below that the 100svh sections
-   genuinely overflow, and snapping back to their start would strand the
-   overflow off-screen. It is also off under prefers-reduced-motion, since
-   the browser animates the snap itself. */
-.snap-section {
-  /* svh rather than vh: mobile browsers shrink the visual viewport as the
-     URL bar retracts, and vh would leave every section slightly taller than
-     the screen for the entire scroll. */
+   So the section is tall and the content sticks to the viewport inside it.
+   You scroll through `story-section`'s height while `story-stage` stays put,
+   centred, for all of it. Every beat now plays out with its content held
+   still in front of you, and the length of the beat is simply how much
+   taller than the stage the section is.
+
+   svh rather than vh: mobile browsers shrink the visual viewport as the URL
+   bar retracts, and vh would leave every stage slightly taller than the
+   screen for the entire scroll. */
+.story-section {
+  position: relative;
+  /* Stage (100svh) + the pinned scroll distance the beat plays across. */
+  min-height: 215svh;
+}
+
+/* The hero: one screenful, centred, no pinning. Kept separate from
+   `.story-section` so the two cannot drift into each other again. */
+.story-hero {
   min-height: 100svh;
   display: flex;
   flex-direction: column;
   justify-content: center;
 }
 
-@media (min-width: 768px) and (min-height: 640px) {
-  @media (prefers-reduced-motion: no-preference) {
-    html.landing-snap {
-      scroll-snap-type: y proximity;
-      scroll-behavior: smooth;
-    }
+.story-stage {
+  position: sticky;
+  top: 0;
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-block: clamp(2rem, 5vh, 3.5rem);
+}
 
-    html.landing-snap .snap-section {
-      scroll-snap-align: start;
-      /* `normal`, not `always` — a fast flick should still be able to cross
-         more than one section. */
-      scroll-snap-stop: normal;
-    }
+/* Beat 03 has four moments to get through plus an interaction that costs
+   real time, so it is simply given more pinned distance. Under the pinned
+   model that is all "make this beat longer" means. */
+.story-section--long {
+  min-height: 285svh;
+}
+
+/* Short viewports cannot hold a stage and a beat at once — the pin would
+   crop content that has nowhere to go. Below this the sections behave like
+   ordinary stacked blocks and the beats simply reveal in place. */
+@media (max-height: 620px), (max-width: 1279px) {
+  .story-section,
+  .story-section--long {
+    min-height: 0;
   }
+
+  .story-stage {
+    position: static;
+    min-height: 0;
+    padding-block: clamp(3.5rem, 8vh, 6rem);
+  }
+}
+
+/* ── Lenis ──────────────────────────────────────────────────────────────
+   The library's required stylesheet, inlined rather than imported so it
+   sits inside the same Tailwind cascade as everything else. `lenis` and
+   `lenis-smooth` are put on <html> by Lenis itself while it's running, so
+   these rules are automatically scoped to the landing route's lifetime.
+
+   The `scroll-behavior: auto` override is the load-bearing one: native
+   smooth scrolling and Lenis both animating the same scroll position fight
+   each other, and the visible result is exactly the stutter this pass is
+   here to remove. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
+}
+
+/* ── Landing page: the drifting follow-up queue row ─────────────────────
+   One copy of the list is translated out to the left while its duplicate
+   takes its place, so the row loops without a seam. -50% is exactly one
+   copy's width *only* because the cards carry their own right margin rather
+   than the track carrying a gap (see QueueMarquee). Paused on hover so a
+   card can be read; the prefers-reduced-motion block above stops it. */
+@keyframes marquee-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-50%, 0, 0); }
+}
+
+.marquee-track {
+  animation: marquee-drift 45s linear infinite;
+  will-change: transform;
+}
+
+.marquee-mask:hover .marquee-track,
+.marquee-mask:focus-within .marquee-track {
+  animation-play-state: paused;
+}
+
+/* Softens both cut edges so cards dissolve out of frame instead of being
+   sliced by an invisible boundary. */
+.marquee-mask {
+  --marquee-fade-left: 4rem;
+  --marquee-fade-right: 4rem;
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--marquee-fade-left),
+    #000 calc(100% - var(--marquee-fade-right)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    #000 var(--marquee-fade-left),
+    #000 calc(100% - var(--marquee-fade-right)),
+    transparent 100%
+  );
+}
+
+/* xl is where the narrative thread appears, pinned over the left gutter.
+   This row is deliberately full-bleed, so it runs underneath it — widen the
+   *left* fade past the thread so cards dissolve before they reach the token
+   rather than sliding out from behind it. The right edge is untouched: that
+   one is the intended "content continues past the frame" bleed. */
+/* The mask now wraps only the drifting remainder — the pinned first card
+   sits outside it and must read as solid. A short left fade softens where
+   the moving cards emerge from behind him; the right edge keeps the wider
+   bleed, which is the "the list keeps going" cue. */
+.marquee-mask {
+  --marquee-fade-left: 2rem;
 }
 
 /* Scrollbar styling for a premium feel */

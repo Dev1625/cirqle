@@ -1,5 +1,6 @@
 import React, { useMemo, useRef } from 'react';
-import { motion, useInView, useReducedMotion } from 'motion/react';
+import { motion, useInView, useMotionValue, useReducedMotion, useTransform, type MotionValue } from 'motion/react';
+import { STORY_CONTACT, STORY_INITIALS } from './storyContact';
 
 // Echoes the real NetworkGraph industry palette so the landing showcase and
 // the in-app graph read as the same system.
@@ -25,7 +26,7 @@ type Node = {
   color: string;
   ring?: string;
   label?: string;
-  kind: 'me' | 'hub' | 'contact';
+  kind: 'me' | 'hub' | 'contact' | 'story';
 };
 type Link = { id: string; x1: number; y1: number; x2: number; y2: number; strong?: boolean };
 
@@ -57,16 +58,100 @@ function build() {
     }
   });
 
-  return { nodes, links };
+  // The story contact joins the Venture lane as a real node, not an overlay.
+  // Placed deliberately rather than by the generic fan-out above: it needs
+  // clear space to its right for the callout, and it needs to be the node
+  // your eye lands on first when the section arrives.
+  const venture = nodes.find((n) => n.id === 'hub-Venture')!;
+  // Pulled in from the hub rather than fanned out like the generic contacts:
+  // the callout that follows needs ~120 units of clear space to its right,
+  // and the viewBox is only 760 wide.
+  const sx = venture.x + 46;
+  const sy = venture.y + 34;
+  nodes.push({
+    id: 'story',
+    x: sx,
+    y: sy,
+    r: 11,
+    color: '#7A2331',
+    ring: '#7A2331',
+    kind: 'story',
+    label: STORY_INITIALS,
+  });
+  links.push({ id: 'l-venture-story', x1: venture.x, y1: venture.y, x2: sx, y2: sy, strong: true });
+
+  return { nodes, links, story: { x: sx, y: sy }, venture: { x: venture.x, y: venture.y } };
 }
 
-export function LandingGraph() {
+/**
+ * Built once at module scope so the geometry can be published as well as
+ * rendered. MapSection needs these three points to place the narrative
+ * token's landing markers *inside* the graph — the token flies down the
+ * You → Venture → contact branch, so it has to know where that branch is.
+ *
+ * Published as percentages of the viewBox because the SVG scales fluidly:
+ * a marker positioned at a percentage of the container tracks the node it
+ * represents at every width, which absolute units would not.
+ */
+const GRAPH = build();
+
+export const GRAPH_ANCHORS = {
+  me: { left: `${(CX / W) * 100}%`, top: `${(CY / H) * 100}%` },
+  hub: { left: `${(GRAPH.venture.x / W) * 100}%`, top: `${(GRAPH.venture.y / H) * 100}%` },
+  story: { left: `${(GRAPH.story.x / W) * 100}%`, top: `${(GRAPH.story.y / H) * 100}%` },
+} as const;
+
+/**
+ * `arrival` is the story contact's existence in this graph, 0 → 1.
+ *
+ * The graph deliberately starts with no node for him at all: he has not
+ * arrived yet. The narrative token flies down the You → Venture branch as
+ * the section scrolls and *becomes* the node, so his node, its connecting
+ * link and its callout all fade up together as the token lands. Without a
+ * value passed the node is simply always present.
+ */
+export function LandingGraph({
+  arrival,
+  branch,
+  youOutline,
+}: {
+  arrival?: MotionValue<number>;
+  /**
+   * 0 → 1 sends a pulse of oxblood along the real You → Venture → contact
+   * edge. This is beat 04's whole mechanic and the reason it works unlike
+   * every other beat: nothing flies down the branch, the branch itself
+   * lights up.
+   */
+  branch?: MotionValue<number>;
+  /** Draws an outline on the centre node, where the token dissolves. */
+  youOutline?: MotionValue<number>;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: '-20% 0px' });
   const reduce = useReducedMotion();
-  const { nodes, links } = useMemo(build, []);
+  const { nodes, links, story } = useMemo(build, []);
 
   const show = inView || reduce;
+  const storyOpacity = arrival ?? 1;
+  const isStoryPart = (id: string) => id === 'story' || id === 'l-venture-story';
+
+  /* The travelling colour.
+     One polyline through You → Venture hub → the contact's position, drawn
+     with a short dash that walks the whole length. `pathLength={1}`
+     normalises it, so a 0.16-long dash offset from 0.16 down to −1 enters at
+     the centre and exits at the far end regardless of the real geometry.
+     Same idea as the ambient signal pulses already on this graph, except
+     driven by the beat's scroll rather than by a repeating timer. */
+  const branchPath = `M ${CX} ${CY} L ${GRAPH.venture.x} ${GRAPH.venture.y} L ${GRAPH.story.x} ${GRAPH.story.y}`;
+  const DASH = 0.16;
+  // A stable zero so the hooks below run unconditionally when a caller does
+  // not drive these (the graph is also usable outside beat 04).
+  const zero = useMotionValue(0);
+  const branchSrc = branch ?? zero;
+  const youSrc = youOutline ?? zero;
+  const branchOffset = useTransform(branchSrc, [0, 1], [DASH, -1]);
+  const branchAlive = useTransform(branchSrc, [0, 0.04, 0.96, 1], [0, 1, 1, 0]);
+  const youDash = useTransform(youSrc, [0, 1], [1, 0]);
 
   return (
     <div ref={ref} className="w-full">
@@ -75,7 +160,7 @@ export function LandingGraph() {
         className="w-full h-auto"
         preserveAspectRatio="xMidYMid meet"
         role="img"
-        aria-label="An illustration of a personal network: you at the center, connected to industry clusters, each holding individual contacts."
+        aria-label={`An illustration of a personal network: you at the center, connected to industry clusters, each holding individual contacts. ${STORY_CONTACT.name} is highlighted in the ${STORY_CONTACT.industry} cluster.`}
       >
         {/* faint grid to match the in-app graph surface */}
         <defs>
@@ -86,20 +171,35 @@ export function LandingGraph() {
         <rect width={W} height={H} fill="url(#lg-grid)" />
 
         {/* links draw in first */}
-        {links.map((link, i) => (
-          <motion.line
-            key={link.id}
-            x1={link.x1}
-            y1={link.y1}
-            x2={link.x2}
-            y2={link.y2}
-            stroke={link.strong ? 'rgba(26,26,26,0.28)' : 'rgba(26,26,26,0.14)'}
-            strokeWidth={link.strong ? 1.6 : 1}
-            initial={reduce ? { pathLength: 1, opacity: 1 } : { pathLength: 0, opacity: 0 }}
-            animate={show ? { pathLength: 1, opacity: 1 } : {}}
-            transition={{ duration: 0.7, delay: 0.1 + i * 0.03, ease: [0.22, 1, 0.36, 1] }}
-          />
-        ))}
+        {links.map((link, i) =>
+          isStoryPart(link.id) ? (
+            // Not drawn in with the rest: this link only exists once the
+            // contact does, so it is tied to the token's arrival instead.
+            <motion.line
+              key={link.id}
+              x1={link.x1}
+              y1={link.y1}
+              x2={link.x2}
+              y2={link.y2}
+              stroke="rgba(122,35,49,0.45)"
+              strokeWidth={1.6}
+              style={{ opacity: storyOpacity }}
+            />
+          ) : (
+            <motion.line
+              key={link.id}
+              x1={link.x1}
+              y1={link.y1}
+              x2={link.x2}
+              y2={link.y2}
+              stroke={link.strong ? 'rgba(26,26,26,0.28)' : 'rgba(26,26,26,0.14)'}
+              strokeWidth={link.strong ? 1.6 : 1}
+              initial={reduce ? { pathLength: 1, opacity: 1 } : { pathLength: 0, opacity: 0 }}
+              animate={show ? { pathLength: 1, opacity: 1 } : {}}
+              transition={{ duration: 0.7, delay: 0.1 + i * 0.03, ease: [0.22, 1, 0.36, 1] }}
+            />
+          )
+        )}
 
         {/* Ambient signal pulses — a dot travels out from "You" along one hub
             connection at a time, so the constellation reads as a live network
@@ -117,7 +217,14 @@ export function LandingGraph() {
                 key={`pulse-${link.id}`}
                 r={3.5}
                 fill="#7A2331"
-                initial={{ opacity: 0 }}
+                // cx/cy have to be seeded here as well as animated. Framer
+                // only writes an animated attribute once the animation runs,
+                // so without these the first paint puts literal "undefined"
+                // into cx/cy and SVG rejects it — twelve console errors on
+                // every load, one pair per pulse.
+                cx={link.x1}
+                cy={link.y1}
+                initial={{ opacity: 0, cx: link.x1, cy: link.y1 }}
                 animate={{
                   cx: [link.x1, link.x2],
                   cy: [link.y1, link.y2],
@@ -136,22 +243,61 @@ export function LandingGraph() {
               />
             ))}
 
+        {/* Beat 04's travelling colour. Rendered above the links so the
+            pulse reads as running *along* the branch, and below the nodes so
+            it passes under the hub it crosses. */}
+        <motion.path
+          d={branchPath}
+          fill="none"
+          stroke="#7A2331"
+          strokeWidth={2.6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          pathLength={1}
+          strokeDasharray={`${DASH} 1`}
+          style={{ strokeDashoffset: branchOffset, opacity: branchAlive }}
+        />
+
+        {/* Where the token dissolves: an outline drawn onto the centre node
+            rather than an icon parked next to it. */}
+        <motion.circle
+          cx={CX}
+          cy={CY}
+          r={34}
+          fill="none"
+          stroke="#7A2331"
+          strokeWidth={1.5}
+          pathLength={1}
+          strokeDasharray={1}
+          style={{ strokeDashoffset: youDash, opacity: youSrc }}
+        />
+
         {/* nodes fade/scale in after their links */}
         {nodes.map((node, i) => {
           const floatDur = 4 + (i % 5) * 0.6;
           return (
             <motion.g
               key={node.id}
-              initial={reduce ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.4 }}
-              animate={show ? { opacity: 1, scale: 1 } : {}}
+              initial={
+                isStoryPart(node.id)
+                  ? false
+                  : reduce
+                    ? { opacity: 1, scale: 1 }
+                    : { opacity: 0, scale: 0.4 }
+              }
+              animate={isStoryPart(node.id) ? undefined : show ? { opacity: 1, scale: 1 } : {}}
               transition={{ duration: 0.5, delay: 0.5 + i * 0.025, ease: [0.22, 1, 0.36, 1] }}
-              style={{ transformOrigin: `${node.x}px ${node.y}px` }}
+              style={
+                isStoryPart(node.id)
+                  ? { transformOrigin: `${node.x}px ${node.y}px`, opacity: storyOpacity }
+                  : { transformOrigin: `${node.x}px ${node.y}px` }
+              }
             >
               <motion.g
                 animate={reduce ? {} : { y: [0, node.kind === 'contact' ? -5 : -3, 0] }}
                 transition={reduce ? {} : { duration: floatDur, repeat: Infinity, ease: 'easeInOut', delay: i * 0.15 }}
               >
-                {node.kind === 'me' && (
+                {(node.kind === 'me' || node.kind === 'story') && (
                   <motion.circle
                     cx={node.x}
                     cy={node.y}
@@ -161,7 +307,18 @@ export function LandingGraph() {
                     strokeWidth={1.5}
                     initial={{ opacity: 0.5, scale: 1 }}
                     animate={reduce ? { opacity: 0.35 } : { opacity: [0.5, 0.12, 0.5], scale: [1, 1.18, 1] }}
-                    transition={reduce ? {} : { duration: 3.2, repeat: Infinity, ease: 'easeInOut' }}
+                    transition={
+                      reduce
+                        ? {}
+                        : {
+                            duration: 3.2,
+                            repeat: Infinity,
+                            ease: 'easeInOut',
+                            // Offset from "You" so the two halos breathe out
+                            // of phase rather than pulsing in lockstep.
+                            delay: node.kind === 'story' ? 1.1 : 0,
+                          }
+                    }
                     style={{ transformOrigin: `${node.x}px ${node.y}px` }}
                   />
                 )}
@@ -177,7 +334,7 @@ export function LandingGraph() {
                     dominantBaseline="central"
                     fontFamily="Inter, sans-serif"
                     fontWeight={node.kind === 'me' ? 700 : 800}
-                    fontSize={node.kind === 'me' ? 11 : 10}
+                    fontSize={node.kind === 'me' ? 11 : node.kind === 'story' ? 9 : 10}
                     fill={node.kind === 'me' ? '#F5F0E8' : '#FFFFFF'}
                   >
                     {node.label}
@@ -187,6 +344,43 @@ export function LandingGraph() {
             </motion.g>
           );
         })}
+
+        {/* The callout that makes the story contact findable rather than
+            merely present. Tied to the same arrival value as his node — the
+            name appears at the moment the token becomes the node, not before,
+            so the label is the arrival being announced rather than a caption
+            waiting for something to caption. */}
+        <motion.g style={{ opacity: storyOpacity }}>
+          <line
+            x1={story.x + 14}
+            y1={story.y}
+            x2={story.x + 30}
+            y2={story.y}
+            stroke="#7A2331"
+            strokeWidth={1}
+            opacity={0.5}
+          />
+          <text
+            x={story.x + 36}
+            y={story.y - 5}
+            fontFamily="Playfair Display, Georgia, serif"
+            fontWeight={700}
+            fontSize={15}
+            fill="#1A1A1A"
+          >
+            {STORY_CONTACT.name}
+          </text>
+          <text
+            x={story.x + 36}
+            y={story.y + 10}
+            fontFamily="Inconsolata, monospace"
+            fontSize={9.5}
+            letterSpacing="1.4"
+            fill="#5C5850"
+          >
+            {STORY_CONTACT.company.toUpperCase()} · {STORY_CONTACT.industry.toUpperCase()}
+          </text>
+        </motion.g>
       </svg>
     </div>
   );

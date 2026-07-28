@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Outlet, Link, Navigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { Logo } from '../components/Logo';
 
 const LandingLayout = () => {
   const { user } = useAuth();
@@ -28,8 +29,12 @@ const LandingLayout = () => {
         }`}
       >
         <div className="flex items-center justify-between px-6 md:px-8 py-4 max-w-6xl mx-auto w-full">
-          <Link to="/" className="font-serif font-black italic text-2xl tracking-tight text-ink">
-            Cirqle
+          {/* Same mark as the in-app sidebar — the landing page and the
+              product should be recognisably the same thing. It's transparent,
+              so it sits correctly on both the bare paper and the scrolled
+              paper/90 header fill. */}
+          <Link to="/" className="text-ink" aria-label="Cirqle — home">
+            <Logo size="sm" kicker={null} />
           </Link>
           <nav className="flex items-center gap-2 sm:gap-4 text-sm font-mono">
             <Link
