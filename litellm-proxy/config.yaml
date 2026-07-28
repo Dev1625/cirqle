@@ -18,63 +18,56 @@
 model_list:
   # ---- DeepSeek: the cost-driven default for anything writing prose -------
   #
-  # ⚠️ CONFIRM THE UPSTREAM MODEL IDS BELOW BEFORE DEPLOYING.
-  # `deepseek-v4-flash` / `deepseek-v4-pro` are the *aliases the app uses* and
-  # are correct as written. The `model:` values are my best guess at the
-  # provider ids and I could not verify them — check DeepSeek's current model
-  # list and edit the two `model:` lines to match. Nothing else needs to change.
+  # Keep the public alias and upstream model honest: a request for
+  # `deepseek-v4-flash` reaches DeepSeek V4 Flash, and a request for
+  # `deepseek-v4-pro` reaches DeepSeek V4 Pro.
   - model_name: deepseek-v4-flash
     litellm_params:
-      model: deepseek/deepseek-chat
+      model: deepseek/deepseek-v4-flash
       api_key: "os.environ/DEEPSEEK_API_KEY"
 
   - model_name: deepseek-v4-pro
     litellm_params:
-      model: deepseek/deepseek-reasoner
+      model: deepseek/deepseek-v4-pro
       api_key: "os.environ/DEEPSEEK_API_KEY"
 
   # ---- Google ------------------------------------------------------------
-  # 1. Google Gemini Flash Endpoint
+  # Compatibility alias retained for older clients.
   - model_name: gemini-flash
     litellm_params:
-      model: gemini/gemini-1.5-flash
+      model: gemini/gemini-2.5-flash
       api_key: "os.environ/GEMINI_API_KEY"
 
-  # 2. Retained so any cached client or older build still resolves. Nothing in
-  #    the app requests this any more — the reasoning tier is DeepSeek now.
-  #    NOTE: this alias never pointed at Gemini 3; it has always resolved to
-  #    gemini-1.5-flash, so it was not the source of a large bill.
+  # Retained so any cached client or older build still resolves. Nothing in
+  # the current app requests these preview aliases.
   - model_name: gemini-3-flash-preview
     litellm_params:
-      model: gemini/gemini-1.5-flash
+      model: gemini/gemini-3-flash-preview
       api_key: "os.environ/GEMINI_API_KEY"
 
-  # 3. The `fast` tier. Kept on Gemini deliberately — it is already cheap and
-  #    good at bulk structured extraction (CSV import, tagging, summaries).
+  # The active `fast` tier: bulk structured extraction, tagging and summaries.
   - model_name: gemini-2.5-flash-lite
     litellm_params:
-      model: gemini/gemini-1.5-flash
+      model: gemini/gemini-2.5-flash-lite
       api_key: "os.environ/GEMINI_API_KEY"
 
-  # 4. Google Gemini 3.1 Pro Preview Alias (routes to stable 1.5-pro)
+  # Compatibility alias retained for older clients.
   - model_name: gemini-3.1-pro-preview
     litellm_params:
-      model: gemini/gemini-1.5-pro
+      model: gemini/gemini-3.1-pro-preview
       api_key: "os.environ/GEMINI_API_KEY"
 
-  # 5. OpenAI GPT-5 Mini Alias (routes to stable gpt-4o-mini)
+  # ---- OpenAI compatibility aliases (not used by the current web app) -----
   - model_name: gpt-5-mini
     litellm_params:
-      model: openai/gpt-4o-mini
+      model: openai/gpt-5-mini
       api_key: "os.environ/OPENAI_API_KEY"
 
-  # 6. OpenAI GPT-4o-mini Chat Completion Endpoint
   - model_name: openai-mini
     litellm_params:
       model: openai/gpt-4o-mini
       api_key: "os.environ/OPENAI_API_KEY"
 
-  # 7. OpenAI GPT-4o-mini Batch API Routing Endpoint
   - model_name: openai-mini-batch
     litellm_params:
       model: openai/gpt-4o-mini

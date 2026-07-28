@@ -34,9 +34,16 @@ export default async function handler(req, res) {
 
   const requestBody = {
     key_alias: `user_${userId}_${Math.floor(Date.now() / 1000)}`,
+    // Associate the virtual key with the Firebase UID so LiteLLM can group
+    // spend across multiple keys belonging to the same Cirqle account.
+    user_id: userId,
+    metadata: {
+      app: "cirqle-web",
+      firebase_uid: userId
+    },
+    tags: ["cirqle-web"],
     max_budget: 5.00,
-    reset_value: 5.00,
-    reset_period: "month",
+    budget_duration: "30d",
     // Virtual keys are scoped to an explicit model allowlist. An alias missing
     // from this array is rejected at request time with a 401/403 that looks
     // like an auth problem rather than a config one — so this list MUST stay

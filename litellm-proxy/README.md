@@ -1,255 +1,202 @@
-# 🌐 Cirqle LiteLLM API Proxy Gateway
+# Cirqle LiteLLM gateway
 
-This repository contains the lightweight, production-ready, Dockerized **LiteLLM API Proxy** designed for **Cirqle**. 
+LiteLLM is the model gateway between the Cirqle web app and the upstream model
+providers. The browser makes one OpenAI-compatible request shape; LiteLLM
+authenticates the user's virtual key, enforces its budget and model allowlist,
+records spend, resolves the requested alias, and calls Google, DeepSeek, or
+OpenAI with the provider credential stored on Railway.
 
-It enables administrators to generate unique, trackable, and capped virtual API keys for individual application users to route Google Gemini and OpenAI requests. Additionally, it natively supports OpenAI's Batch Processing endpoints (`/v1/files` and `/v1/batches`) to leverage **50% cost discounts** while tracking usage.
+The browser never receives a provider key or the LiteLLM master key.
 
----
+## Request flow
 
-## 🏗️ Architecture Overview
+```text
+Firebase user signs in
+  -> Vercel /api/register-user
+  -> LiteLLM /key/generate, authenticated with LITELLM_MASTER_KEY
+  -> per-user virtual key, $5 / 30-day budget
+  -> key is stored on the user's Firestore document and in browser localStorage
 
-The gateway utilizes exactly **two services** via Docker Compose:
-1. `litellm-proxy`: The gateway core mapping standard routes, storing persistent state (keys, logs, budgets) inside a container-mounted SQLite database file (`/data/litellm.db`).
-2. `redis`: Core state cache for high-speed rate-limiting verification, distributed caching, and real-time synchronization of dollar budgets.
-
-```
-                    ┌────────────────────────┐
-                    │  Cirqle Frontend App   │
-                    └───────────┬────────────┘
-                                │ (Virtual API Key)
-                                ▼
-                    ┌────────────────────────┐
-                    │ LiteLLM Proxy (:4000)  │
-                    └────┬──────────────┬────┘
-                         │              │
-        (Budgets/Cache)  ▼              ▼  (Persistent Keys/Logs)
-                    ┌─────────┐    ┌─────────┐
-                    │  Redis  │    │ SQLite  │
-                    └─────────┘    └─────────┘
+AI feature
+  -> src/lib/ai.ts selects fast | reasoning | draft
+  -> src/lib/aiConfig.ts converts the tier to a public model alias
+  -> src/lib/aiClient.ts POSTs /v1/chat/completions with the virtual key
+  -> LiteLLM config.yaml resolves the alias to an upstream provider/model
+  -> provider response is normalized to the OpenAI chat-completions shape
 ```
 
----
+## Active tiers
 
-## 🚀 Getting Started
+These are the only aliases requested by the current web bundle:
 
-### 1. Security & Environment Setup
-Copy the template environment file and populate your actual API keys:
-```bash
-cp .env.template .env
+| Tier | Public LiteLLM alias | Upstream model | Current jobs |
+|---|---|---|---|
+| `fast` | `gemini-2.5-flash-lite` | `gemini/gemini-2.5-flash-lite` | Contact parsing, CSV import, tag extraction, voice-memo summary |
+| `reasoning` | `deepseek-v4-flash` | `deepseek/deepseek-v4-flash` | Weekly priorities, natural-language search, reply processing, pre-meeting brief, commitments, revival notes |
+| `draft` | `deepseek-v4-pro` | `deepseek/deepseek-v4-pro` | Outreach drafts and NFC/business-card copy |
+
+The public alias is the stable application contract. The upstream model is the
+provider-specific target. They are separate so an upstream model can be changed
+without editing every feature.
+
+`config.yaml` also retains compatibility aliases for older cached clients:
+
+| Compatibility alias | Upstream model |
+|---|---|
+| `gemini-flash` | `gemini/gemini-2.5-flash` |
+| `gemini-3-flash-preview` | `gemini/gemini-3-flash-preview` |
+| `gemini-3.1-pro-preview` | `gemini/gemini-3.1-pro-preview` |
+| `gpt-5-mini` | `openai/gpt-5-mini` |
+| `openai-mini` | `openai/gpt-4o-mini` |
+| `openai-mini-batch` | `openai/gpt-4o-mini` |
+
+## Why `config.yaml` matters
+
+`config.yaml` is the runtime routing table loaded by the LiteLLM container on
+Railway. For every `model_list` entry:
+
+- `model_name` is the public alias accepted from the app.
+- `litellm_params.model` is the real `provider/model` target.
+- `litellm_params.api_key` names the Railway environment variable containing
+  the provider credential.
+
+A healthy LiteLLM process does not prove every upstream target is valid.
+`/health/liveliness` can return 200 while a retired model produces a provider
+404. After every model change, make one real completion through each active
+alias.
+
+## Changing a model
+
+### Keep the existing public alias
+
+This is the normal and safest swap. Change only the `model:` value for that
+alias in `config.yaml`, then redeploy Railway.
+
+Example: keep the `fast` application contract but move it to a newer Gemini:
+
+```yaml
+- model_name: gemini-2.5-flash-lite
+  litellm_params:
+    model: gemini/<new-valid-model-id>
+    api_key: "os.environ/GEMINI_API_KEY"
 ```
 
-Open `.env` and fill in:
-* `LITELLM_MASTER_KEY`: Set your master administrative token (must start with `sk-`, e.g., `sk-cirqle-admin-master-key-1234`).
-* `LITELLM_SALT_KEY`: Set a long random string to encrypt the keys in the SQLite database.
-* `OPENAI_API_KEY`: Your OpenAI organization key.
-* `GEMINI_API_KEY`: Your Google Gemini Developer API key.
+Because the alias did not change:
 
-### 2. Launch the Services
-Start the Docker containers in detached mode:
-```bash
-docker compose up -d --build
+- feature call sites do not change;
+- `src/lib/aiConfig.ts` does not change;
+- existing virtual-key model allowlists do not change;
+- Vercel does not need a functional frontend change.
+
+### Introduce or rename a public alias
+
+When the alias itself changes, keep these three places synchronized:
+
+1. `src/lib/aiConfig.ts` — maps `fast`, `reasoning`, and `draft` to aliases.
+2. `litellm-proxy/config.yaml` — maps each alias to the real provider model.
+3. `api/register-user.js` — authorizes the alias on newly generated user keys.
+
+Existing virtual keys retain the allowlist they were issued with. If a renamed
+alias is not on an existing key, either retain the old alias as a compatibility
+route or rotate/reissue those user keys.
+
+## Credentials and deployment
+
+Railway must provide:
+
+- `LITELLM_MASTER_KEY`
+- `LITELLM_SALT_KEY`
+- `DATABASE_URL`
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
+- `GEMINI_API_KEY`
+- `DEEPSEEK_API_KEY`
+- `OPENAI_API_KEY` while OpenAI compatibility aliases remain configured
+
+Vercel must provide the same `LITELLM_MASTER_KEY` to the serverless
+`/api/register-user` function and `VITE_GATEWAY_URL` for the browser build.
+
+Never put provider keys or `LITELLM_MASTER_KEY` in a `VITE_*` variable. Vite
+inlines those values into public browser JavaScript.
+
+Railway builds this directory with `Dockerfile` and starts LiteLLM with:
+
+```text
+litellm --config /app/config.yaml
 ```
 
-Verify that both services are healthy:
-```bash
-docker compose ps
+After a Railway deployment:
+
+1. Check `GET /health/liveliness`.
+2. Authenticate with the master key and inspect `GET /model/info`.
+3. Make a tiny `/v1/chat/completions` request through each active alias.
+4. Confirm the request appears in the LiteLLM Usage view or spend logs.
+
+## Virtual keys and budgets
+
+Vercel's `api/register-user.js` creates one virtual key when an account has no
+stored key. New keys include:
+
+- `user_id`: the Firebase UID, used for per-user aggregation;
+- a readable `key_alias` beginning with `user_<firebase-uid>_`;
+- metadata and the `cirqle-web` tag;
+- the active and compatibility model allowlist;
+- a `$5` budget that resets every `30d`.
+
+The master key is administrative. A virtual key is restricted and safe to use
+for model requests from that user's browser.
+
+## Viewing spend
+
+The deployed proxy exposes its admin UI at:
+
+```text
+https://litellm-production-2a63.up.railway.app/ui
 ```
 
----
+Authenticate as the proxy administrator with the master-key credentials. The
+Usage view is the easiest place to inspect total cost, cost by model, request
+volume, and individual keys/users.
 
-## 🛠️ Admin Runbook (User Lifecycle & Key Management)
+The running LiteLLM version also exposes these master-key-authenticated APIs:
 
-All admin endpoints must be authenticated using the `LITELLM_MASTER_KEY` defined in your `.env`.
+| Need | Endpoint |
+|---|---|
+| List keys and their accumulated spend | `GET /key/list?return_full_object=true&sort_by=spend&sort_order=desc` |
+| Inspect one key | `GET /key/info?key=<key-or-hash>` |
+| Filter calls directly by Firebase UID | `GET /spend/logs?user_id=<firebase-uid>&start_date=<YYYY-MM-DD>&end_date=<YYYY-MM-DD>` |
+| Filter/paginate detailed calls by model or key alias | `GET /spend/logs/v2?key_alias=<alias>` |
+| Aggregate total spend over a date range | `GET /global/spend/report` |
+| Inspect the loaded alias-to-provider map | `GET /model/info` |
 
-### 1. Generate a Capped & Restricted Virtual Key
-Generate a trackable virtual key for an individual user. This key is constrained to:
-* **Max Dollar Budget**: Capped at `$5.00` total lifetime spend.
-* **Rate Limit**: Capped at `20` requests per minute (RPM).
-* **Restricted Access**: Only allowed to invoke the `gemini-flash`, `openai-mini`, and `openai-mini-batch` models.
-
-```bash
-curl -X POST http://localhost:4000/key/generate \
-  -H "Authorization: Bearer <LITELLM_MASTER_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "key_alias": "user-cirqle-crm-001",
-    "max_budget": 5.00,
-    "rpm_limit": 20,
-    "models": ["gemini-flash", "openai-mini", "openai-mini-batch"]
-  }'
-```
-
-**Expected Response**:
-```json
-{
-  "key": "sk-1234...xxxx",
-  "expires": null,
-  "key_alias": "user-cirqle-crm-001",
-  "max_budget": 5.0,
-  "rpm_limit": 20,
-  "models": ["gemini-flash", "openai-mini", "openai-mini-batch"]
-}
-```
-> ⚠️ **Save the returned `key`!** This is the virtual key your client application will use to authenticate.
-
----
-
-## 🧪 Client Validation (Standard & Batch Endpoints)
-
-Clients authenticate by passing their virtual key in the `Authorization: Bearer <VIRTUAL_KEY>` header.
-
-### 1. Synchronous Chat Completion (Google Gemini Flash)
-Send a synchronous request to the `gemini-flash` model via the gateway:
-
-```bash
-curl -X POST http://localhost:4000/v1/chat/completions \
-  -H "Authorization: Bearer <VIRTUAL_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "gemini-flash",
-    "messages": [
-      {
-        "role": "user",
-        "content": "Hello! Confirm you are routing through Cirqle Proxy."
-      }
-    ]
-  }'
-```
-
----
-
-### 2. Asynchronous OpenAI Batch Processing (50% Cost Discount)
-OpenAI's Batch API requires uploading a `.jsonl` requests file, submitting a batch job referencing the file, and then querying its status. The proxy natively tracks token usage and associates costs with the user's virtual key.
-
-#### Step A: Prepare the Batch Payload File (`requests.jsonl`)
-Create a file named `requests.jsonl` containing the chat requests:
-```json
-{"custom_id": "request-1", "method": "POST", "url": "/v1/chat/completions", "body": {"model": "openai-mini-batch", "messages": [{"role": "user", "content": "Analyze: 2+2"}], "max_tokens": 50}}
-{"custom_id": "request-2", "method": "POST", "url": "/v1/chat/completions", "body": {"model": "openai-mini-batch", "messages": [{"role": "user", "content": "Analyze: 3+3"}], "max_tokens": 50}}
-```
-
-#### Step B: Upload Payload File to Proxy
-Upload the payload file using the `/v1/files` endpoint. Specify `model=openai-mini-batch` as a form-data parameter to route it correctly:
-
-```bash
-curl -X POST http://localhost:4000/v1/files \
-  -H "Authorization: Bearer <VIRTUAL_KEY>" \
-  -F "purpose=batch" \
-  -F "file=@requests.jsonl" \
-  -F "model=openai-mini-batch"
-```
-
-**Expected Response**:
-```json
-{
-  "id": "file-encoded-xxxxxx",
-  "object": "file",
-  "bytes": 352,
-  "created_at": 1716487800,
-  "filename": "requests.jsonl",
-  "purpose": "batch"
-}
-```
-> ℹ️ LiteLLM automatically encodes the routing information directly into the returned `id` (e.g. `file-encoded-xxxxxx`).
-
-#### Step C: Dispatch the Batch Job
-Submit the batch job using the returned file ID:
-
-```bash
-curl -X POST http://localhost:4000/v1/batches \
-  -H "Authorization: Bearer <VIRTUAL_KEY>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "input_file_id": "<FILE_ID_FROM_STEP_B>",
-    "endpoint": "/v1/chat/completions",
-    "completion_window": "24h"
-  }'
-```
-
-**Expected Response**:
-```json
-{
-  "id": "batch-encoded-yyyyyy",
-  "object": "batch",
-  "endpoint": "/v1/chat/completions",
-  "errors": null,
-  "input_file_id": "file-encoded-xxxxxx",
-  "completion_window": "24h",
-  "status": "validating",
-  "output_file_id": null,
-  "error_file_id": null,
-  "created_at": 1716487850,
-  "in_progress_at": null,
-  "expires_at": null,
-  "finalizing_at": null,
-  "completed_at": null,
-  "failed_at": null,
-  "expired_at": null,
-  "cancelled_at": null,
-  "request_counts": {
-    "total": 2,
-    "completed": 0,
-    "failed": 0
-  },
-  "metadata": null
-}
-```
-
-#### Step D: Monitor Batch Status
-Retrieve the current batch processing status using the returned Batch ID:
+Example admin request:
 
 ```bash
-curl -X GET http://localhost:4000/v1/batches/<BATCH_ID_FROM_STEP_C> \
-  -H "Authorization: Bearer <VIRTUAL_KEY>"
+curl \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
+  "https://litellm-production-2a63.up.railway.app/key/list?return_full_object=true&sort_by=spend&sort_order=desc"
 ```
 
-Once the status is `"completed"`, the `output_file_id` will be populated, and you can download the final output using:
+Per-user request:
+
 ```bash
-curl -X GET http://localhost:4000/v1/files/<OUTPUT_FILE_ID>/content \
-  -H "Authorization: Bearer <VIRTUAL_KEY>"
+curl \
+  -H "Authorization: Bearer ${LITELLM_MASTER_KEY}" \
+  "https://litellm-production-2a63.up.railway.app/spend/logs?user_id=<firebase-uid>&start_date=2026-07-01&end_date=2026-07-31&summarize=true"
 ```
 
----
+For new keys, filter or group by the Firebase UID stored as `user_id`. Existing
+keys created before `user_id` was added can still be identified by their
+`user_<firebase-uid>_...` alias. Do not expose any of these administrative
+endpoints through the browser or log the master key.
 
-## 🔌 Frontend Client Integration Guide
+## Local development
 
-To swap the direct API endpoints over to the proxy target, update your initialization code inside [gemini.ts](file:///c:/Users/Devarshi%20Dalal/Documents/Projects/official%20cirqle%20crm/src/lib/gemini.ts):
+Copy `.env.template` to a local, untracked `.env`, provide development
+credentials, and run:
 
-```typescript
-import { GoogleGenAI } from "@google/genai";
-
-let aiClient: GoogleGenAI | null = null;
-let lastApiKey: string | null = null;
-
-export function getGemini(userApiKey?: string): GoogleGenAI {
-  // 1. Ingest dynamic user API key (virtual key), fallback to localStorage
-  const apiKey = userApiKey || 
-                 (typeof window !== "undefined" ? localStorage.getItem("CIRQLE_USER_PROXY_KEY") : null) || 
-                 process.env.GEMINI_API_KEY;
-
-  if (!apiKey) {
-    throw new Error("API Key is not defined.");
-  }
-
-  // 2. Change the baseURL to target the LiteLLM proxy
-  const gatewayUrl = process.env.NEXT_PUBLIC_GATEWAY_URL || "http://localhost:4000";
-
-  // 3. Re-initialize client if key changes
-  if (!aiClient || lastApiKey !== apiKey) {
-    aiClient = new GoogleGenAI({ 
-      apiKey: apiKey,
-      httpOptions: {
-        baseUrl: gatewayUrl
-      }
-    });
-    lastApiKey = apiKey;
-  }
-
-  return aiClient;
-}
+```bash
+docker compose up --build
 ```
 
-### Transition Steps:
-1. Generate the virtual key for a user using the Admin endpoint.
-2. Save this key in your client browser session (e.g., `localStorage.setItem('CIRQLE_USER_PROXY_KEY', 'sk-...')`).
-3. Call `getGemini()` in your UI hooks. The SDK will automatically route all subsequent requests (such as `ai.models.generateContent`) to `http://localhost:4000` using the user's capped key!
+The local gateway listens on `http://localhost:4000`. Keep production provider
+credentials out of local files whenever possible.
