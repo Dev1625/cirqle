@@ -10,6 +10,7 @@ import {
   useSlotOpacity,
 } from './StorySection';
 import { useStoryScroll } from '../StoryScroll';
+import { StoryOutline, StoryPulse, useCue } from '../StoryHighlight';
 import { STORY_CONTACT } from '../storyContact';
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -46,6 +47,14 @@ export function ParseSection() {
   const { reduced } = useStoryScroll();
   const scrub = useScrub(1);
 
+  /* Choreography. The token lands, dissolves, and the highlight walks the
+     beat: raw text → the label doing the reading → the record being written.
+     The form outline deliberately draws on just as FILL begins, so the
+     outline is tracking the parse rather than announcing a finished box. */
+  const rawOutline = useCue(scrub, [0.06, 0.2], [0.3, 0.4]);
+  const readingPulse = useCue(scrub, [0.16, 0.26], [0.34, 0.44]);
+  const formOutline = useCue(scrub, [0.3, 0.44], [0.9, 0.97]);
+
   // One slot per field plus a final slot for tags/commit.
   const slots = FIELDS.length + 1;
   const committed = useTransform(scrub, [FILL[0] + ((FILL[1] - FILL[0]) * 5) / 6, FILL[1]], [0, 1]);
@@ -55,14 +64,17 @@ export function ParseSection() {
       <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2 lg:gap-16">
         <StoryReveal className="lg:order-2" y={24}>
           <div className="relative">
-            {/* What the tap actually handed over. */}
-            <div className="rounded-card border border-ink/15 bg-paper p-4 font-mono text-xs leading-relaxed text-muted">
+            {/* What the tap actually handed over. Outlined first — the story
+                here is that this scrap is what gets read. */}
+            <div className="relative rounded-card border border-ink/15 bg-paper p-4 font-mono text-xs leading-relaxed text-muted">
+              <StoryOutline show={rawOutline} />
               “{STORY_CONTACT.rawCapture}”
             </div>
 
             <div className="my-3 flex items-center gap-3">
               <span className="h-px flex-1 bg-ink/12" />
-              <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted">
+              <span className="relative flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted">
+                <StoryPulse show={readingPulse} inset={-7} radius={7} />
                 <Sparkles size={12} className="text-brand" /> Reading
               </span>
               <span className="h-px flex-1 bg-ink/12" />
@@ -71,6 +83,10 @@ export function ParseSection() {
             <div className="relative">
               {/* The token lands on the record it is writing. */}
               <StoryAnchor stage={1} className="-left-3 -top-3" />
+              {/* …then dissolves, and the outline moves here to accompany the
+                  fields as they resolve, rather than sitting on the raw text
+                  while the real work happens somewhere else. */}
+              <StoryOutline show={formOutline} />
               <div
                 className="rounded-card border border-ink/25 bg-white p-5 md:p-6"
                 style={{ boxShadow: 'var(--shadow-card)' }}

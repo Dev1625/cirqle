@@ -1,5 +1,5 @@
 import React, { useMemo, useRef } from 'react';
-import { motion, useInView, useReducedMotion, type MotionValue } from 'motion/react';
+import { motion, useInView, useMotionValue, useReducedMotion, useTransform, type MotionValue } from 'motion/react';
 import { STORY_CONTACT, STORY_INITIALS } from './storyContact';
 
 // Echoes the real NetworkGraph industry palette so the landing showcase and
@@ -110,7 +110,22 @@ export const GRAPH_ANCHORS = {
  * link and its callout all fade up together as the token lands. Without a
  * value passed the node is simply always present.
  */
-export function LandingGraph({ arrival }: { arrival?: MotionValue<number> }) {
+export function LandingGraph({
+  arrival,
+  branch,
+  youOutline,
+}: {
+  arrival?: MotionValue<number>;
+  /**
+   * 0 → 1 sends a pulse of oxblood along the real You → Venture → contact
+   * edge. This is beat 04's whole mechanic and the reason it works unlike
+   * every other beat: nothing flies down the branch, the branch itself
+   * lights up.
+   */
+  branch?: MotionValue<number>;
+  /** Draws an outline on the centre node, where the token dissolves. */
+  youOutline?: MotionValue<number>;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once: true, margin: '-20% 0px' });
   const reduce = useReducedMotion();
@@ -119,6 +134,24 @@ export function LandingGraph({ arrival }: { arrival?: MotionValue<number> }) {
   const show = inView || reduce;
   const storyOpacity = arrival ?? 1;
   const isStoryPart = (id: string) => id === 'story' || id === 'l-venture-story';
+
+  /* The travelling colour.
+     One polyline through You → Venture hub → the contact's position, drawn
+     with a short dash that walks the whole length. `pathLength={1}`
+     normalises it, so a 0.16-long dash offset from 0.16 down to −1 enters at
+     the centre and exits at the far end regardless of the real geometry.
+     Same idea as the ambient signal pulses already on this graph, except
+     driven by the beat's scroll rather than by a repeating timer. */
+  const branchPath = `M ${CX} ${CY} L ${GRAPH.venture.x} ${GRAPH.venture.y} L ${GRAPH.story.x} ${GRAPH.story.y}`;
+  const DASH = 0.16;
+  // A stable zero so the hooks below run unconditionally when a caller does
+  // not drive these (the graph is also usable outside beat 04).
+  const zero = useMotionValue(0);
+  const branchSrc = branch ?? zero;
+  const youSrc = youOutline ?? zero;
+  const branchOffset = useTransform(branchSrc, [0, 1], [DASH, -1]);
+  const branchAlive = useTransform(branchSrc, [0, 0.04, 0.96, 1], [0, 1, 1, 0]);
+  const youDash = useTransform(youSrc, [0, 1], [1, 0]);
 
   return (
     <div ref={ref} className="w-full">
@@ -209,6 +242,35 @@ export function LandingGraph({ arrival }: { arrival?: MotionValue<number> }) {
                 }}
               />
             ))}
+
+        {/* Beat 04's travelling colour. Rendered above the links so the
+            pulse reads as running *along* the branch, and below the nodes so
+            it passes under the hub it crosses. */}
+        <motion.path
+          d={branchPath}
+          fill="none"
+          stroke="#7A2331"
+          strokeWidth={2.6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          pathLength={1}
+          strokeDasharray={`${DASH} 1`}
+          style={{ strokeDashoffset: branchOffset, opacity: branchAlive }}
+        />
+
+        {/* Where the token dissolves: an outline drawn onto the centre node
+            rather than an icon parked next to it. */}
+        <motion.circle
+          cx={CX}
+          cy={CY}
+          r={34}
+          fill="none"
+          stroke="#7A2331"
+          strokeWidth={1.5}
+          pathLength={1}
+          strokeDasharray={1}
+          style={{ strokeDashoffset: youDash, opacity: youSrc }}
+        />
 
         {/* nodes fade/scale in after their links */}
         {nodes.map((node, i) => {

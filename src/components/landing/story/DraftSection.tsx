@@ -1,6 +1,6 @@
 import React from 'react';
-import { motion, useTransform } from 'motion/react';
-import { Send, Sparkles } from 'lucide-react';
+import { AnimatePresence, motion, useMotionValueEvent, useTransform } from 'motion/react';
+import { Mail, Send, Sparkles } from 'lucide-react';
 import {
   StorySection,
   StoryHeading,
@@ -8,8 +8,11 @@ import {
   StoryAnchor,
   ScrubbedText,
   useScrub,
+  useSectionRange,
+  HOUSE_EASE,
 } from './StorySection';
 import { useStoryScroll } from '../StoryScroll';
+import { StoryOutline, StoryPulse, useCue } from '../StoryHighlight';
 import { STORY_CONTACT } from '../storyContact';
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -23,7 +26,14 @@ import { STORY_CONTACT } from '../storyContact';
    The text assembles by per-word opacity over a paragraph already at its
    final size (see ScrubbedText). A real character-appending typewriter would
    reflow the card on every frame and shove the send button around under the
-   reader's cursor.
+   reader's cursor. The caret rides on top of that, one per word, lit only
+   while the scrub is inside its slot.
+
+   The send is the one thing here that is a state change rather than a
+   scrubbed value, for the same reason beat 03's answer is: it happens
+   because someone pressed a button, or because the page pressed it for a
+   visitor who scrolled straight past. Un-sending an email on scroll-up would
+   be a strange thing to depict.
    ──────────────────────────────────────────────────────────────────────── */
 
 const SUBJECT = `Following up from ${STORY_CONTACT.metAt}`;
@@ -42,11 +52,42 @@ const GREETING_SHARE: [number, number] = [0.45, 0.52];
 const BODY_SHARE: [number, number] = [0.52, 0.85];
 
 export function DraftSection() {
-  const { reduced } = useStoryScroll();
+  const { progress, reduced } = useStoryScroll();
   const scrub = useScrub(5);
+  const [rangeStart, rangeEnd] = useSectionRange(5);
 
   const ready = useTransform(scrub, [0.85, 0.92], [0, 1]);
   const pulse = useTransform(scrub, [0.85, 0.92], [1, 0]);
+
+  /* Choreography: the whole compose box is named on arrival, then the
+     highlight gets out of the way and lets the caret do the work. */
+  const composeOutline = useCue(scrub, [0.08, 0.22], [0.34, 0.44]);
+  // The invitation only exists once there is a finished email to send.
+  const sendPulse = useCue(scrub, [0.9, 0.96], [0.99, 1]);
+
+  /* Send. Real click, or — for a visitor scrolling straight through — the
+     same passive-completion pattern beat 03 already uses, with the same
+     guarantee: any real interaction disables the automatic one for good, and
+     it fires at the very end of the beat so a visitor who wants to press it
+     themselves gets an unhurried window after the invitation appears. */
+  const [sent, setSent] = React.useState(false);
+  const touched = React.useRef(false);
+  const autoRan = React.useRef(false);
+  const autoAt = rangeStart + (rangeEnd - rangeStart) * 0.97;
+
+  useMotionValueEvent(progress, 'change', (p) => {
+    if (autoRan.current || touched.current || p < autoAt) return;
+    autoRan.current = true;
+    setSent(true);
+  });
+
+  React.useEffect(() => {
+    if (reduced && !touched.current && !autoRan.current) {
+      // Nothing scrubs under reduced motion, so the auto-send has no hook.
+      autoRan.current = true;
+      setSent(true);
+    }
+  }, [reduced]);
 
   return (
     <StorySection index={5} id="draft">
@@ -54,6 +95,7 @@ export function DraftSection() {
         <StoryReveal className="lg:order-2" y={24}>
           <div className="relative">
             <StoryAnchor stage={5} className="-left-3 -top-3" />
+            <StoryOutline show={composeOutline} />
             <div
               className="overflow-hidden rounded-card border border-ink/25 bg-white"
               style={{ boxShadow: 'var(--shadow-card)' }}
@@ -66,7 +108,7 @@ export function DraftSection() {
                     className="absolute left-0 top-0 whitespace-nowrap"
                     style={{ opacity: reduced ? 1 : ready }}
                   >
-                    Draft ready
+                    {sent ? 'Sent' : 'Draft ready'}
                   </motion.span>
                 </span>
                 <motion.span
@@ -78,31 +120,49 @@ export function DraftSection() {
                 />
               </div>
 
-              <div className="space-y-3 p-5 font-mono text-sm leading-relaxed">
+              <div className="relative space-y-3 p-5 font-mono text-sm leading-relaxed">
                 <p className="text-muted">
                   <span className="text-ink">To:</span> {STORY_CONTACT.email}
                 </p>
                 <p className="text-muted">
                   <span className="text-ink">Subject:</span>{' '}
-                  <ScrubbedText text={SUBJECT} scrub={scrub} share={SUBJECT_SHARE} />
+                  <ScrubbedText text={SUBJECT} scrub={scrub} share={SUBJECT_SHARE} cursor />
                 </p>
                 <p>
-                  <ScrubbedText text={GREETING} scrub={scrub} share={GREETING_SHARE} />
+                  <ScrubbedText text={GREETING} scrub={scrub} share={GREETING_SHARE} cursor />
                 </p>
                 <p className="text-subtle">
-                  <ScrubbedText text={BODY} scrub={scrub} share={BODY_SHARE} />
+                  <ScrubbedText text={BODY} scrub={scrub} share={BODY_SHARE} cursor />
                 </p>
 
                 <motion.div className="flex gap-2 pt-2" style={{ opacity: reduced ? 1 : ready }}>
-                  <span className="inline-flex items-center gap-1.5 rounded-card bg-brand px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-brand-on">
-                    <Send size={11} /> Send
+                  <span className="relative">
+                    {/* Unmounted rather than faded once sent: the invitation
+                        has been accepted, so there is nothing left to invite. */}
+                    {!sent && <StoryPulse show={sendPulse} inset={-7} radius={9} />}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        touched.current = true;
+                        setSent(true);
+                      }}
+                      disabled={sent}
+                      className="inline-flex items-center gap-1.5 rounded-card bg-brand px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-brand-on transition-[transform,background-color] duration-150 hover:bg-[#8E2A3A] active:scale-[0.98] disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+                    >
+                      <Send size={11} /> {sent ? 'Sent' : 'Send'}
+                    </button>
                   </span>
                   <span className="inline-flex items-center rounded-card border border-ink/15 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-subtle">
                     Refine
                   </span>
                 </motion.div>
+
               </div>
             </div>
+            {/* Outside the card, not inside it: the card is overflow-hidden
+                so an email launched from within it was neatly clipped at the
+                border and never went anywhere. */}
+            <FlyingMail sent={sent} reduced={reduced} />
           </div>
         </StoryReveal>
 
@@ -121,5 +181,41 @@ export function DraftSection() {
         />
       </div>
     </StorySection>
+  );
+}
+
+/**
+ * The email leaving. Transform and opacity only, and `pointer-events-none` so
+ * it cannot swallow a click on its way out of the card.
+ */
+function FlyingMail({ sent, reduced }: { sent: boolean; reduced: boolean }) {
+  if (reduced) return null;
+  return (
+    <AnimatePresence>
+      {sent && (
+        <motion.span
+          key="flying"
+          aria-hidden="true"
+          className="pointer-events-none absolute bottom-8 left-8 z-10 text-brand"
+          initial={{ opacity: 0, x: 0, y: 0, scale: 0.7 }}
+          animate={{ opacity: [0, 1, 1, 0], x: 540, y: -150, scale: [0.7, 1, 1, 0.8] }}
+          /* Opacity gets its own linear track. Sharing the house ease-out
+             curve meant the eased progress was already past the fade-out
+             keyframe a third of the way through the flight, so the mail
+             vanished almost as soon as it set off. The path keeps the ease;
+             the fade no longer inherits it.
+
+             It also leaves to the right rather than straight up — a steeper
+             exit flew it behind the sticky header, where nobody sees it. */
+          transition={{
+            duration: 1.3,
+            ease: HOUSE_EASE,
+            opacity: { duration: 1.3, ease: 'linear', times: [0, 0.08, 0.72, 1] },
+          }}
+        >
+          <Mail size={22} />
+        </motion.span>
+      )}
+    </AnimatePresence>
   );
 }

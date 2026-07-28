@@ -9,6 +9,7 @@ import {
   useSlotOpacity,
 } from './StorySection';
 import { useStoryScroll } from '../StoryScroll';
+import { StoryOutline, useCue } from '../StoryHighlight';
 import { STORY_CONTACT, STORY_INITIALS } from '../storyContact';
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -41,8 +42,16 @@ export function HealthSection() {
   const { reduced } = useStoryScroll();
   const scrub = useScrub(4);
 
+  /* Choreography. The token's anchor is the ring itself, not the card's
+     corner, so its arrival reinforces the score filling rather than reading
+     as a second thing happening beside it. The outline then leaves the card
+     entirely and goes to find him in the row below — the same callback beat
+     03 makes, in the place a visitor would actually have to hunt. */
+  const ringOutline = useCue(scrub, [0.16, 0.3], [0.62, 0.72]);
+  const rowCallback = useCue(scrub, [0.62, 0.76], [0.95, 1]);
+
   return (
-    <StorySection index={4} id="queue" bleed={<QueueMarquee scrub={scrub} reduced={reduced} />}>
+    <StorySection index={4} id="queue" bleed={<QueueMarquee scrub={scrub} reduced={reduced} callback={rowCallback} />}>
       <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2 lg:gap-16">
         <StoryHeading
           index={4}
@@ -59,13 +68,12 @@ export function HealthSection() {
 
         <StoryReveal y={24}>
           <div className="relative">
-            <StoryAnchor stage={4} className="-left-3 -top-3" />
             <div
               className="rounded-card border border-ink/25 bg-white p-6"
               style={{ boxShadow: 'var(--shadow-card)' }}
             >
               <div className="flex items-center gap-5">
-                <HealthRing scrub={scrub} reduced={reduced} />
+                <HealthRing scrub={scrub} reduced={reduced} outline={ringOutline} />
                 <div className="min-w-0">
                   <p className="font-serif text-2xl font-bold leading-tight">
                     {STORY_CONTACT.name}
@@ -141,7 +149,15 @@ function DetailRow({
  * The number is driven from the same scrub through a MotionValue rather than
  * React state, so it counts without re-rendering the tree every frame.
  */
-function HealthRing({ scrub, reduced }: { scrub: MotionValue<number>; reduced: boolean }) {
+function HealthRing({
+  scrub,
+  reduced,
+  outline,
+}: {
+  scrub: MotionValue<number>;
+  reduced: boolean;
+  outline: MotionValue<number>;
+}) {
   const r = (RING.size - RING.stroke) / 2;
   const c = 2 * Math.PI * r;
   const target = STORY_CONTACT.health;
@@ -152,6 +168,9 @@ function HealthRing({ scrub, reduced }: { scrub: MotionValue<number>; reduced: b
 
   return (
     <div className="relative shrink-0" style={{ width: RING.size, height: RING.size }}>
+      {/* The token merges into the score rather than parking beside it. */}
+      <StoryAnchor stage={4} className="left-1/2 top-1/2" />
+      <StoryOutline show={outline} inset={-7} radius={999} />
       <svg width={RING.size} height={RING.size} className="-rotate-90" aria-hidden="true">
         <circle
           cx={RING.size / 2}
@@ -193,7 +212,15 @@ function HealthRing({ scrub, reduced }: { scrub: MotionValue<number>; reduced: b
  * on hover so a card can be read, and the global prefers-reduced-motion rule
  * in index.css stops it outright.
  */
-function QueueMarquee({ scrub, reduced }: { scrub: MotionValue<number>; reduced: boolean }) {
+function QueueMarquee({
+  scrub,
+  reduced,
+  callback,
+}: {
+  scrub: MotionValue<number>;
+  reduced: boolean;
+  callback: MotionValue<number>;
+}) {
   const track = [...QUEUE, ...QUEUE];
   const opacity = useTransform(scrub, [0.34, 0.55], [0, 1]);
   const y = useTransform(scrub, [0.34, 0.55], [24, 0]);
@@ -212,10 +239,14 @@ function QueueMarquee({ scrub, reduced }: { scrub: MotionValue<number>; reduced:
               className="mr-4 w-[290px] shrink-0"
             >
               <div
-                className={`h-full rounded-card border p-5 ${
+                className={`relative h-full rounded-card border p-5 ${
                   q.isStory ? 'border-brand/40 bg-brand/[0.06]' : 'border-ink/15 bg-white'
                 }`}
               >
+                {/* Only his card, and only the real one — the duplicate copy
+                    that makes the marquee loop seamlessly must not carry a
+                    second outline drifting across the row. */}
+                {q.isStory && i < QUEUE.length && <StoryOutline show={callback} inset={-5} radius={10} />}
                 <div className="mb-3 flex items-center justify-between gap-2">
                   <span className="truncate font-serif text-lg font-bold">{q.name}</span>
                   <span

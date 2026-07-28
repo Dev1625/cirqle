@@ -1,5 +1,5 @@
 import React from 'react';
-import { AnimatePresence, motion, useMotionValueEvent } from 'motion/react';
+import { AnimatePresence, motion, useMotionValueEvent, type MotionValue } from 'motion/react';
 import { Sparkles, CornerDownLeft } from 'lucide-react';
 import {
   StorySection,
@@ -7,9 +7,11 @@ import {
   StoryReveal,
   StoryAnchor,
   HOUSE_EASE,
+  useScrub,
   useSectionRange,
 } from './StorySection';
 import { useStoryScroll } from '../StoryScroll';
+import { StoryOutline, StoryPulse, useCue } from '../StoryHighlight';
 import { STORY_CONTACT } from '../storyContact';
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -144,6 +146,21 @@ export function AskSection() {
   const touched = React.useRef(false);
   const autoRan = React.useRef(false);
 
+  /* Choreography. The chip is named first, then the invitation moves to the
+     Ask button — and the pulse is timed to land *before* the auto-run at
+     0.55 of the beat, so the invitation is real rather than decorative. A
+     visitor who takes it gets there first; one who doesn't sees the page
+     take its own advice. */
+  const scrub = useScrub(2);
+  const chipOutline = useCue(scrub, [0.08, 0.2], [0.34, 0.44]);
+  const askPulse = useCue(scrub, [0.3, 0.4], [0.6, 0.7]);
+  /* The callback onto his result card. Scrubbed, not latched to the click:
+     an interaction-driven outline stayed lit for the rest of the page, which
+     is the one thing this pass's highlights are not allowed to do. Its window
+     opens after the auto-run at 0.55, so by the time it draws there is an
+     answer under it either way. */
+  const callback = useCue(scrub, [0.66, 0.78], [0.95, 1]);
+
   React.useEffect(() => () => clearTimeout(timer.current), []);
 
   const ask = React.useCallback((question: string) => {
@@ -197,7 +214,7 @@ export function AskSection() {
           {/* Example questions. Clicking one replaces whatever is in the bar
               and resets the answer, so the visitor still presses Ask. */}
           <div className="mb-4 flex flex-wrap justify-center gap-2">
-            {SCRIPTS.map((s) => {
+            {SCRIPTS.map((s, i) => {
               const selected = s.question === query;
               return (
                 <button
@@ -205,12 +222,16 @@ export function AskSection() {
                   type="button"
                   onClick={() => pick(s.question)}
                   aria-pressed={selected}
-                  className={`rounded-card border px-3 py-1.5 font-mono text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper ${
+                  className={`relative rounded-card border px-3 py-1.5 font-mono text-[10px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper ${
                     selected
                       ? 'border-brand/40 bg-brand/10 text-ink'
                       : 'border-ink/15 bg-paper/70 text-muted hover:border-ink/30 hover:text-ink'
                   }`}
                 >
+                  {/* Only the first chip is outlined: it is the one the
+                      passive-scroller auto-run picks, so pointing at it is
+                      telling the truth about what is about to happen. */}
+                  {i === 0 && <StoryOutline show={chipOutline} inset={-4} radius={9} />}
                   “{s.question}”
                 </button>
               );
@@ -240,13 +261,19 @@ export function AskSection() {
               placeholder="Ask your network…"
               className="min-w-0 flex-1 bg-transparent font-mono text-sm font-semibold italic text-ink placeholder:not-italic placeholder:font-normal placeholder:text-muted focus:outline-none"
             />
-            <button
-              type="submit"
-              disabled={phase.state === 'thinking'}
-              className="shrink-0 rounded-card bg-brand px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-brand-on transition-[transform,background-color] duration-150 hover:bg-[#8E2A3A] active:scale-[0.98] disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-white"
-            >
-              {phase.state === 'thinking' ? 'Asking' : 'Ask'}
-            </button>
+            <span className="relative shrink-0">
+              {/* The invitation. Its window closes before the auto-run
+                  threshold so a real visitor gets a genuine chance to click
+                  rather than watching the page do it for them. */}
+              <StoryPulse show={askPulse} inset={-7} radius={9} />
+              <button
+                type="submit"
+                disabled={phase.state === 'thinking'}
+                className="rounded-card bg-brand px-3 py-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-brand-on transition-[transform,background-color] duration-150 hover:bg-[#8E2A3A] active:scale-[0.98] disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-white"
+              >
+                {phase.state === 'thinking' ? 'Asking' : 'Ask'}
+              </button>
+            </span>
           </form>
 
           <div className="mt-3 min-h-[280px]" aria-live="polite">
@@ -275,7 +302,7 @@ export function AskSection() {
               {phase.state === 'answered' && (
                 <Fade key={`answer-${phase.script?.question ?? 'none'}`}>
                   {phase.script ? (
-                    <Answer script={phase.script} />
+                    <Answer script={phase.script} callback={callback} />
                   ) : (
                     <div className="rounded-card border border-ink/15 bg-white p-5">
                       <p className="font-mono text-xs leading-relaxed text-subtle">
@@ -308,7 +335,7 @@ function Fade({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Answer({ script }: { script: Scripted }) {
+function Answer({ script, callback }: { script: Scripted; callback: MotionValue<number> }) {
   return (
     <div className="overflow-hidden rounded-card border border-ink/25 bg-white" style={{ boxShadow: 'var(--shadow-card)' }}>
       <div className="flex items-center gap-2 border-b border-ink/10 bg-paper/50 px-5 py-2.5 font-mono text-[10px] uppercase tracking-widest text-muted">
@@ -325,10 +352,14 @@ function Answer({ script }: { script: Scripted }) {
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, delay: 0.08 + i * 0.07, ease: HOUSE_EASE }}
-              className={`rounded-card border p-3.5 ${
+              className={`relative rounded-card border p-3.5 ${
                 r.isStory ? 'border-brand/40 bg-brand/[0.06]' : 'border-ink/15 bg-paper/50'
               }`}
             >
+              {/* The callback. Of the three results, one of them is the
+                  person this page has been following since the tap — so the
+                  outline goes on that card and not the other two. */}
+              {r.isStory && <StoryOutline show={callback} inset={-5} radius={10} />}
               <p className="font-serif text-base font-bold leading-tight">{r.name}</p>
               <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted">
                 {r.firm}

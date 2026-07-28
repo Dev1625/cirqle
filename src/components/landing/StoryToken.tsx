@@ -37,7 +37,19 @@ import { STORY_STAGES, type StoryStage } from './storyStages';
 /** How much of the section's window the token spends parked on its anchor. */
 const DWELL_VIEWPORTS = 0.34;
 
-type Keyframes = { times: number[]; xs: number[]; ys: number[] } | null;
+type Keyframes = {
+  times: number[];
+  xs: number[];
+  ys: number[];
+  /**
+   * Each beat's dwell window, plus whether the token actually moves during
+   * it. A beat whose token travels mid-dwell (beat 04 crosses the graph)
+   * must not become visible until it has essentially arrived, or the thing
+   * that beat exists to avoid — a separate object flying down the branch —
+   * is exactly what you see.
+   */
+  windows: Array<{ from: number; to: number; moves: boolean }>;
+} | null;
 
 /** Piecewise-linear lookup, clamped at both ends. `times` must be ascending. */
 function piecewise(at: number, times: number[], values: number[]) {
@@ -72,6 +84,8 @@ export function StoryToken() {
     const times: number[] = [];
     const xs: number[] = [];
     const ys: number[] = [];
+    /** Each beat's dwell window, kept so the visibility rhythm can use it. */
+    const windows: Array<{ from: number; to: number; moves: boolean }> = [];
 
     for (let stage = 0; stage < STORY_STAGES.length; stage += 1) {
       const own = anchors.filter((a) => a.stage === stage);
@@ -97,6 +111,7 @@ export function StoryToken() {
 
       const from = centre - half;
       const to = centre + half;
+      windows.push({ from, to, moves: own.length > 1 });
 
       if (own.length === 1) {
         // Park. Two keyframes holding the same page position means the token
@@ -113,7 +128,7 @@ export function StoryToken() {
       }
     }
 
-    return { times: strictlyIncreasing(times), xs, ys };
+    return { times: strictlyIncreasing(times), xs, ys, windows };
   }, [anchors, stops, limit, viewportH]);
 
   // Hooks must run unconditionally, so fall back to a harmless 2-point range
@@ -168,15 +183,58 @@ export function StoryToken() {
   scaleOutput.push(0.86);
   const scale = useTransform(progress, strictlyIncreasing(scaleInput), scaleOutput);
 
-  /* Fade in as the first beat approaches, out once the last one is done —
-     the roadmap and footer are not part of the story and should not have a
-     narrative token loitering over them. */
-  const fadeIn = stops[0] - (0.9 * viewportH) / (limit || 1);
-  const fadeOut = stops[stops.length - 1] + (0.55 * viewportH) / (limit || 1);
+  /* ── The visibility rhythm ──────────────────────────────────────────
+     The token is no longer continuously present. Each beat now tells its
+     own part of the story through oxblood highlights on its real elements
+     (see StoryHighlight), so the token's job is the connective tissue
+     between them, not a companion icon sitting beside content that is
+     perfectly capable of speaking for itself.
+
+     Per beat: arrive visible, dissolve into the section a beat later, stay
+     gone while that section plays out, then re-form near the end of the
+     dwell to carry the thread to the next anchor.
+
+     Two deliberate exceptions:
+     - Beat 01 does not fade in beforehand at all. The card has to finish
+       turning and settle on its back face first; the token forms only after
+       that, which is the whole of this pass's beat-01 change.
+     - The last beat never re-forms. There is nowhere left to travel to. */
+  const vis = React.useMemo(() => {
+    const w = frames?.windows;
+    if (!w) return null;
+    const input: number[] = [];
+    const output: number[] = [];
+    const at = (win: [number, number], f: number) => win[0] + (win[1] - win[0]) * f;
+
+    w.forEach(({ from, to, moves }, i) => {
+      const win: [number, number] = [from, to];
+      if (i === 0) {
+        /* Beat 01 forms late on purpose, and "late" is a specific number.
+           The card's turn runs from a third to two-thirds of that beat's
+           *section range*, which lands at roughly 0.74 of its narrower dwell
+           window — so forming at 0.42 of the dwell, as this first did, put
+           the token on screen while the card was still mid-rotation. It now
+           forms after the back face has settled, and departs almost at once,
+           which is exactly the hand-off the beat wants. */
+        input.push(at(win, 0.78), at(win, 0.92));
+        output.push(0, 1);
+      } else {
+        // Arrive visible, dissolve, re-form to depart. A beat that carries
+        // the token across itself re-forms much later, so it materialises at
+        // its destination rather than being watched crossing to it.
+        const reformStart = moves ? 0.9 : 0.74;
+        const reformEnd = moves ? 0.98 : 0.94;
+        input.push(at(win, 0.06), at(win, moves ? 0.2 : 0.26), at(win, reformStart), at(win, reformEnd));
+        output.push(1, 0, 0, i === w.length - 1 ? 0 : 1);
+      }
+    });
+    return { input: strictlyIncreasing(input), output };
+  }, [frames]);
+
   const opacity = useTransform(
     progress,
-    strictlyIncreasing([fadeIn, stops[0] - (0.35 * viewportH) / (limit || 1), fadeOut, fadeOut + 0.02]),
-    frames ? [0, 1, 1, 0] : [0, 0, 0, 0]
+    vis ? vis.input : [0, 1],
+    vis ? vis.output : [0, 0]
   );
 
   // Under ?scrollprobe the built path and the live values are published for

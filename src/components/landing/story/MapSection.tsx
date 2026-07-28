@@ -35,9 +35,15 @@ export function MapSection() {
   const { reduced } = useStoryScroll();
   const scrub = useScrub(3);
 
-  // He appears over the last stretch of the token's run down the branch —
-  // as it reaches the third anchor, not before it sets off.
-  const arrival = useTransform(scrub, [0.62, 0.82], [0, 1]);
+  /* Beat 04's sequence, and the one place this page works differently.
+     The token lands on "You", dissolves into an outline there, and then
+     nothing flies anywhere — the *edge itself* carries a pulse of oxblood
+     out to where the contact will be, and his node fades up as that pulse
+     arrives. Everything is scrubbed, so scrolling back retracts the colour
+     down the branch and takes the node with it. */
+  const youOutline = useTransform(scrub, [0.1, 0.26], [0, 1]);
+  const branch = useTransform(scrub, [0.3, 0.74], [0, 1]);
+  const arrival = useTransform(scrub, [0.66, 0.82], [0, 1]);
 
   return (
     <StorySection index={3} id="network" className="bg-white/40">
@@ -65,12 +71,19 @@ export function MapSection() {
         <div className="lg:col-span-7 lg:-mr-10 xl:-mr-16">
           <StoryReveal y={24}>
             <div className="relative">
-              {/* The branch the token flies: centre → hub → new contact. */}
+              {/* Two anchors, not three. The token arrives on "You" and
+                  re-forms at the contact's node to depart — but it is
+                  invisible in between (see StoryToken's visibility rhythm),
+                  because the whole point of this beat is that the branch
+                  lights up rather than something travelling along it. */}
               <StoryAnchor stage={3} order={0} style={GRAPH_ANCHORS.me} />
-              <StoryAnchor stage={3} order={1} style={GRAPH_ANCHORS.hub} />
-              <StoryAnchor stage={3} order={2} style={GRAPH_ANCHORS.story} />
+              <StoryAnchor stage={3} order={1} style={GRAPH_ANCHORS.story} />
 
-              <LandingGraph arrival={reduced ? undefined : arrival} />
+              <LandingGraph
+                arrival={reduced ? undefined : arrival}
+                branch={reduced ? undefined : branch}
+                youOutline={reduced ? undefined : youOutline}
+              />
             </div>
           </StoryReveal>
         </div>

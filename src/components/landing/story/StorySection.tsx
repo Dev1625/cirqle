@@ -195,11 +195,14 @@ export function ScrubbedText({
   scrub,
   share = [0, 1],
   className = '',
+  cursor = false,
 }: {
   text: string;
   scrub: MotionValue<number>;
   share?: [number, number];
   className?: string;
+  /** Show an oxblood caret at the word currently being written. */
+  cursor?: boolean;
 }) {
   const { reduced } = useStoryScroll();
   const words = React.useMemo(() => text.split(' '), [text]);
@@ -215,6 +218,7 @@ export function ScrubbedText({
           count={words.length}
           share={share}
           reduced={reduced}
+          cursor={cursor}
         />
       ))}
     </span>
@@ -228,6 +232,7 @@ function ScrubWord({
   count,
   share,
   reduced,
+  cursor,
 }: {
   word: string;
   scrub: MotionValue<number>;
@@ -235,11 +240,44 @@ function ScrubWord({
   count: number;
   share: [number, number];
   reduced: boolean;
+  cursor: boolean;
 }) {
   const opacity = useSlotOpacity(scrub, slot, count, share);
+
+  /* The caret.
+     Every word carries its own, and each is lit only while the scrub is
+     inside that word's slot — so exactly one is visible at a time and it
+     appears to walk the text as it writes. Rendering one caret and moving it
+     would mean recomputing its position in React on every frame; this is
+     pure opacity on elements that already exist.
+
+     It is absolutely positioned against its word, so it adds nothing to the
+     line box. A caret in the text flow would nudge every following word by
+     its own width on each step, which is precisely the reflow this page's
+     word-by-word reveal exists to avoid. */
+  const span = share[1] - share[0];
+  const step = span / Math.max(count, 1);
+  const start = share[0] + slot * step;
+  const here = useTransform(
+    scrub,
+    [start, start + step * 0.05, start + step * 0.95, start + step],
+    [0, 1, 1, 0]
+  );
+
   return (
-    <motion.span className="inline-block whitespace-pre" style={{ opacity: reduced ? 1 : opacity }}>
+    <motion.span
+      className={`whitespace-pre ${cursor ? 'relative inline-block' : 'inline-block'}`}
+      style={{ opacity: reduced ? 1 : opacity }}
+    >
       {word}
+      {cursor && !reduced && (
+        <motion.span
+          aria-hidden="true"
+          data-caret=""
+          className="pointer-events-none absolute right-0 top-[0.1em] h-[1em] w-[2px] bg-brand"
+          style={{ opacity: here }}
+        />
+      )}
     </motion.span>
   );
 }
