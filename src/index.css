@@ -156,6 +156,15 @@ body::before {
   min-height: 215svh;
 }
 
+/* The hero: one screenful, centred, no pinning. Kept separate from
+   `.story-section` so the two cannot drift into each other again. */
+.story-hero {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
 .story-stage {
   position: sticky;
   top: 0;

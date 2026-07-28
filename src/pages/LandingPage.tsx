@@ -99,8 +99,13 @@ function LandingStory() {
 function Hero() {
   const reduce = useReducedMotion();
 
+  /* Deliberately not a `story-section`. That class is now a tall pinning
+     container that expects a sticky `.story-stage` inside it, and the hero
+     has neither — it was inheriting 215svh of height with its content
+     sitting at the top, which is exactly the dead band that opened up under
+     the CTA. The hero is one screen, centred, as it always was. */
   return (
-    <section className="story-section">
+    <section className="story-hero">
       <div className={`${STORY_COLUMN} pb-20 pt-16 md:pb-28 md:pt-24`}>
         <div className="grid grid-cols-1 items-center gap-12 lg:grid-cols-12 lg:gap-8">
           <div className="lg:col-span-7">
