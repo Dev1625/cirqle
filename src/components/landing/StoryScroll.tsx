@@ -44,7 +44,12 @@ export type AnchorPoint = {
   stage: number;
   order: number;
   x: number;
-  y: number;
+  /** Offset from the top of the sticky stage this anchor lives in. */
+  stageOffsetY: number;
+  /** Geometry of the pinned section, so the token can solve sticky itself. */
+  sectionTop: number;
+  sectionH: number;
+  stageH: number;
   /** How long the token parks here, relative to the beat's other stops. */
   weight: number;
   /** The hop *into* this anchor is not shown (beat 04 crosses unseen). */
@@ -60,8 +65,10 @@ type StoryScrollValue = {
    * responsive reflow.
    */
   stops: number[];
-  /** Page-space landing points, sorted by stage then order within a stage. */
+  /** Landing points, sorted by stage then order within a stage. */
   anchors: AnchorPoint[];
+  /** Each beat's pinned scroll range, in page pixels. */
+  pins: Array<{ start: number; end: number }>;
   /** Scrollable distance in px — the conversion factor between the two spaces. */
   limit: number;
   viewportH: number;
@@ -136,7 +143,8 @@ const sameAnchors = (a: AnchorPoint[], b: AnchorPoint[]) =>
       p.weight === b[i].weight &&
       p.silent === b[i].silent &&
       Math.abs(p.x - b[i].x) < 0.5 &&
-      Math.abs(p.y - b[i].y) < 0.5
+      Math.abs(p.stageOffsetY - b[i].stageOffsetY) < 0.5 &&
+      Math.abs(p.sectionTop - b[i].sectionTop) < 0.5
   );
 
 export function StoryScrollProvider({ children }: { children: React.ReactNode }) {
@@ -153,6 +161,7 @@ export function StoryScrollProvider({ children }: { children: React.ReactNode })
 
   const [stops, setStops] = React.useState<number[]>([]);
   const [anchors, setAnchors] = React.useState<AnchorPoint[]>([]);
+  const [pins, setPins] = React.useState<Array<{ start: number; end: number }>>([]);
   const [metrics, setMetrics] = React.useState({ limit: 0, viewportH: 0 });
 
   const registerStage = React.useCallback((index: number, el: HTMLElement | null) => {
@@ -231,29 +240,56 @@ export function StoryScrollProvider({ children }: { children: React.ReactNode })
       const scrollY = window.scrollY;
       const scrollX = window.scrollX;
 
+      /* A beat's scroll range is the stretch over which its stage is pinned:
+         from the section's top reaching the viewport top, to the section
+         running out of room underneath it. That is exactly the span during
+         which the content is held still in front of the reader, which is why
+         it — and not the section's centre — is what the beat's animation is
+         mapped onto. */
       const orderedStages = [...stageEls.current.entries()].sort((a, b) => a[0] - b[0]);
+      const nextPins = orderedStages.map(([, el]) => {
+        const stage = el.querySelector<HTMLElement>('.story-stage');
+        const top = layoutPosition(el).y;
+        const stageH = stage ? stage.offsetHeight : el.offsetHeight;
+        return { start: top, end: top + Math.max(0, el.offsetHeight - stageH) };
+      });
       const nextStops = strictlyIncreasing(
-        orderedStages.map(([, el]) => {
-          const rect = el.getBoundingClientRect();
-          const centre = rect.top + scrollY + rect.height / 2 - window.innerHeight / 2;
-          return clamp01(centre / limit);
-        })
+        nextPins.map((p) => clamp01((p.start + p.end) / 2 / limit))
       );
 
       const nextAnchors = [...anchorEls.current.values()]
         .sort((a, b) => a.stage - b.stage || a.order - b.order)
         .map(({ stage, order, el, weight, silent }) => {
-          const { x, y } = layoutPosition(el);
-          // Page space, not viewport space. The token converts to viewport
-          // coordinates only at the final step (see StoryToken), which is
-          // what keeps it welded to a target that scrolls with the page.
-          return { stage, order, x, y, weight, silent };
+          const section = el.closest<HTMLElement>('section');
+          const stageEl = el.closest<HTMLElement>('.story-stage');
+          const here = layoutPosition(el);
+          const stageTop = stageEl ? layoutPosition(stageEl).y : here.y;
+          return {
+            stage,
+            order,
+            weight,
+            silent,
+            x: here.x,
+            // Everything below is resolved against live scroll by the token,
+            // because a pinned stage's rendered position is not its layout
+            // position and only the token knows the current scroll.
+            stageOffsetY: here.y - stageTop,
+            sectionTop: section ? layoutPosition(section).y : here.y,
+            sectionH: section ? section.offsetHeight : 0,
+            stageH: stageEl ? stageEl.offsetHeight : 0,
+          };
         });
 
       // Equality-guarded: this runs from a ResizeObserver on <body>, and an
       // unconditional setState there is a render loop.
       setStops((prev) => (sameStops(prev, nextStops) ? prev : nextStops));
       setAnchors((prev) => (sameAnchors(prev, nextAnchors) ? prev : nextAnchors));
+      setPins((prev) =>
+        prev.length === nextPins.length &&
+        prev.every((p, i) => Math.abs(p.start - nextPins[i].start) < 0.5 && Math.abs(p.end - nextPins[i].end) < 0.5)
+          ? prev
+          : nextPins
+      );
       setMetrics((prev) =>
         prev.limit === limit && prev.viewportH === window.innerHeight
           ? prev
@@ -281,13 +317,14 @@ export function StoryScrollProvider({ children }: { children: React.ReactNode })
       progress,
       stops,
       anchors,
+      pins,
       limit: metrics.limit,
       viewportH: metrics.viewportH,
       registerStage,
       registerAnchor,
       reduced,
     }),
-    [progress, stops, anchors, metrics, registerStage, registerAnchor, reduced]
+    [progress, stops, anchors, pins, metrics, registerStage, registerAnchor, reduced]
   );
 
   return <StoryScrollContext.Provider value={value}>{children}</StoryScrollContext.Provider>;
@@ -326,6 +363,12 @@ export function useStoryAnchor(
   );
 }
 
+/**
+ * How much of a beat's pinned stretch is held back at each end, so nothing
+ * important fires on the exact frame the pin engages or releases.
+ */
+export const SECTION_INSET = 0.06;
+
 /** Even spacing, used until the real sections have been measured. */
 const FALLBACK_STOPS = STORY_STAGES.map((_, i) => (i + 0.5) / STORY_STAGES.length);
 
@@ -335,32 +378,34 @@ export function useStoryStops() {
 }
 
 /**
- * The scroll window a beat's own animations play across.
+ * The scroll window a beat's own animations play across: the stretch over
+ * which its stage is pinned, trimmed slightly at both ends.
  *
- * Deliberately NOT the section's whole journey through the viewport. That
- * range spends most of its length with the section barely visible at the top
- * or bottom edge, so anything mapped across it has already finished by the
- * time the section is centred and readable — the visitor arrives to find it
- * done rather than watching it happen.
+ * This used to be a fixed number of viewport heights either side of the
+ * section's centre, and that was the root of a whole class of complaints —
+ * the beat began while the section was still entering the bottom of the
+ * screen and ended as it left the top, because a section only has a few
+ * hundred pixels of scroll during which its content is properly framed. The
+ * pin removes the problem rather than retiming around it: for the whole of
+ * this range the content is held still, centred, in front of the reader.
  *
- * Instead this is a window around the section's measured centre stop, sized
- * as a fraction of the *viewport* rather than of the page, so a beat plays
- * out while it is genuinely the thing on screen. `spread` is in viewport
- * heights either side of centre.
- *
- * This constant, not the section height, is what governs how long a beat
- * takes to watch. The window is `2 × spread × viewportH` pixels of scrolling
- * regardless of how tall the section is — making sections taller on its own
- * only adds empty gaps between beats. Both were too small: every beat played
- * out in 0.8 of a viewport of scrolling, which is not enough to register one
- * step before the next arrives.
+ * `inset` keeps the first and last moments of the beat clear of the handoff
+ * at either end, so nothing important fires on the exact frame the pin
+ * engages or releases.
  */
-export const SECTION_SPREAD = 0.68;
-
-export function useSectionRange(index: number, spread = SECTION_SPREAD): [number, number] {
-  const { limit, viewportH } = useStoryScroll();
+export function useSectionRange(index: number, inset = SECTION_INSET): [number, number] {
+  const { pins, limit } = useStoryScroll();
   const stops = useStoryStops();
-  const centre = stops[index];
-  const half = limit > 0 ? (spread * viewportH) / limit : 0.04;
-  return [Math.max(0, centre - half), Math.min(1, centre + half)];
+  const pin = pins[index];
+  if (!pin || !limit || pin.end <= pin.start) {
+    // Not pinned (short viewport, or not measured yet) — fall back to a
+    // window around the measured centre so the beats still play.
+    const half = 0.05;
+    return [Math.max(0, stops[index] - half), Math.min(1, stops[index] + half)];
+  }
+  const span = pin.end - pin.start;
+  return [
+    clamp01((pin.start + span * inset) / limit),
+    clamp01((pin.end - span * inset) / limit),
+  ];
 }

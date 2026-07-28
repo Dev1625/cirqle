@@ -30,7 +30,7 @@ const RING = { size: 76, stroke: 5 };
 
 /** The token arrives across the first 30%; the card fills in after it, and
  *  is finished by 86% so it completes while the beat is still centred. */
-const FILL: [number, number] = [0.22, 0.62];
+const FILL: [number, number] = [0.2, 0.56];
 
 const DETAILS = [
   ['Met', `${STORY_CONTACT.metAt} · ${STORY_CONTACT.metWhen}`],
@@ -47,8 +47,8 @@ export function HealthSection() {
      as a second thing happening beside it. The outline then leaves the card
      entirely and goes to find him in the row below — the same callback beat
      03 makes, in the place a visitor would actually have to hunt. */
-  const ringOutline = useCue(scrub, [0.12, 0.24], [0.5, 0.58]);
-  const rowCallback = useCue(scrub, [0.68, 0.8], [0.96, 1]);
+  const ringOutline = useCue(scrub, [0.14, 0.26], [0.48, 0.56]);
+  const rowCallback = useCue(scrub, [0.62, 0.73], [0.93, 0.99]);
 
   return (
     <StorySection index={4} id="queue" bleed={<QueueMarquee scrub={scrub} reduced={reduced} callback={rowCallback} />}>
@@ -221,56 +221,71 @@ function QueueMarquee({
   reduced: boolean;
   callback: MotionValue<number>;
 }) {
-  const track = [...QUEUE, ...QUEUE];
-  const opacity = useTransform(scrub, [0.5, 0.68], [0, 1]);
-  const y = useTransform(scrub, [0.5, 0.68], [24, 0]);
+  // He is rendered separately at the head of the row, so the drifting
+  // track carries everyone else.
+  const track = [...REST, ...REST];
+  const opacity = useTransform(scrub, [0.46, 0.62], [0, 1]);
+  const y = useTransform(scrub, [0.46, 0.62], [24, 0]);
 
   return (
     <motion.div className="mt-12" style={{ opacity: reduced ? 1 : opacity, y: reduced ? 0 : y }}>
-      {/* Fade width is set in CSS, not inline: at xl the narrative token
-          travels across this row's left edge, so the mask has to widen past
-          it or cards slide out from under the token. */}
-      {/* The token's second stop for this beat. A fixed point over the row
-          rather than a marker on his card: the card is inside a continuously
-          translating track, and anchors are measured in layout space, so an
-          anchor riding the marquee would report where the card would be if
-          it were not moving. */}
-      <div className="relative">
-        <StoryAnchor stage={4} order={1} weight={1.4} className="left-[22%] top-1/2" />
-      </div>
-      <div className="marquee-mask overflow-hidden">
-        <div className="marquee-track flex w-max">
-          {track.map((q, i) => (
-            <div
-              key={`${q.name}-${i}`}
-              aria-hidden={i >= QUEUE.length ? true : undefined}
-              className="mr-4 w-[290px] shrink-0"
-            >
-              <div
-                className={`relative h-full rounded-card border p-5 ${
-                  q.isStory ? 'border-brand/40 bg-brand/[0.06]' : 'border-ink/15 bg-white'
-                }`}
-              >
-                {/* Only his card, and only the real one — the duplicate copy
-                    that makes the marquee loop seamlessly must not carry a
-                    second outline drifting across the row. */}
-                {q.isStory && i < QUEUE.length && <StoryOutline show={callback} inset={-5} radius={10} />}
-                <div className="mb-3 flex items-center justify-between gap-2">
-                  <span className="truncate font-serif text-lg font-bold">{q.name}</span>
-                  <span
-                    className={`shrink-0 rounded-card px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${q.tone}`}
-                  >
-                    {q.status}
-                  </span>
-                </div>
-                <p className="font-mono text-[10px] uppercase tracking-widest text-muted">{q.firm}</p>
-                <p className="mt-4 font-mono text-sm leading-relaxed text-subtle">{q.action}</p>
+      <div className="flex">
+        {/* His card is lifted out of the drifting track and pinned at the
+            head of the row.
+
+            It used to ride the marquee, which meant the token could not land
+            on it: anchors are measured in layout space, so an anchor on a
+            continuously translating card reports where that card would be if
+            it were standing still. The previous fix — a fixed marker at 22%
+            of the row — put the token in an arbitrary spot near his card
+            rather than on it.
+
+            Pinning him is also the more truthful layout. The copy says he is
+            at the top of your queue; a card that drifts past with the others
+            says the opposite. The rest of the list still runs endlessly
+            behind him. */}
+        <div className="relative mr-4 w-[290px] shrink-0">
+          <StoryAnchor stage={4} order={1} weight={1.6} className="-left-3 -top-3" />
+          <StoryOutline show={callback} inset={-5} radius={10} />
+          <QueueCard entry={QUEUE[0]} />
+        </div>
+
+        {/* The drifting remainder gets its own clipping box, starting after
+            him. Sharing one container let the moving track slide straight
+            over the pinned card — he was there the whole time, with other
+            people's cards passing across the top of him. */}
+        <div className="marquee-mask min-w-0 flex-1 overflow-hidden">
+          <div className="marquee-track flex w-max">
+            {track.map((q, i) => (
+              <div key={`${q.name}-${i}`} aria-hidden={i >= REST.length ? true : undefined} className="mr-4 w-[290px] shrink-0">
+                <QueueCard entry={q} />
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </motion.div>
+  );
+}
+
+function QueueCard({ entry }: { entry: (typeof QUEUE)[number] }) {
+  return (
+    <div
+      className={`h-full rounded-card border p-5 ${
+        entry.isStory ? 'border-brand/40 bg-brand/[0.06]' : 'border-ink/15 bg-white'
+      }`}
+    >
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <span className="truncate font-serif text-lg font-bold">{entry.name}</span>
+        <span
+          className={`shrink-0 rounded-card px-2 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest ${entry.tone}`}
+        >
+          {entry.status}
+        </span>
+      </div>
+      <p className="font-mono text-[10px] uppercase tracking-widest text-muted">{entry.firm}</p>
+      <p className="mt-4 font-mono text-sm leading-relaxed text-subtle">{entry.action}</p>
+    </div>
   );
 }
 
@@ -312,3 +327,6 @@ const QUEUE = [
     action: 'She sent the intro — close the loop.',
   },
 ];
+
+/** Everyone except him — he is pinned at the head of the row. */
+const REST = QUEUE.filter((q) => !q.isStory);

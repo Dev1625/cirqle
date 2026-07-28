@@ -41,9 +41,12 @@ export function MapSection() {
      out to where the contact will be, and his node fades up as that pulse
      arrives. Everything is scrubbed, so scrolling back retracts the colour
      down the branch and takes the node with it. */
-  const youOutline = useTransform(scrub, [0.08, 0.22], [0, 1]);
-  const branch = useTransform(scrub, [0.32, 0.68], [0, 1]);
-  const arrival = useTransform(scrub, [0.62, 0.76], [0, 1]);
+  const youOutline = useTransform(scrub, [0.08, 0.2], [0, 1]);
+  /* The travelling colour gets over half the beat to itself. It is the one
+     thing this section exists to show, and at a third of the window it was
+     over almost before it registered. */
+  const branch = useTransform(scrub, [0.24, 0.78], [0, 1]);
+  const arrival = useTransform(scrub, [0.72, 0.84], [0, 1]);
 
   return (
     <StorySection index={3} id="network" className="bg-white/40">

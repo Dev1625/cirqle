@@ -34,13 +34,18 @@ export function StorySection({
 }) {
   const ref = useStoryStage(index);
   return (
-    <section
-      ref={ref}
-      id={id}
-      className={`story-section overflow-x-clip border-t border-ink/15 ${className}`}
-    >
-      <div className={STORY_COLUMN}>{children}</div>
-      {bleed}
+    <section ref={ref} id={id} className={`story-section border-t border-ink/15 ${className}`}>
+      {/* The stage is what sticks. Everything a beat shows lives inside it,
+          bleed content included, so the whole composition holds still while
+          the beat plays. `overflow-x-clip` sits here rather than on the
+          section: an ancestor that clips would not break sticky, but keeping
+          it inside the stage keeps the clipping box the same size as the
+          thing being clipped. */
+      }
+      <div className="story-stage overflow-x-clip">
+        <div className={STORY_COLUMN}>{children}</div>
+        {bleed}
+      </div>
     </section>
   );
 }

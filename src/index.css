@@ -128,45 +128,65 @@ body::before {
   }
 }
 
-/* ── Landing page: continuous scroll ────────────────────────────────────
+/* ── Landing page: continuous scroll, pinned beats ─────────────────────
    CSS scroll-snap is gone. It cut the page into discrete slides, which is
    the opposite of what the story needs: one unbroken read from the tap to
-   the drafted email. Smoothing is Lenis's job now (see StoryScroll.tsx),
-   and Lenis drives the real document scroll, so nothing below is hijacked.
+   the drafted email. Smoothing is Lenis's job (see StoryScroll.tsx), and
+   Lenis drives the real document scroll, so nothing is hijacked.
 
-   Sections are content-driven now. They used to be a flat 100svh each, but
-   that height only ever existed to give scroll-snap a page-sized thing to
-   snap to — with the snapping gone it was just air, and on a tall desktop
-   viewport it was a lot of air: six beats of mostly empty cream between
-   short two-column blocks.
+   Beats are now *pinned*, and that is the fix for a specific complaint: the
+   animations started as a section entered the bottom of the screen and
+   finished as it left the top, so nothing ever played while you were
+   actually looking at it. That was not a timing bug — it was geometry. A
+   1062px section in a 900px viewport has only ~340px of scroll during which
+   its content is properly framed, and the beats needed four times that.
 
-   What replaces it is padding that scales with the viewport plus a floor
-   well under a full screen. Tall viewports get generous but finite spacing;
-   short ones still get a beat that fills enough of the screen to read as its
-   own moment. The floor also keeps the measured stops from bunching: beats
-   need to be far enough apart in scroll terms for their animation windows
-   not to overlap.
+   So the section is tall and the content sticks to the viewport inside it.
+   You scroll through `story-section`'s height while `story-stage` stays put,
+   centred, for all of it. Every beat now plays out with its content held
+   still in front of you, and the length of the beat is simply how much
+   taller than the stage the section is.
 
    svh rather than vh: mobile browsers shrink the visual viewport as the URL
-   bar retracts, and vh would leave every section slightly taller than the
+   bar retracts, and vh would leave every stage slightly taller than the
    screen for the entire scroll. */
 .story-section {
-  /* Tall on purpose. Two different things were cramped: how long a beat's
-     animation takes to play (that is SECTION_SPREAD, measured in viewport
-     heights of scrolling, not in section height) and how much room beats
-     have between them. Raising only the first would run adjacent beats into
-     each other; raising only this would add empty gaps and change nothing
-     about the pacing. Both went up together.
+  position: relative;
+  /* Stage (100svh) + the pinned scroll distance the beat plays across. */
+  min-height: 215svh;
+}
 
-     118svh is the trimmed figure. 130 gave the pacing room but left a
-     visible dead band under beats whose content does not fill the height —
-     and since the *pacing* comes from SECTION_SPREAD, not from here, the
-     height could come back down without costing any of the extra time. */
-  min-height: 118svh;
-  padding-block: clamp(3.5rem, 8vh, 6rem);
+.story-stage {
+  position: sticky;
+  top: 0;
+  min-height: 100svh;
   display: flex;
   flex-direction: column;
   justify-content: center;
+  padding-block: clamp(2rem, 5vh, 3.5rem);
+}
+
+/* Beat 03 has four moments to get through plus an interaction that costs
+   real time, so it is simply given more pinned distance. Under the pinned
+   model that is all "make this beat longer" means. */
+.story-section--long {
+  min-height: 285svh;
+}
+
+/* Short viewports cannot hold a stage and a beat at once — the pin would
+   crop content that has nowhere to go. Below this the sections behave like
+   ordinary stacked blocks and the beats simply reveal in place. */
+@media (max-height: 620px), (max-width: 1279px) {
+  .story-section,
+  .story-section--long {
+    min-height: 0;
+  }
+
+  .story-stage {
+    position: static;
+    min-height: 0;
+    padding-block: clamp(3.5rem, 8vh, 6rem);
+  }
 }
 
 /* ── Lenis ──────────────────────────────────────────────────────────────
@@ -247,10 +267,12 @@ html.lenis body {
    *left* fade past the thread so cards dissolve before they reach the token
    rather than sliding out from behind it. The right edge is untouched: that
    one is the intended "content continues past the frame" bleed. */
-@media (min-width: 1280px) {
-  .marquee-mask {
-    --marquee-fade-left: 15rem;
-  }
+/* The mask now wraps only the drifting remainder — the pinned first card
+   sits outside it and must read as solid. A short left fade softens where
+   the moving cards emerge from behind him; the right edge keeps the wider
+   bleed, which is the "the list keeps going" cue. */
+.marquee-mask {
+  --marquee-fade-left: 2rem;
 }
 
 /* Scrollbar styling for a premium feel */

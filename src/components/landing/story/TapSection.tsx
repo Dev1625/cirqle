@@ -33,9 +33,14 @@ export function TapSection() {
   const [from, to] = useSectionRange(0);
   const span = to - from;
 
+  /* Front, turn, back — but weighted to the front half of the beat. The
+     turn used to run to two-thirds of the window and, with the window
+     spanning the section's whole pass across the screen, that meant the card
+     was still rotating as the section left. It now settles by 55%, leaving
+     the rest of the pinned stretch to simply look at the finished card. */
   const rotateY = useTransform(
     progress,
-    [from, from + span / 3, from + (span * 2) / 3, to],
+    [from, from + span * 0.18, from + span * 0.55, to],
     [0, 0, 180, 180]
   );
 

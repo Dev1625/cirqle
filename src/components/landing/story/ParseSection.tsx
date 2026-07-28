@@ -41,7 +41,7 @@ const FIELDS = [
 ];
 
 /** Reveal window inside the beat's own scroll range. */
-const FILL: [number, number] = [0.52, 0.93];
+const FILL: [number, number] = [0.46, 0.84];
 
 export function ParseSection() {
   const { reduced } = useStoryScroll();
@@ -51,9 +51,9 @@ export function ParseSection() {
      beat: raw text → the label doing the reading → the record being written.
      The form outline deliberately draws on just as FILL begins, so the
      outline is tracking the parse rather than announcing a finished box. */
-  const rawOutline = useCue(scrub, [0.05, 0.15], [0.3, 0.38]);
-  const readingPulse = useCue(scrub, [0.17, 0.25], [0.32, 0.4]);
-  const formOutline = useCue(scrub, [0.46, 0.58], [0.94, 0.99]);
+  const rawOutline = useCue(scrub, [0.08, 0.18], [0.32, 0.4]);
+  const readingPulse = useCue(scrub, [0.2, 0.28], [0.34, 0.42]);
+  const formOutline = useCue(scrub, [0.42, 0.52], [0.9, 0.97]);
 
   // One slot per field plus a final slot for tags/commit.
   const slots = FIELDS.length + 1;

@@ -47,23 +47,23 @@ const BODY =
 /* The token lands across the first 30%, then the draft writes itself, and
    the send row is up by 92% — early enough that the finished email is still
    centred rather than on its way off the top of the screen. */
-const SUBJECT_SHARE: [number, number] = [0.22, 0.36];
-const GREETING_SHARE: [number, number] = [0.36, 0.43];
-const BODY_SHARE: [number, number] = [0.43, 0.78];
+const SUBJECT_SHARE: [number, number] = [0.2, 0.32];
+const GREETING_SHARE: [number, number] = [0.32, 0.38];
+const BODY_SHARE: [number, number] = [0.36, 0.72];
 
 export function DraftSection() {
   const { progress, reduced } = useStoryScroll();
   const scrub = useScrub(5);
   const [rangeStart, rangeEnd] = useSectionRange(5);
 
-  const ready = useTransform(scrub, [0.78, 0.85], [0, 1]);
-  const pulse = useTransform(scrub, [0.78, 0.85], [1, 0]);
+  const ready = useTransform(scrub, [0.72, 0.78], [0, 1]);
+  const pulse = useTransform(scrub, [0.72, 0.78], [1, 0]);
 
   /* Choreography: the whole compose box is named on arrival, then the
      highlight gets out of the way and lets the caret do the work. */
-  const composeOutline = useCue(scrub, [0.05, 0.16], [0.28, 0.36]);
+  const composeOutline = useCue(scrub, [0.08, 0.18], [0.3, 0.38]);
   // The invitation only exists once there is a finished email to send.
-  const sendPulse = useCue(scrub, [0.86, 0.92], [0.995, 1]);
+  const sendPulse = useCue(scrub, [0.78, 0.84], [0.97, 1]);
 
   /* Send. Real click, or — for a visitor scrolling straight through — the
      same passive-completion pattern beat 03 already uses, with the same
@@ -73,7 +73,7 @@ export function DraftSection() {
   const [sent, setSent] = React.useState(false);
   const touched = React.useRef(false);
   const autoRan = React.useRef(false);
-  const autoAt = rangeStart + (rangeEnd - rangeStart) * 0.97;
+  const autoAt = rangeStart + (rangeEnd - rangeStart) * 0.9;
 
   useMotionValueEvent(progress, 'change', (p) => {
     if (autoRan.current || touched.current || p < autoAt) return;

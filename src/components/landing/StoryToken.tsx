@@ -1,6 +1,6 @@
 import React from 'react';
 import { motion, useTransform, type MotionValue } from 'motion/react';
-import { useStoryScroll, useStoryStops, strictlyIncreasing } from './StoryScroll';
+import { useStoryScroll, useStoryStops, strictlyIncreasing, type AnchorPoint } from './StoryScroll';
 import { STORY_STAGES, type StoryStage } from './storyStages';
 
 /* ────────────────────────────────────────────────────────────────────────
@@ -34,40 +34,63 @@ import { STORY_STAGES, type StoryStage } from './storyStages';
    Everything here animates transform and opacity only.
    ──────────────────────────────────────────────────────────────────────── */
 
-/** How much of the section's window the token spends inside the beat. */
-const DWELL_VIEWPORTS = 0.68;
-/** Ceiling as a share of the distance to the nearest beat — see below. */
-const DWELL_GAP_SHARE = 0.46;
+/**
+ * Lead-in before the token starts working a beat, as a share of that beat's
+ * pinned stretch. "Give it a second" — the token used to begin moving the
+ * instant a beat's window opened, which read as it reacting to the section
+ * arriving rather than to you having arrived.
+ */
+const LEAD_IN = 0.12;
+/** Matching tail, so it has left before the pin releases. */
+const TAIL = 0.06;
 /** A hop's share of a beat, against an anchor's `weight` for its park. */
 const HOP_WEIGHT = 1;
 
 type Keyframes = {
   times: number[];
-  xs: number[];
-  ys: number[];
+  /** Index into `anchors` for each keyframe; positions are solved live. */
+  idx: number[];
   /** Visibility keyframes, built alongside the path from the same segments. */
   visTimes: number[];
   visValues: number[];
 } | null;
 
-/** Piecewise-linear lookup, clamped at both ends. `times` must be ascending. */
-function piecewise(at: number, times: number[], values: number[]) {
-  if (times.length === 0) return 0;
-  if (at <= times[0]) return values[0];
+/** Which segment of an ascending `times` array `at` falls in, and how far. */
+function segmentAt(at: number, times: number[]) {
   const last = times.length - 1;
-  if (at >= times[last]) return values[last];
+  if (at <= times[0]) return { a: 0, b: 0, t: 0 };
+  if (at >= times[last]) return { a: last, b: last, t: 0 };
   for (let i = 1; i <= last; i += 1) {
     if (at <= times[i]) {
       const span = times[i] - times[i - 1];
-      const t = span > 0 ? (at - times[i - 1]) / span : 0;
-      return values[i - 1] + (values[i] - values[i - 1]) * t;
+      return { a: i - 1, b: i, t: span > 0 ? (at - times[i - 1]) / span : 0 };
     }
   }
-  return values[last];
+  return { a: last, b: last, t: 0 };
+}
+
+/**
+ * Where an anchor actually is on screen, given the current scroll.
+ *
+ * Its stage is `position: sticky`, so its rendered position is not its layout
+ * position: while the beat is pinned the stage sits at the top of the
+ * viewport no matter how far the page has scrolled. This resolves the sticky
+ * rule directly — natural position until the section's top reaches the
+ * viewport top, held at 0 while there is section left underneath, then
+ * carried up as the section runs out.
+ *
+ * Solving it here rather than measuring it is what keeps the token welded to
+ * its target: a measured rect would be one frame stale, and this is exact.
+ */
+function anchorViewportY(a: AnchorPoint, scrollY: number) {
+  const natural = a.sectionTop - scrollY;
+  const floor = a.sectionTop + a.sectionH - a.stageH - scrollY;
+  const stageTop = Math.min(Math.max(0, natural), floor);
+  return stageTop + a.stageOffsetY;
 }
 
 export function StoryToken() {
-  const { progress, anchors, limit, viewportH, reduced } = useStoryScroll();
+  const { progress, anchors, pins, limit, reduced } = useStoryScroll();
   const stops = useStoryStops();
 
   /**
@@ -79,10 +102,8 @@ export function StoryToken() {
   const frames: Keyframes = React.useMemo(() => {
     if (!limit || anchors.length === 0) return null;
 
-    const desired = (DWELL_VIEWPORTS * viewportH) / limit;
     const times: number[] = [];
-    const xs: number[] = [];
-    const ys: number[] = [];
+    const idx: number[] = [];
     const visTimes: number[] = [];
     const visValues: number[] = [];
     const vis = (t: number, v: number) => {
@@ -94,22 +115,16 @@ export function StoryToken() {
       const own = anchors.filter((a) => a.stage === stage);
       if (own.length === 0) return null; // incomplete measurement — draw nothing
 
-      const centre = stops[stage];
-
-      /* The window has to be clamped to its neighbours, not just taken from
-         the viewport. Sized purely in viewport heights it is fine on a long
-         page and far too wide on a short one — and when adjacent windows
-         overlap, the combined keyframe list stops being monotonic.
-         `strictlyIncreasing` then "fixes" it by squashing whole segments to
-         1e-5, and the token interpolates against a mangled range and lands
-         nowhere near its anchor. That is not hypothetical: tightening the
-         section padding once shortened this page by a quarter and produced
-         exactly that failure. */
-      const gapBefore = stage > 0 ? centre - stops[stage - 1] : Infinity;
-      const gapAfter = stage < stops.length - 1 ? stops[stage + 1] - centre : Infinity;
-      const half = Math.min(desired, DWELL_GAP_SHARE * Math.min(gapBefore, gapAfter));
-      const from = centre - half;
-      const to = centre + half;
+      /* The token works the same pinned stretch the beat's own animation
+         does, rather than a window measured out from the section's centre.
+         Before the pin existed those were different things and the token
+         could be mid-journey while the beat had not started; now there is
+         one answer to "when is this beat happening" and everything uses it. */
+      const pin = pins[stage];
+      if (!pin || pin.end <= pin.start) return null;
+      const pinSpan = (pin.end - pin.start) / limit;
+      const from = pin.start / limit + pinSpan * LEAD_IN;
+      const to = pin.end / limit - pinSpan * TAIL;
       const span = to - from;
 
       /* A beat is no longer one park. It is park → hop → park → hop → park,
@@ -126,10 +141,10 @@ export function StoryToken() {
         const t0 = cursor;
         const t1 = cursor + parkW;
 
-        // Position: two keyframes at the same point = parked for that stretch.
+        // Position: two keyframes on the same anchor = parked for that stretch.
+        const flat = anchors.indexOf(a);
         times.push(t0, t1);
-        xs.push(a.x, a.x);
-        ys.push(a.y, a.y);
+        idx.push(flat, flat);
 
         const firstOfPage = stage === 0 && j === 0;
         const lastOfPage = stage === STORY_STAGES.length - 1 && j === own.length - 1;
@@ -180,47 +195,58 @@ export function StoryToken() {
 
     return {
       times: strictlyIncreasing(times),
-      xs,
-      ys,
+      idx,
       visTimes: strictlyIncreasing(visTimes),
       visValues,
     };
-  }, [anchors, stops, limit, viewportH]);
+  }, [anchors, pins, stops, limit]);
 
   // Hooks must run unconditionally, so fall back to a harmless 2-point range
   // when measurement is incomplete and hide the token with opacity instead.
-  const safe = frames ?? { times: [0, 1], xs: [0, 0], ys: [0, 0] };
+  const safe = frames ?? { times: [0, 1], idx: [0, 0] };
 
 
-  /* One transformer per axis, both reading `progress` directly.
+  /* One transformer per axis, both reading `progress` directly, and both
+     resolving the anchor's on-screen position live rather than interpolating
+     baked coordinates. Positions cannot be baked any more: the stages are
+     pinned, so where an anchor *is* depends on the current scroll.
 
-     The obvious shape for this is a chain — interpolate page position from
-     progress, then subtract scroll in a second `useTransform([pageY,
-     progress])`. That does not work: a multi-input transform fed a *derived*
-     MotionValue reads a stale snapshot of it, so the token interpolated x
-     correctly and left y frozen on the first keyframe. Doing the whole
-     conversion in a single transformer over the single source of truth
-     removes the chain and the staleness with it. */
-  const path = React.useCallback(
-    (p: number, values: number[]) => {
+     Chaining these through a second multi-input `useTransform` does not work
+     — a multi-input transform fed a derived MotionValue reads a stale
+     snapshot of it, which once left the token's y frozen on its first
+     keyframe for the entire page. One transformer each, over the one source
+     of truth. */
+  const solve = React.useCallback(
+    (p: number, axis: 'x' | 'y') => {
+      if (!frames || anchors.length === 0) return 0;
+
       // Reduced motion does not travel: snap to the nearest beat first, so
-      // the token jumps between anchors as a state change, not a slide.
+      // the token jumps between stops as a state change, not a slide.
       let at = p;
       if (reduced) {
         let nearest = stops[0];
-        stops.forEach((s) => {
-          if (p >= s - 1e-9) nearest = s;
+        stops.forEach((sv) => {
+          if (p >= sv - 1e-9) nearest = sv;
         });
         at = nearest;
       }
-      return piecewise(at, safe.times, values);
+
+      const seg = segmentAt(at, safe.times);
+      const A = anchors[safe.idx[seg.a]];
+      const B = anchors[safe.idx[seg.b]];
+      if (!A || !B) return 0;
+
+      const scrollY = p * limit;
+      if (axis === 'x') return A.x + (B.x - A.x) * seg.t;
+      const ay = anchorViewportY(A, scrollY);
+      const by = anchorViewportY(B, scrollY);
+      return ay + (by - ay) * seg.t;
     },
-    [reduced, stops, safe.times]
+    [frames, anchors, reduced, stops, safe.times, safe.idx, limit]
   );
 
-  const x = useTransform(progress, (p) => path(p, safe.xs));
-  // Page space → viewport space. The one conversion, done inline.
-  const y = useTransform(progress, (p) => path(p, safe.ys) - p * limit);
+  const x = useTransform(progress, (p) => solve(p, 'x'));
+  const y = useTransform(progress, (p) => solve(p, 'y'));
 
   /* Emphasis: a genuine multi-keyframe range built from the measured stops —
      full size on arrival at each beat, eased back down while travelling. */
@@ -261,7 +287,7 @@ export function StoryToken() {
       anchors,
       stops,
       limit,
-      viewportH,
+      pins,
       live: () => ({
         progress: progress.get(),
         // x and y are the only derived values now.
@@ -270,7 +296,7 @@ export function StoryToken() {
         y: y.get(),
       }),
     };
-  }, [frames, anchors, stops, limit, viewportH, progress, x, y]);
+  }, [frames, anchors, pins, stops, limit, progress, x, y]);
 
   return (
     <motion.div

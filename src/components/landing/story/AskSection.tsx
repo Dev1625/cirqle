@@ -121,10 +121,10 @@ function resolve(query: string): Scripted | null {
 
 /* This beat has more to get through than any other — name the chip, invite
    the click, run the query, then point at the answer — and unlike the rest
-   its middle step costs real time that scroll cannot scrub. So it is given a
-   wider window than the page default rather than having its steps packed
-   tighter together. */
-const ASK_SPREAD = 0.78;
+   its middle step costs real time that scroll cannot scrub. It gets a taller
+   section than its neighbours (see `.story-section--long` in index.css),
+   which under the pinned model is exactly what "give this beat longer" now
+   means. */
 
 type Phase = { state: 'idle' } | { state: 'thinking' } | { state: 'answered'; script: Scripted | null };
 
@@ -144,13 +144,13 @@ export function AskSection() {
      that subscription re-bind on every render. Once the visitor interacts —
      picking a chip, typing, or pressing Ask — this never fires. */
   const { progress, reduced } = useStoryScroll();
-  const [rangeStart, rangeEnd] = useSectionRange(2, ASK_SPREAD);
+  const [rangeStart, rangeEnd] = useSectionRange(2);
   // After the Ask pulse has had its window, and far enough before the end of
   // the beat that the populate-then-ask sequence and its thinking pause still
   // finish while the answer panel is on screen. The beat is roughly twice as
   // long in scroll terms as it used to be, so this is a real pause rather
   // than a formality — there is time to press it yourself.
-  const autoAt = rangeStart + (rangeEnd - rangeStart) * 0.52;
+  const autoAt = rangeStart + (rangeEnd - rangeStart) * 0.58;
   const touched = React.useRef(false);
   const autoRan = React.useRef(false);
 
@@ -159,15 +159,15 @@ export function AskSection() {
      0.55 of the beat, so the invitation is real rather than decorative. A
      visitor who takes it gets there first; one who doesn't sees the page
      take its own advice. */
-  const scrub = useScrub(2, ASK_SPREAD);
-  const chipOutline = useCue(scrub, [0.05, 0.14], [0.26, 0.33]);
-  const askPulse = useCue(scrub, [0.34, 0.43], [0.58, 0.65]);
+  const scrub = useScrub(2);
+  const chipOutline = useCue(scrub, [0.1, 0.2], [0.32, 0.39]);
+  const askPulse = useCue(scrub, [0.4, 0.48], [0.66, 0.73]);
   /* The callback onto his result card. Scrubbed, not latched to the click:
      an interaction-driven outline stayed lit for the rest of the page, which
      is the one thing this pass's highlights are not allowed to do. Its window
      opens after the auto-run at 0.55, so by the time it draws there is an
      answer under it either way. */
-  const callback = useCue(scrub, [0.68, 0.78], [0.96, 1]);
+  const callback = useCue(scrub, [0.7, 0.79], [0.94, 0.99]);
 
   React.useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -209,7 +209,7 @@ export function AskSection() {
   }, [reduced]);
 
   return (
-    <StorySection index={2} id="ask" className="bg-white/40">
+    <StorySection index={2} id="ask" className="story-section--long bg-white/40">
       <StoryHeading
         index={2}
         className="mx-auto max-w-3xl text-center [&_h2]:mx-auto [&_h2]:max-w-[20ch] [&_p:last-of-type]:mx-auto [&_p:first-of-type]:justify-center"
@@ -289,7 +289,6 @@ export function AskSection() {
           </form>
 
           <div className="relative mt-3 min-h-[280px]" aria-live="polite">
-            <StoryAnchor stage={2} order={2} weight={2} className="-left-3 top-8" />
             <AnimatePresence mode="wait" initial={false}>
               {phase.state === 'idle' && (
                 <Fade key="idle">
@@ -372,6 +371,13 @@ function Answer({ script, callback }: { script: Scripted; callback: MotionValue<
               {/* The callback. Of the three results, one of them is the
                   person this page has been following since the tap — so the
                   outline goes on that card and not the other two. */}
+              {/* The token's last stop for this beat is his card itself, so
+                  that pressing Ask visibly sends it from the button to him
+                  rather than leaving it hovering over the synthesis panel.
+                  The card only exists once an answer has run — the path
+                  simply re-plans when it appears, and by then the token is
+                  still parked back on Ask, so nothing jumps. */}
+              {r.isStory && <StoryAnchor stage={2} order={2} weight={2} className="-left-3 -top-3" />}
               {r.isStory && <StoryOutline show={callback} inset={-5} radius={10} />}
               <p className="font-serif text-base font-bold leading-tight">{r.name}</p>
               <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-muted">
