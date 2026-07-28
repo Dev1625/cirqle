@@ -41,9 +41,9 @@ export function MapSection() {
      out to where the contact will be, and his node fades up as that pulse
      arrives. Everything is scrubbed, so scrolling back retracts the colour
      down the branch and takes the node with it. */
-  const youOutline = useTransform(scrub, [0.1, 0.26], [0, 1]);
-  const branch = useTransform(scrub, [0.3, 0.74], [0, 1]);
-  const arrival = useTransform(scrub, [0.66, 0.82], [0, 1]);
+  const youOutline = useTransform(scrub, [0.08, 0.22], [0, 1]);
+  const branch = useTransform(scrub, [0.32, 0.68], [0, 1]);
+  const arrival = useTransform(scrub, [0.62, 0.76], [0, 1]);
 
   return (
     <StorySection index={3} id="network" className="bg-white/40">
@@ -76,8 +76,8 @@ export function MapSection() {
                   invisible in between (see StoryToken's visibility rhythm),
                   because the whole point of this beat is that the branch
                   lights up rather than something travelling along it. */}
-              <StoryAnchor stage={3} order={0} style={GRAPH_ANCHORS.me} />
-              <StoryAnchor stage={3} order={1} style={GRAPH_ANCHORS.story} />
+              <StoryAnchor stage={3} order={0} weight={1.6} style={GRAPH_ANCHORS.me} />
+              <StoryAnchor stage={3} order={1} weight={1.6} silent style={GRAPH_ANCHORS.story} />
 
               <LandingGraph
                 arrival={reduced ? undefined : arrival}

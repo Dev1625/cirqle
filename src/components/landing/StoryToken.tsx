@@ -34,21 +34,20 @@ import { STORY_STAGES, type StoryStage } from './storyStages';
    Everything here animates transform and opacity only.
    ──────────────────────────────────────────────────────────────────────── */
 
-/** How much of the section's window the token spends parked on its anchor. */
-const DWELL_VIEWPORTS = 0.34;
+/** How much of the section's window the token spends inside the beat. */
+const DWELL_VIEWPORTS = 0.68;
+/** Ceiling as a share of the distance to the nearest beat — see below. */
+const DWELL_GAP_SHARE = 0.46;
+/** A hop's share of a beat, against an anchor's `weight` for its park. */
+const HOP_WEIGHT = 1;
 
 type Keyframes = {
   times: number[];
   xs: number[];
   ys: number[];
-  /**
-   * Each beat's dwell window, plus whether the token actually moves during
-   * it. A beat whose token travels mid-dwell (beat 04 crosses the graph)
-   * must not become visible until it has essentially arrived, or the thing
-   * that beat exists to avoid — a separate object flying down the branch —
-   * is exactly what you see.
-   */
-  windows: Array<{ from: number; to: number; moves: boolean }>;
+  /** Visibility keyframes, built alongside the path from the same segments. */
+  visTimes: number[];
+  visValues: number[];
 } | null;
 
 /** Piecewise-linear lookup, clamped at both ends. `times` must be ascending. */
@@ -84,8 +83,12 @@ export function StoryToken() {
     const times: number[] = [];
     const xs: number[] = [];
     const ys: number[] = [];
-    /** Each beat's dwell window, kept so the visibility rhythm can use it. */
-    const windows: Array<{ from: number; to: number; moves: boolean }> = [];
+    const visTimes: number[] = [];
+    const visValues: number[] = [];
+    const vis = (t: number, v: number) => {
+      visTimes.push(t);
+      visValues.push(v);
+    };
 
     for (let stage = 0; stage < STORY_STAGES.length; stage += 1) {
       const own = anchors.filter((a) => a.stage === stage);
@@ -93,42 +96,95 @@ export function StoryToken() {
 
       const centre = stops[stage];
 
-      /* The dwell window has to be clamped to its neighbours, not just taken
-         from the viewport. A dwell sized purely in viewport heights is fine
-         on a long page and far too wide on a short one — and when adjacent
-         windows overlap, the combined keyframe list stops being monotonic.
+      /* The window has to be clamped to its neighbours, not just taken from
+         the viewport. Sized purely in viewport heights it is fine on a long
+         page and far too wide on a short one — and when adjacent windows
+         overlap, the combined keyframe list stops being monotonic.
          `strictlyIncreasing` then "fixes" it by squashing whole segments to
-         1e-5 wide, and the token interpolates against a mangled range and
-         lands nowhere near its anchor. That is not hypothetical: tightening
-         the section padding shortened this page by a quarter and produced
-         exactly that failure.
-
-         0.42 of the distance to the closest neighbouring beat keeps every
-         window disjoint and still leaves a gap for the token to travel in. */
+         1e-5, and the token interpolates against a mangled range and lands
+         nowhere near its anchor. That is not hypothetical: tightening the
+         section padding once shortened this page by a quarter and produced
+         exactly that failure. */
       const gapBefore = stage > 0 ? centre - stops[stage - 1] : Infinity;
       const gapAfter = stage < stops.length - 1 ? stops[stage + 1] - centre : Infinity;
-      const half = Math.min(desired, 0.42 * Math.min(gapBefore, gapAfter));
-
+      const half = Math.min(desired, DWELL_GAP_SHARE * Math.min(gapBefore, gapAfter));
       const from = centre - half;
       const to = centre + half;
-      windows.push({ from, to, moves: own.length > 1 });
+      const span = to - from;
 
-      if (own.length === 1) {
-        // Park. Two keyframes holding the same page position means the token
-        // stays glued to the anchor for the whole window.
-        times.push(from, to);
-        xs.push(own[0].x, own[0].x);
-        ys.push(own[0].y, own[0].y);
-      } else {
-        own.forEach((a, j) => {
-          times.push(from + ((to - from) * j) / (own.length - 1));
-          xs.push(a.x);
-          ys.push(a.y);
-        });
-      }
+      /* A beat is no longer one park. It is park → hop → park → hop → park,
+         so the token walks between the things a beat is actually about — the
+         chips, then the Ask button, then the answer — instead of sitting on
+         one spot while highlights appear elsewhere. Seeing it move to a
+         control is what tells you to use that control. */
+      const totalWeight =
+        own.reduce((sum, a) => sum + a.weight, 0) + HOP_WEIGHT * (own.length - 1);
+
+      let cursor = from;
+      own.forEach((a, j) => {
+        const parkW = (a.weight / totalWeight) * span;
+        const t0 = cursor;
+        const t1 = cursor + parkW;
+
+        // Position: two keyframes at the same point = parked for that stretch.
+        times.push(t0, t1);
+        xs.push(a.x, a.x);
+        ys.push(a.y, a.y);
+
+        const firstOfPage = stage === 0 && j === 0;
+        const lastOfPage = stage === STORY_STAGES.length - 1 && j === own.length - 1;
+        const silentIn = a.silent;
+        const silentOut = own[j + 1]?.silent ?? false;
+
+        if (firstOfPage) {
+          /* Beat 01 forms late, and "late" is a specific number: the card's
+             turn runs to roughly three-quarters of this window, so forming
+             any earlier puts the token on screen mid-rotation. */
+          vis(t0, 0);
+          vis(t0 + parkW * 0.76, 0);
+          vis(t0 + parkW * 0.9, 1);
+          vis(t1, 1);
+        } else {
+          if (silentIn) {
+            // Materialise at the destination rather than be seen crossing.
+            vis(t0, 0);
+            vis(t0 + parkW * 0.06, 0);
+            vis(t0 + parkW * 0.2, 1);
+          } else {
+            vis(t0, 1);
+          }
+
+          /* Heavy stops dissolve mid-park so the beat's own highlight owns
+             the moment; light stops are waypoints and stay visible. */
+          if (a.weight >= 1.5) {
+            vis(t0 + parkW * 0.42, 1);
+            vis(t0 + parkW * 0.6, 0);
+            vis(t1 - parkW * 0.2, 0);
+          }
+
+          vis(t1, lastOfPage || silentOut ? 0 : 1);
+        }
+
+        cursor = t1;
+
+        if (j < own.length - 1) {
+          const hopW = (HOP_WEIGHT / totalWeight) * span;
+          if (own[j + 1].silent) {
+            vis(cursor, 0);
+            vis(cursor + hopW, 0);
+          }
+          cursor += hopW;
+        }
+      });
     }
 
-    return { times: strictlyIncreasing(times), xs, ys, windows };
+    return {
+      times: strictlyIncreasing(times),
+      xs,
+      ys,
+      visTimes: strictlyIncreasing(visTimes),
+      visValues,
+    };
   }, [anchors, stops, limit, viewportH]);
 
   // Hooks must run unconditionally, so fall back to a harmless 2-point range
@@ -183,58 +239,16 @@ export function StoryToken() {
   scaleOutput.push(0.86);
   const scale = useTransform(progress, strictlyIncreasing(scaleInput), scaleOutput);
 
-  /* ── The visibility rhythm ──────────────────────────────────────────
-     The token is no longer continuously present. Each beat now tells its
-     own part of the story through oxblood highlights on its real elements
-     (see StoryHighlight), so the token's job is the connective tissue
-     between them, not a companion icon sitting beside content that is
-     perfectly capable of speaking for itself.
-
-     Per beat: arrive visible, dissolve into the section a beat later, stay
-     gone while that section plays out, then re-form near the end of the
-     dwell to carry the thread to the next anchor.
-
-     Two deliberate exceptions:
-     - Beat 01 does not fade in beforehand at all. The card has to finish
-       turning and settle on its back face first; the token forms only after
-       that, which is the whole of this pass's beat-01 change.
-     - The last beat never re-forms. There is nowhere left to travel to. */
-  const vis = React.useMemo(() => {
-    const w = frames?.windows;
-    if (!w) return null;
-    const input: number[] = [];
-    const output: number[] = [];
-    const at = (win: [number, number], f: number) => win[0] + (win[1] - win[0]) * f;
-
-    w.forEach(({ from, to, moves }, i) => {
-      const win: [number, number] = [from, to];
-      if (i === 0) {
-        /* Beat 01 forms late on purpose, and "late" is a specific number.
-           The card's turn runs from a third to two-thirds of that beat's
-           *section range*, which lands at roughly 0.74 of its narrower dwell
-           window — so forming at 0.42 of the dwell, as this first did, put
-           the token on screen while the card was still mid-rotation. It now
-           forms after the back face has settled, and departs almost at once,
-           which is exactly the hand-off the beat wants. */
-        input.push(at(win, 0.78), at(win, 0.92));
-        output.push(0, 1);
-      } else {
-        // Arrive visible, dissolve, re-form to depart. A beat that carries
-        // the token across itself re-forms much later, so it materialises at
-        // its destination rather than being watched crossing to it.
-        const reformStart = moves ? 0.9 : 0.74;
-        const reformEnd = moves ? 0.98 : 0.94;
-        input.push(at(win, 0.06), at(win, moves ? 0.2 : 0.26), at(win, reformStart), at(win, reformEnd));
-        output.push(1, 0, 0, i === w.length - 1 ? 0 : 1);
-      }
-    });
-    return { input: strictlyIncreasing(input), output };
-  }, [frames]);
-
+  /* ── Visibility ─────────────────────────────────────────────────────
+     Built segment by segment above rather than as a separate rhythm here,
+     because a beat now has several stops and each one needs its own
+     arrive / dissolve / re-form decision. The token is the connective
+     tissue: visible while it travels and as it lands, out of the way while
+     a highlight does the talking. */
   const opacity = useTransform(
     progress,
-    vis ? vis.input : [0, 1],
-    vis ? vis.output : [0, 0]
+    frames ? frames.visTimes : [0, 1],
+    frames ? frames.visValues : [0, 0]
   );
 
   // Under ?scrollprobe the built path and the live values are published for

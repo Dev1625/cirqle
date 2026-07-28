@@ -89,6 +89,10 @@ Needs a window ≥1280px wide — the token is hidden below that by design.
    couldn't settle headlessly.
 5. **Beat 06's Send.** It pulses, invites a click, and actually sends — a mail
    icon flies off. Click it yourself before the page does it for you.
+6. **The token hopping inside a beat** — clearest in beat 03, where it walks
+   from the first question chip over to the Ask button. Pacing lives in
+   `SECTION_SPREAD` (StoryScroll.tsx); section height is separate and is just
+   `min-height` in `index.css`.
 
 ## Open questions for you
 

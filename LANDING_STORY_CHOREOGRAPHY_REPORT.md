@@ -188,6 +188,58 @@ Worth recording, because all three passed every assertion I had.
 
 ---
 
+## Pacing revision (follow-up on this pass)
+
+Feedback after the first cut: *"there's not enough time to enjoy this… I'd
+make the sections a bit longer vertically so you can really see each
+animation… and the token should even travel small distances (like between the
+questions and the ask button), so I know to ask."*
+
+**The section-height instinct was right but height alone would not have fixed
+it.** A beat's animation window is `2 × spread × viewportH` — measured in
+*pixels of scrolling*, not in section height. Making sections taller with the
+old `spread = 0.4` would have added empty gaps between beats and left every
+beat playing out in the same 720px it always had. Two dials, both turned:
+
+| | before | after |
+|---|---|---|
+| `SECTION_SPREAD` (time per beat) | 0.4 → 720px | **0.68 → 1224px** |
+| `.story-section` min-height | 62svh | **118svh** |
+| Beat 03 only (four moments + ask latency) | 0.4 | **0.78** |
+| Page scroll length | 6,389px | **9,057px** |
+
+118svh is a trimmed figure. 130 gave the pacing room but left a visible dead
+band under beats whose content does not fill the height; since the pacing
+comes from the spread and not the height, the height came back down without
+costing any of the extra time.
+
+**The token now travels inside a beat, not just between them.** A beat used to
+be one park. It is now `park → hop → park → hop → park`, so the token walks
+between the things a beat is actually about. `StoryAnchor` gained `weight`
+(how long it parks) and `silent` (hide the hop *into* this stop, for beat 04).
+
+| Beat | Stops the token walks |
+|---|---|
+| 01 | the card (one stop, forms after the flip) |
+| 02 | raw capture → the record being written |
+| 03 | **first chip → Ask button → the answer** |
+| 04 | "You" → the new node, hop hidden |
+| 05 | the health ring → the queue row |
+| 06 | the compose box → Send |
+
+Heavy stops dissolve mid-park so the beat's highlight owns the moment; light
+stops are waypoints and the token stays visible through them. That is the rule
+that makes the chip → Ask hop read as an instruction rather than decoration.
+
+Beat 03 also had its auto-run latency trimmed (450+620ms → 300+420ms) and
+moved to 0.52 of its window. Scrolling does not pause for that delay, so every
+millisecond of it was scroll distance the answer was not yet on screen for.
+
+Re-verified after the change: 0 console errors, highlights still retract
+(1 → 0 → 1), reduced motion unchanged, mobile clean, build passes.
+
+---
+
 ## Flag for a follow-up pass
 
 1. **Beat 04, as above.** The exception, and the one whose motion cannot be
@@ -203,8 +255,10 @@ Worth recording, because all three passed every assertion I had.
    but the button stays "Sent", consistent with beat 03's answer persisting.
    Un-sending an email on scroll-up seemed the stranger depiction, but it is a
    judgement call and the brief's reversibility rule is otherwise absolute.
-5. **The Ask pulse window (0.30–0.40) versus the auto-run (0.55)** gives roughly
-   96px of scroll between the invitation appearing and the page acting on it.
-   Enough to notice, possibly not enough to act on if you are scrolling
-   briskly. Widening it means moving the auto-run later, which risks the answer
-   landing off-screen — the trade the revision pass already tuned once.
+5. **The Ask invitation now has real room** — the pulse runs 0.34–0.65 of a
+   window that is itself ~1.8× wider, against an auto-run at 0.52. That is the
+   pacing complaint's specific fix, but it is still a tuned number rather than
+   a measured one.
+6. **118svh is a judgement call.** It is nearly double what it was and it may
+   still be too much or too little for you; it is one value in `index.css` and
+   changing it costs nothing, because the pacing lives in `SECTION_SPREAD`.

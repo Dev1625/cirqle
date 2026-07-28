@@ -47,23 +47,23 @@ const BODY =
 /* The token lands across the first 30%, then the draft writes itself, and
    the send row is up by 92% — early enough that the finished email is still
    centred rather than on its way off the top of the screen. */
-const SUBJECT_SHARE: [number, number] = [0.3, 0.45];
-const GREETING_SHARE: [number, number] = [0.45, 0.52];
-const BODY_SHARE: [number, number] = [0.52, 0.85];
+const SUBJECT_SHARE: [number, number] = [0.22, 0.36];
+const GREETING_SHARE: [number, number] = [0.36, 0.43];
+const BODY_SHARE: [number, number] = [0.43, 0.78];
 
 export function DraftSection() {
   const { progress, reduced } = useStoryScroll();
   const scrub = useScrub(5);
   const [rangeStart, rangeEnd] = useSectionRange(5);
 
-  const ready = useTransform(scrub, [0.85, 0.92], [0, 1]);
-  const pulse = useTransform(scrub, [0.85, 0.92], [1, 0]);
+  const ready = useTransform(scrub, [0.78, 0.85], [0, 1]);
+  const pulse = useTransform(scrub, [0.78, 0.85], [1, 0]);
 
   /* Choreography: the whole compose box is named on arrival, then the
      highlight gets out of the way and lets the caret do the work. */
-  const composeOutline = useCue(scrub, [0.08, 0.22], [0.34, 0.44]);
+  const composeOutline = useCue(scrub, [0.05, 0.16], [0.28, 0.36]);
   // The invitation only exists once there is a finished email to send.
-  const sendPulse = useCue(scrub, [0.9, 0.96], [0.99, 1]);
+  const sendPulse = useCue(scrub, [0.86, 0.92], [0.995, 1]);
 
   /* Send. Real click, or — for a visitor scrolling straight through — the
      same passive-completion pattern beat 03 already uses, with the same
@@ -94,7 +94,7 @@ export function DraftSection() {
       <div className="grid grid-cols-1 items-center gap-14 lg:grid-cols-2 lg:gap-16">
         <StoryReveal className="lg:order-2" y={24}>
           <div className="relative">
-            <StoryAnchor stage={5} className="-left-3 -top-3" />
+            <StoryAnchor stage={5} order={0} weight={2.6} className="-left-3 -top-3" />
             <StoryOutline show={composeOutline} />
             <div
               className="overflow-hidden rounded-card border border-ink/25 bg-white"
@@ -139,6 +139,9 @@ export function DraftSection() {
                   <span className="relative">
                     {/* Unmounted rather than faded once sent: the invitation
                         has been accepted, so there is nothing left to invite. */}
+                    {/* The token walks over to Send once the draft is
+                        written, for the same reason it walks to Ask. */}
+                    <StoryAnchor stage={5} order={1} weight={1.2} className="-left-3 -top-3" />
                     {!sent && <StoryPulse show={sendPulse} inset={-7} radius={9} />}
                     <button
                       type="button"

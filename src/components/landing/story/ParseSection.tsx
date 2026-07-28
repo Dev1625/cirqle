@@ -41,7 +41,7 @@ const FIELDS = [
 ];
 
 /** Reveal window inside the beat's own scroll range. */
-const FILL: [number, number] = [0.32, 0.88];
+const FILL: [number, number] = [0.52, 0.93];
 
 export function ParseSection() {
   const { reduced } = useStoryScroll();
@@ -51,9 +51,9 @@ export function ParseSection() {
      beat: raw text → the label doing the reading → the record being written.
      The form outline deliberately draws on just as FILL begins, so the
      outline is tracking the parse rather than announcing a finished box. */
-  const rawOutline = useCue(scrub, [0.06, 0.2], [0.3, 0.4]);
-  const readingPulse = useCue(scrub, [0.16, 0.26], [0.34, 0.44]);
-  const formOutline = useCue(scrub, [0.3, 0.44], [0.9, 0.97]);
+  const rawOutline = useCue(scrub, [0.05, 0.15], [0.3, 0.38]);
+  const readingPulse = useCue(scrub, [0.17, 0.25], [0.32, 0.4]);
+  const formOutline = useCue(scrub, [0.46, 0.58], [0.94, 0.99]);
 
   // One slot per field plus a final slot for tags/commit.
   const slots = FIELDS.length + 1;
@@ -67,6 +67,8 @@ export function ParseSection() {
             {/* What the tap actually handed over. Outlined first — the story
                 here is that this scrap is what gets read. */}
             <div className="relative rounded-card border border-ink/15 bg-paper p-4 font-mono text-xs leading-relaxed text-muted">
+              {/* First stop: the scrap being read. */}
+              <StoryAnchor stage={1} order={0} className="-left-3 -top-3" />
               <StoryOutline show={rawOutline} />
               “{STORY_CONTACT.rawCapture}”
             </div>
@@ -81,8 +83,9 @@ export function ParseSection() {
             </div>
 
             <div className="relative">
-              {/* The token lands on the record it is writing. */}
-              <StoryAnchor stage={1} className="-left-3 -top-3" />
+              {/* Second stop, and the one that matters — heavier, so the
+                  token settles here and dissolves while the record fills. */}
+              <StoryAnchor stage={1} order={1} weight={2.4} className="-left-3 -top-3" />
               {/* …then dissolves, and the outline moves here to accompany the
                   fields as they resolve, rather than sitting on the raw text
                   while the real work happens somewhere else. */}

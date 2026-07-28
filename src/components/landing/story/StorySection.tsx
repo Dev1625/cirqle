@@ -53,16 +53,22 @@ export function StorySection({
 export function StoryAnchor({
   stage,
   order = 0,
+  weight = 1,
+  silent = false,
   className = '',
   style,
 }: {
   stage: number;
   order?: number;
+  /** How long the token parks here, relative to the beat's other stops. */
+  weight?: number;
+  /** Hide the token on its way *to* this stop. */
+  silent?: boolean;
   className?: string;
   /** For anchors placed by percentage, e.g. a node inside a fluid SVG. */
   style?: React.CSSProperties;
 }) {
-  const ref = useStoryAnchor(stage, order);
+  const ref = useStoryAnchor(stage, order, { weight, silent });
   return (
     <span
       ref={ref}

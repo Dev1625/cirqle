@@ -151,8 +151,19 @@ body::before {
    bar retracts, and vh would leave every section slightly taller than the
    screen for the entire scroll. */
 .story-section {
-  min-height: 62svh;
-  padding-block: clamp(3.5rem, 7.5vh, 6rem);
+  /* Tall on purpose. Two different things were cramped: how long a beat's
+     animation takes to play (that is SECTION_SPREAD, measured in viewport
+     heights of scrolling, not in section height) and how much room beats
+     have between them. Raising only the first would run adjacent beats into
+     each other; raising only this would add empty gaps and change nothing
+     about the pacing. Both went up together.
+
+     118svh is the trimmed figure. 130 gave the pacing room but left a
+     visible dead band under beats whose content does not fill the height —
+     and since the *pacing* comes from SECTION_SPREAD, not from here, the
+     height could come back down without costing any of the extra time. */
+  min-height: 118svh;
+  padding-block: clamp(3.5rem, 8vh, 6rem);
   display: flex;
   flex-direction: column;
   justify-content: center;

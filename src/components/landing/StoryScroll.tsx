@@ -40,7 +40,16 @@ import { STORY_STAGES } from './storyStages';
 
 const clamp01 = (n: number) => (n < 0 ? 0 : n > 1 ? 1 : n);
 
-export type AnchorPoint = { stage: number; order: number; x: number; y: number };
+export type AnchorPoint = {
+  stage: number;
+  order: number;
+  x: number;
+  y: number;
+  /** How long the token parks here, relative to the beat's other stops. */
+  weight: number;
+  /** The hop *into* this anchor is not shown (beat 04 crosses unseen). */
+  silent: boolean;
+};
 
 type StoryScrollValue = {
   /** 0 → 1 across the whole page. Written only by the active scroll driver. */
@@ -57,7 +66,12 @@ type StoryScrollValue = {
   limit: number;
   viewportH: number;
   registerStage: (index: number, el: HTMLElement | null) => void;
-  registerAnchor: (stage: number, order: number, el: HTMLElement | null) => void;
+  registerAnchor: (
+    stage: number,
+    order: number,
+    el: HTMLElement | null,
+    opts?: { weight?: number; silent?: boolean }
+  ) => void;
   /** The visitor asked for reduced motion — Lenis is bypassed entirely. */
   reduced: boolean;
 };
@@ -119,6 +133,8 @@ const sameAnchors = (a: AnchorPoint[], b: AnchorPoint[]) =>
     (p, i) =>
       p.stage === b[i].stage &&
       p.order === b[i].order &&
+      p.weight === b[i].weight &&
+      p.silent === b[i].silent &&
       Math.abs(p.x - b[i].x) < 0.5 &&
       Math.abs(p.y - b[i].y) < 0.5
   );
@@ -129,7 +145,10 @@ export function StoryScrollProvider({ children }: { children: React.ReactNode })
 
   const stageEls = React.useRef(new Map<number, HTMLElement>());
   const anchorEls = React.useRef(
-    new Map<string, { stage: number; order: number; el: HTMLElement }>()
+    new Map<
+      string,
+      { stage: number; order: number; el: HTMLElement; weight: number; silent: boolean }
+    >()
   );
 
   const [stops, setStops] = React.useState<number[]>([]);
@@ -142,10 +161,24 @@ export function StoryScrollProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const registerAnchor = React.useCallback(
-    (stage: number, order: number, el: HTMLElement | null) => {
+    (
+      stage: number,
+      order: number,
+      el: HTMLElement | null,
+      opts?: { weight?: number; silent?: boolean }
+    ) => {
       const key = `${stage}:${order}`;
-      if (el) anchorEls.current.set(key, { stage, order, el });
-      else anchorEls.current.delete(key);
+      if (el) {
+        anchorEls.current.set(key, {
+          stage,
+          order,
+          el,
+          weight: opts?.weight ?? 1,
+          silent: opts?.silent ?? false,
+        });
+      } else {
+        anchorEls.current.delete(key);
+      }
     },
     []
   );
@@ -209,12 +242,12 @@ export function StoryScrollProvider({ children }: { children: React.ReactNode })
 
       const nextAnchors = [...anchorEls.current.values()]
         .sort((a, b) => a.stage - b.stage || a.order - b.order)
-        .map(({ stage, order, el }) => {
+        .map(({ stage, order, el, weight, silent }) => {
           const { x, y } = layoutPosition(el);
           // Page space, not viewport space. The token converts to viewport
           // coordinates only at the final step (see StoryToken), which is
           // what keeps it welded to a target that scrolls with the page.
-          return { stage, order, x, y };
+          return { stage, order, x, y, weight, silent };
         });
 
       // Equality-guarded: this runs from a ResizeObserver on <body>, and an
@@ -279,11 +312,17 @@ export function useStoryStage(index: number) {
 }
 
 /** Registers one landing point for the token inside a beat. */
-export function useStoryAnchor(stage: number, order = 0) {
+export function useStoryAnchor(
+  stage: number,
+  order = 0,
+  opts?: { weight?: number; silent?: boolean }
+) {
   const { registerAnchor } = useStoryScroll();
+  const weight = opts?.weight ?? 1;
+  const silent = opts?.silent ?? false;
   return React.useCallback(
-    (el: HTMLElement | null) => registerAnchor(stage, order, el),
-    [registerAnchor, stage, order]
+    (el: HTMLElement | null) => registerAnchor(stage, order, el, { weight, silent }),
+    [registerAnchor, stage, order, weight, silent]
   );
 }
 
@@ -304,12 +343,21 @@ export function useStoryStops() {
  * time the section is centred and readable — the visitor arrives to find it
  * done rather than watching it happen.
  *
- * Instead this is a tight window around the section's measured centre stop,
- * sized as a fraction of the *viewport* rather than of the page, so a beat
- * plays out while it is genuinely the thing on screen. `spread` is in
- * viewport heights either side of centre.
+ * Instead this is a window around the section's measured centre stop, sized
+ * as a fraction of the *viewport* rather than of the page, so a beat plays
+ * out while it is genuinely the thing on screen. `spread` is in viewport
+ * heights either side of centre.
+ *
+ * This constant, not the section height, is what governs how long a beat
+ * takes to watch. The window is `2 × spread × viewportH` pixels of scrolling
+ * regardless of how tall the section is — making sections taller on its own
+ * only adds empty gaps between beats. Both were too small: every beat played
+ * out in 0.8 of a viewport of scrolling, which is not enough to register one
+ * step before the next arrives.
  */
-export function useSectionRange(index: number, spread = 0.4): [number, number] {
+export const SECTION_SPREAD = 0.68;
+
+export function useSectionRange(index: number, spread = SECTION_SPREAD): [number, number] {
   const { limit, viewportH } = useStoryScroll();
   const stops = useStoryStops();
   const centre = stops[index];

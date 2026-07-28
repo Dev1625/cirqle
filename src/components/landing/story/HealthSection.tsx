@@ -30,7 +30,7 @@ const RING = { size: 76, stroke: 5 };
 
 /** The token arrives across the first 30%; the card fills in after it, and
  *  is finished by 86% so it completes while the beat is still centred. */
-const FILL: [number, number] = [0.3, 0.86];
+const FILL: [number, number] = [0.22, 0.62];
 
 const DETAILS = [
   ['Met', `${STORY_CONTACT.metAt} · ${STORY_CONTACT.metWhen}`],
@@ -47,8 +47,8 @@ export function HealthSection() {
      as a second thing happening beside it. The outline then leaves the card
      entirely and goes to find him in the row below — the same callback beat
      03 makes, in the place a visitor would actually have to hunt. */
-  const ringOutline = useCue(scrub, [0.16, 0.3], [0.62, 0.72]);
-  const rowCallback = useCue(scrub, [0.62, 0.76], [0.95, 1]);
+  const ringOutline = useCue(scrub, [0.12, 0.24], [0.5, 0.58]);
+  const rowCallback = useCue(scrub, [0.68, 0.8], [0.96, 1]);
 
   return (
     <StorySection index={4} id="queue" bleed={<QueueMarquee scrub={scrub} reduced={reduced} callback={rowCallback} />}>
@@ -169,7 +169,7 @@ function HealthRing({
   return (
     <div className="relative shrink-0" style={{ width: RING.size, height: RING.size }}>
       {/* The token merges into the score rather than parking beside it. */}
-      <StoryAnchor stage={4} className="left-1/2 top-1/2" />
+      <StoryAnchor stage={4} order={0} weight={2.2} className="left-1/2 top-1/2" />
       <StoryOutline show={outline} inset={-7} radius={999} />
       <svg width={RING.size} height={RING.size} className="-rotate-90" aria-hidden="true">
         <circle
@@ -222,14 +222,22 @@ function QueueMarquee({
   callback: MotionValue<number>;
 }) {
   const track = [...QUEUE, ...QUEUE];
-  const opacity = useTransform(scrub, [0.34, 0.55], [0, 1]);
-  const y = useTransform(scrub, [0.34, 0.55], [24, 0]);
+  const opacity = useTransform(scrub, [0.5, 0.68], [0, 1]);
+  const y = useTransform(scrub, [0.5, 0.68], [24, 0]);
 
   return (
     <motion.div className="mt-12" style={{ opacity: reduced ? 1 : opacity, y: reduced ? 0 : y }}>
       {/* Fade width is set in CSS, not inline: at xl the narrative token
           travels across this row's left edge, so the mask has to widen past
           it or cards slide out from under the token. */}
+      {/* The token's second stop for this beat. A fixed point over the row
+          rather than a marker on his card: the card is inside a continuously
+          translating track, and anchors are measured in layout space, so an
+          anchor riding the marquee would report where the card would be if
+          it were not moving. */}
+      <div className="relative">
+        <StoryAnchor stage={4} order={1} weight={1.4} className="left-[22%] top-1/2" />
+      </div>
       <div className="marquee-mask overflow-hidden">
         <div className="marquee-track flex w-max">
           {track.map((q, i) => (

@@ -119,6 +119,13 @@ function resolve(query: string): Scripted | null {
   return best?.script ?? null;
 }
 
+/* This beat has more to get through than any other — name the chip, invite
+   the click, run the query, then point at the answer — and unlike the rest
+   its middle step costs real time that scroll cannot scrub. So it is given a
+   wider window than the page default rather than having its steps packed
+   tighter together. */
+const ASK_SPREAD = 0.78;
+
 type Phase = { state: 'idle' } | { state: 'thinking' } | { state: 'answered'; script: Scripted | null };
 
 export function AskSection() {
@@ -137,12 +144,13 @@ export function AskSection() {
      that subscription re-bind on every render. Once the visitor interacts —
      picking a chip, typing, or pressing Ask — this never fires. */
   const { progress, reduced } = useStoryScroll();
-  const [rangeStart, rangeEnd] = useSectionRange(2);
-  // Just past the beat's centre. It has to fire early enough that the
-  // populate-then-ask sequence *and* its 620ms of thinking still finish while
-  // the answer panel is on screen — firing three-quarters of the way through
-  // the window put the answer up as the ask bar was leaving the top of it.
-  const autoAt = rangeStart + (rangeEnd - rangeStart) * 0.55;
+  const [rangeStart, rangeEnd] = useSectionRange(2, ASK_SPREAD);
+  // After the Ask pulse has had its window, and far enough before the end of
+  // the beat that the populate-then-ask sequence and its thinking pause still
+  // finish while the answer panel is on screen. The beat is roughly twice as
+  // long in scroll terms as it used to be, so this is a real pause rather
+  // than a formality — there is time to press it yourself.
+  const autoAt = rangeStart + (rangeEnd - rangeStart) * 0.52;
   const touched = React.useRef(false);
   const autoRan = React.useRef(false);
 
@@ -151,15 +159,15 @@ export function AskSection() {
      0.55 of the beat, so the invitation is real rather than decorative. A
      visitor who takes it gets there first; one who doesn't sees the page
      take its own advice. */
-  const scrub = useScrub(2);
-  const chipOutline = useCue(scrub, [0.08, 0.2], [0.34, 0.44]);
-  const askPulse = useCue(scrub, [0.3, 0.4], [0.6, 0.7]);
+  const scrub = useScrub(2, ASK_SPREAD);
+  const chipOutline = useCue(scrub, [0.05, 0.14], [0.26, 0.33]);
+  const askPulse = useCue(scrub, [0.34, 0.43], [0.58, 0.65]);
   /* The callback onto his result card. Scrubbed, not latched to the click:
      an interaction-driven outline stayed lit for the rest of the page, which
      is the one thing this pass's highlights are not allowed to do. Its window
      opens after the auto-run at 0.55, so by the time it draws there is an
      answer under it either way. */
-  const callback = useCue(scrub, [0.66, 0.78], [0.95, 1]);
+  const callback = useCue(scrub, [0.68, 0.78], [0.96, 1]);
 
   React.useEffect(() => () => clearTimeout(timer.current), []);
 
@@ -170,7 +178,7 @@ export function AskSection() {
     // answer reads as having been worked out rather than pre-printed.
     timer.current = setTimeout(() => {
       setPhase({ state: 'answered', script: resolve(question) });
-    }, 620);
+    }, 420);
   }, []);
 
   const pick = (question: string) => {
@@ -187,7 +195,7 @@ export function AskSection() {
     setQuery(chosen.question);
     // Populate, then ask — the same two steps, in the same order, with the
     // same pause between them a person clicking would produce.
-    timer.current = setTimeout(() => ask(chosen.question), 450);
+    timer.current = setTimeout(() => ask(chosen.question), 300);
   });
 
   React.useEffect(() => {
@@ -231,6 +239,7 @@ export function AskSection() {
                   {/* Only the first chip is outlined: it is the one the
                       passive-scroller auto-run picks, so pointing at it is
                       telling the truth about what is about to happen. */}
+                  {i === 0 && <StoryAnchor stage={2} order={0} className="-left-3 -top-3" />}
                   {i === 0 && <StoryOutline show={chipOutline} inset={-4} radius={9} />}
                   “{s.question}”
                 </button>
@@ -262,9 +271,12 @@ export function AskSection() {
               className="min-w-0 flex-1 bg-transparent font-mono text-sm font-semibold italic text-ink placeholder:not-italic placeholder:font-normal placeholder:text-muted focus:outline-none"
             />
             <span className="relative shrink-0">
-              {/* The invitation. Its window closes before the auto-run
-                  threshold so a real visitor gets a genuine chance to click
-                  rather than watching the page do it for them. */}
+              {/* The invitation. The token hops here from the chip before the
+                  pulse starts — seeing it move to the control is what tells
+                  you the control is the point. Its window still closes before
+                  the auto-run so a real visitor gets a genuine chance to
+                  click rather than watching the page do it for them. */}
+              <StoryAnchor stage={2} order={1} weight={1.3} className="-left-3 -top-3" />
               <StoryPulse show={askPulse} inset={-7} radius={9} />
               <button
                 type="submit"
@@ -276,7 +288,8 @@ export function AskSection() {
             </span>
           </form>
 
-          <div className="mt-3 min-h-[280px]" aria-live="polite">
+          <div className="relative mt-3 min-h-[280px]" aria-live="polite">
+            <StoryAnchor stage={2} order={2} weight={2} className="-left-3 top-8" />
             <AnimatePresence mode="wait" initial={false}>
               {phase.state === 'idle' && (
                 <Fade key="idle">
