@@ -7,12 +7,13 @@ order to read it in. The detail lives in the two pass reports; this is the map.
 
 | | |
 |---|---|
-| **Live** | `http://127.0.0.1:3222` (add `?scrollprobe=1` for the debug readout) |
-| **Branch** | `feature/landing-story-revision-2026-07-27` |
-| **Worktree** | `.claude/worktrees/landing-story-rev/` |
+| **Live** | `http://127.0.0.1:3333` (add `?scrollprobe=1` for the debug readout) |
+| **Branch** | `feature/landing-story-choreography-2026-07-28` |
+| **Worktree** | `.claude/worktrees/landing-choreo/` |
 | **Pass 1 report** | `LANDING_STORY_REPORT.md` — the story rebuild |
-| **Pass 2 report** | `LANDING_STORY_REVISION_REPORT.md` — this revision |
-| **Previous version** | `http://127.0.0.1:3111`, for A/B against pass 1 |
+| **Pass 2 report** | `LANDING_STORY_REVISION_REPORT.md` — anchor-following token, scrubbing |
+| **Pass 3 report** | `LANDING_STORY_CHOREOGRAPHY_REPORT.md` — the per-beat highlight choreography |
+| **Previous versions** | `http://127.0.0.1:3111` (pass 1) and `http://127.0.0.1:3222` (pass 2), for A/B |
 
 Both passes branched off `polish/depth-pass-2026-07-24` (`53ea326`), **not**
 `main`. `main`'s `LandingPage.tsx` is still the 70-line original with no
@@ -20,17 +21,17 @@ landing work in it at all — none of the three landing branches are merged, so
 `main` is four passes behind on this page. Worth deciding what to do about
 that separately.
 
-## The five commits
+## The commits
 
 ```
-070c378  drop scroll-snap, put Lenis under one scroll loop      (pass 1)
-2310b9f  restructure the page around one contact's journey      (pass 1)
+070c378  drop scroll-snap, put Lenis under one scroll loop       (pass 1)
+2310b9f  restructure the page around one contact's journey       (pass 1)
 589b9b7  LANDING_STORY_REPORT.md
 9a0a96b  token travels into content, everything scrubs by scroll (pass 2)
 169568b  LANDING_STORY_REVISION_REPORT.md
+30a6e8f  LANDING_REVIEW.md
+02c08e6  the token hands off to the UI's own reactions           (pass 3)
 ```
-
-Net across both: **+2,650 / −775 lines** over 15 files.
 
 ## Suggested review order
 
@@ -49,7 +50,8 @@ once you know what the provider gives them.
 | File | What to look at |
 |---|---|
 | `StoryScroll.tsx` | Lenis setup, the single `progress` MotionValue, and the measurement of section stops + anchor points. The header comment explains why Framer never gets its own scroll listener. |
-| `StoryToken.tsx` | The travelling token: how the path is built from anchors, why interpolation happens in page space, the dwell-window clamp. |
+| `StoryToken.tsx` | The travelling token: how the path is built from anchors, why interpolation happens in page space, the dwell-window clamp, and the per-beat visibility rhythm (arrive, dissolve, re-form). |
+| `StoryHighlight.tsx` | The shared outline + pulse primitive every beat's choreography reuses, and `useCue`, the timing vocabulary. |
 
 **3. The six beats** — each is one file, in page order.
 
@@ -75,15 +77,18 @@ once you know what the provider gives them.
 
 Needs a window ≥1280px wide — the token is hidden below that by design.
 
-1. **Beat 04, scrolled slowly.** The hardest one to judge from stills: the
-   contact genuinely does not exist in the graph until the token flies down
-   the branch and becomes him.
+1. **Beat 04, scrolled slowly.** The hardest one to judge from stills, and the
+   one beat that works unlike the other five: the token dissolves into an
+   outline on "You", a pulse of oxblood travels the real edge, and the contact
+   only exists once it arrives. Nothing flies down the branch.
 2. **Scroll back up** through beats 02, 05, 06. Fields empty, ring drains,
    email un-writes. That's the scrubbing being real rather than triggered.
 3. **Beat 03 without touching anything.** It runs itself. Any click or
    keystroke disables that permanently for the session — reload to re-arm.
 4. **Beat 01's flip** at a normal trackpad pace. This is the one thing I
    couldn't settle headlessly.
+5. **Beat 06's Send.** It pulses, invites a click, and actually sends — a mail
+   icon flies off. Click it yourself before the page does it for you.
 
 ## Open questions for you
 
