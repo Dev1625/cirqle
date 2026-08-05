@@ -1,21 +1,24 @@
 import {
   doc,
   getDoc,
-  setDoc,
-  addDoc,
-  updateDoc,
-  collection,
-  getDocs,
-  deleteDoc,
-  query,
-  orderBy,
-  runTransaction,
   serverTimestamp,
+  setDoc,
+  updateDoc,
 } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { db, getFirebaseAppCheckToken } from '../config/firebase';
+import type { GroundingDisplay } from './grounding';
+import {
+  hasCardValidationErrors,
+  validateCardConfig,
+} from './cardValidation';
+export {
+  clearStoredVisitorName,
+  getStoredVisitorName,
+  storeVisitorName,
+} from './publicCardVisitor';
 
 /**
- * The NFC card's software half.
+ * The public card's software half, shared by NFC, QR, and copied links.
  *
  * A physical NFC tag is just a chip that opens a URL, so everything a real
  * card would need already exists once /c/:cardId does. Provisioning hardware
@@ -101,9 +104,22 @@ export function generateCardId(length = 10): string {
   return out;
 }
 
-export function cardUrl(cardId: string): string {
+/**
+ * A distribution-path marker, not proof of hardware. Someone can copy any
+ * URL, so the value says which owner-issued URL opened the card and nothing
+ * stronger.
+ */
+export type CardCaptureChannel = 'qr' | 'nfc' | 'link' | 'direct';
+
+export function cardUrl(
+  cardId: string,
+  captureChannel?: CardCaptureChannel,
+): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  return `${origin}/c/${cardId}`;
+  const base = `${origin}/c/${cardId}`;
+  return captureChannel
+    ? `${base}?via=${encodeURIComponent(captureChannel)}`
+    : base;
 }
 
 // ── Owner side ────────────────────────────────────────────────────────────
@@ -116,7 +132,12 @@ export function cardUrl(cardId: string): string {
  * owner-only. Only the fields the owner explicitly put on their card are
  * copied across — never the whole profile document.
  */
-export async function publishCard(uid: string, cardId: string, config: CardConfig): Promise<void> {
+export async function publishCard(
+  uid: string,
+  cardId: string,
+  config: CardConfig,
+  privateAIGrounding: GroundingDisplay | null = null,
+): Promise<void> {
   const payload: Record<string, any> = {
     cardId,
     ownerUid: uid,
@@ -138,6 +159,9 @@ export async function publishCard(uid: string, cardId: string, config: CardConfi
   await updateDoc(doc(db, `users/${uid}`), {
     cardId,
     card: { ...config, published: true },
+    // This stays on the owner-only profile. The public card receives only the
+    // explicit schema above and never exposes request/model/source metadata.
+    cardAIGrounding: privateAIGrounding,
     updatedAt: serverTimestamp(),
   });
 }
@@ -149,49 +173,74 @@ export async function unpublishCard(uid: string, cardId: string): Promise<void> 
 
 // ── Public / viewer side ──────────────────────────────────────────────────
 
-export async function loadPublicCard(cardId: string): Promise<PublicCard | null> {
-  const snap = await getDoc(doc(db, `cards/${cardId}`));
-  if (!snap.exists()) return null;
-  const data = snap.data() as any;
-  if (data.published === false) return null;
+export function publicCardFromRecord(
+  cardId: string,
+  data: unknown,
+): PublicCard | null {
+  if (
+    !/^[23456789abcdefghjkmnpqrstuvwxyz]{10}$/.test(cardId) ||
+    !data ||
+    typeof data !== 'object' ||
+    Array.isArray(data)
+  ) {
+    return null;
+  }
+  const record = data as Record<string, unknown>;
+  if (
+    record.published !== true ||
+    typeof record.ownerUid !== 'string' ||
+    !record.ownerUid ||
+    record.ownerUid.length > 128 ||
+    !['ai', 'custom', 'ported'].includes(String(record.mode)) ||
+    !['compact', 'expanded'].includes(String(record.layout)) ||
+    !CARD_ACCENTS.some((accent) => accent.id === record.accent) ||
+    typeof record.name !== 'string' ||
+    typeof record.role !== 'string' ||
+    typeof record.company !== 'string' ||
+    typeof record.intro !== 'string' ||
+    !(
+      record.portedUrl == null ||
+      typeof record.portedUrl === 'string'
+    ) ||
+    !(record.email == null || typeof record.email === 'string') ||
+    !Array.isArray(record.links) ||
+    record.links.some(
+      (link) =>
+        !link ||
+        typeof link !== 'object' ||
+        Array.isArray(link) ||
+        typeof (link as Record<string, unknown>).label !== 'string' ||
+        typeof (link as Record<string, unknown>).url !== 'string',
+    )
+  ) {
+    return null;
+  }
+  const config: CardConfig = {
+    mode: record.mode as CardMode,
+    accent: record.accent as string,
+    layout: record.layout as CardLayout,
+    name: record.name,
+    role: record.role,
+    company: record.company,
+    intro: record.intro,
+    portedUrl: (record.portedUrl as string | null) || null,
+    links: record.links as { label: string; url: string }[],
+    email: (record.email as string | null) || null,
+    published: true,
+  };
+  if (hasCardValidationErrors(validateCardConfig(config))) return null;
   return {
     cardId,
-    ownerUid: data.ownerUid,
-    mode: data.mode || 'ai',
-    accent: data.accent || 'oxblood',
-    layout: data.layout || 'expanded',
-    name: data.name || '',
-    role: data.role || '',
-    company: data.company || '',
-    intro: data.intro || '',
-    portedUrl: data.portedUrl || null,
-    links: data.links || [],
-    email: data.email || null,
-    published: true,
+    ownerUid: record.ownerUid,
+    ...config,
   };
 }
 
-/**
- * First-visit tracking is a localStorage flag, deliberately — the brief asks
- * for a name, not an account. No cookie, no identifier sent anywhere, nothing
- * that follows the viewer off this page.
- */
-const VISITOR_KEY = 'CIRQLE_CARD_VISITOR';
-
-export function getStoredVisitorName(): string | null {
-  try {
-    return localStorage.getItem(VISITOR_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function storeVisitorName(name: string): void {
-  try {
-    localStorage.setItem(VISITOR_KEY, name);
-  } catch {
-    /* private browsing — the dialog simply asks again next time */
-  }
+export async function loadPublicCard(cardId: string): Promise<PublicCard | null> {
+  const snap = await getDoc(doc(db, `cards/${cardId}`));
+  return snap.exists()
+    ? publicCardFromRecord(cardId, snap.data())
+    : null;
 }
 
 export interface CaptureInput {
@@ -200,134 +249,60 @@ export interface CaptureInput {
   visitorEmail?: string | null;
   visitorCompany?: string | null;
   note?: string | null;
+  consentToFollowUp?: boolean;
+  website?: string;
+  captureChannel?: CardCaptureChannel;
 }
 
 /**
- * Written by an unauthenticated viewer. Firestore rules allow create-only on
- * this subcollection with a validated shape, and no public read — a stranger
- * can drop a card off, but cannot enumerate who else has.
+ * Sent by an unauthenticated viewer through the public capture API. The server
+ * applies App Check, throttling, and deduplication before an Admin SDK write.
+ * Browser rules deny direct creation so those controls cannot be bypassed.
  */
 export async function submitCapture(input: CaptureInput): Promise<void> {
-  await addDoc(collection(db, `cards/${input.cardId}/captures`), {
-    visitorName: input.visitorName,
-    visitorEmail: input.visitorEmail || null,
-    visitorCompany: input.visitorCompany || null,
-    note: input.note || null,
-    capturedAt: serverTimestamp(),
-    processed: false,
+  const appCheckToken = await getFirebaseAppCheckToken();
+  const response = await fetch('/api/cards/capture', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(appCheckToken
+        ? { 'X-Firebase-AppCheck': appCheckToken }
+        : {}),
+    },
+    body: JSON.stringify({
+      cardId: input.cardId,
+      visitorName: input.visitorName,
+      visitorEmail: input.visitorEmail || null,
+      visitorCompany: input.visitorCompany || null,
+      note: input.note || null,
+      consentToFollowUp: input.consentToFollowUp === true,
+      captureChannel: input.captureChannel || 'direct',
+      website: input.website || '',
+    }),
   });
-}
 
-// ── Reverse capture: captures → contacts in the owner's Directory ─────────
-
-export interface PendingCapture {
-  id: string;
-  visitorName: string;
-  visitorEmail: string | null;
-  visitorCompany: string | null;
-  note: string | null;
-  capturedAt: Date | null;
-}
-
-export async function listPendingCaptures(cardId: string): Promise<PendingCapture[]> {
-  const snap = await getDocs(query(collection(db, `cards/${cardId}/captures`), orderBy('capturedAt', 'asc')));
-  return snap.docs.map((d) => {
-    const data = d.data() as any;
-    return {
-      id: d.id,
-      visitorName: data.visitorName || 'Unknown',
-      visitorEmail: data.visitorEmail || null,
-      visitorCompany: data.visitorCompany || null,
-      note: data.note || null,
-      capturedAt: data.capturedAt?.toDate ? data.capturedAt.toDate() : null,
-    };
-  });
-}
-
-/**
- * Drains pending captures into real contacts.
- *
- * This is now the FALLBACK path. The primary is the `onCardCapture` Cloud
- * Function (functions/index.js), which files a tap the instant it happens
- * instead of on the owner's next app load. This stays because the whole
- * feature has to keep working with nothing deployed — and because if the
- * function errors, it deliberately leaves the capture in place for this to
- * pick up.
- *
- * Both paths are therefore live at once and can race on the same capture. Each
- * *claims* it in a transaction — read the capture, bail if it is already gone,
- * then create the contact and delete the capture in one atomic commit. First
- * one there wins; the other finds nothing and does nothing.
- *
- * That is why this uses a pre-generated ref with `transaction.set` instead of
- * the more obvious `addDoc`: addDoc cannot take part in a transaction, and
- * without one the check and the write are separate, which is exactly the gap
- * that produces a duplicate contact.
- */
-export async function drainCaptures(params: {
-  uid: string;
-  cardId: string;
-  eventName?: string | null;
-  locationHint?: string | null;
-}): Promise<number> {
-  const pending = await listPendingCaptures(params.cardId);
-  if (pending.length === 0) return 0;
-
-  let created = 0;
-  for (const capture of pending) {
-    const captureRef = doc(db, `cards/${params.cardId}/captures/${capture.id}`);
-
-    const filed = await runTransaction(db, async (tx) => {
-      const snap = await tx.get(captureRef);
-      if (!snap.exists()) return false; // the Cloud Function got here first
-
-      const when = capture.capturedAt || new Date();
-      const contextBits = [
-        `Tapped your card ${when.toLocaleDateString()} at ${when.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`,
-        params.eventName ? `at ${params.eventName}` : null,
-        params.locationHint && !params.eventName ? `near ${params.locationHint}` : null,
-      ].filter(Boolean);
-
-      const contactRef = doc(collection(db, `users/${params.uid}/contacts`));
-      tx.set(contactRef, {
-        userId: params.uid,
-        name: capture.visitorName,
-        company: capture.visitorCompany || null,
-        role: null,
-        industry: null,
-        relationshipTier: 'Cold',
-        summary: contextBits.join(' '),
-        whyTheyMatter: capture.note || null,
-        tags: params.eventName ? [params.eventName] : [],
-        location: params.locationHint || null,
-        email: capture.visitorEmail || null,
-        linkedinUrl: null,
-        subIndustry: null,
-        lastContactedAt: when,
-        seniority: null,
-        school: null,
-        connectionSource: 'NFC card',
-        capturedVia: 'nfc-card',
-        capturedAt: when,
-        capturedEventName: params.eventName || null,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      tx.delete(captureRef);
-      return true;
-    });
-
-    if (filed) created += 1;
+  if (!response.ok) {
+    let message = 'This card could not be saved right now.';
+    try {
+      const body = await response.json();
+      if (typeof body?.error?.message === 'string') {
+        message = body.error.message;
+      }
+    } catch {
+      // Keep a stable public error instead of exposing an intermediary body.
+    }
+    throw new Error(message);
   }
-
-  return created;
 }
 
 // ── vCard ─────────────────────────────────────────────────────────────────
 
 function escapeVCard(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r\n?|\n/g, '\\n');
 }
 
 export function buildVCard(card: PublicCard): string {
@@ -338,7 +313,7 @@ export function buildVCard(card: PublicCard): string {
     card.company ? `ORG:${escapeVCard(card.company)}` : null,
     card.role ? `TITLE:${escapeVCard(card.role)}` : null,
     card.email ? `EMAIL;TYPE=INTERNET:${escapeVCard(card.email)}` : null,
-    `URL:${cardUrl(card.cardId)}`,
+    `URL:${cardUrl(card.cardId, 'link')}`,
     card.intro ? `NOTE:${escapeVCard(card.intro)}` : null,
     'END:VCARD',
   ].filter(Boolean);

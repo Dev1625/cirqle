@@ -1,32 +1,79 @@
-import React from 'react';
+import * as React from 'react';
 
-/**
- * The house empty state: icon + one line of muted copy + a CTA, inside a
- * dashed frame. Documented in DESIGN.md §6 as the standard for "nothing here
- * yet" — this component exists so every new surface in the feature pass gets
- * it identically rather than each one improvising its own blank.
- *
- * Deliberately has no loading or error mode. Those are a different pattern
- * (see AISurface) and conflating them is how a dead end gets shipped.
- */
+export interface EmptyStateProps {
+  icon: React.ComponentType<{ size?: number; className?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
+  /** Compact legacy API used by existing dashboard and AI surfaces. */
+  line?: string;
+  action?: React.ReactNode;
+  /** Structured API for setup and no-results states that need more direction. */
+  eyebrow?: string;
+  title?: string;
+  description?: string;
+  primaryAction?: React.ReactNode;
+  secondaryAction?: React.ReactNode;
+  tertiaryAction?: React.ReactNode;
+  status?: boolean;
+  className?: string;
+}
+
 export function EmptyState({
   icon: Icon,
   line,
   action,
+  eyebrow,
+  title,
+  description,
+  primaryAction,
+  secondaryAction,
+  tertiaryAction,
+  status = false,
   className = '',
-}: {
-  icon: React.ComponentType<{ size?: number; className?: string }>;
-  line: string;
-  action?: React.ReactNode;
-  className?: string;
-}) {
+}: EmptyStateProps) {
+  const headingId = React.useId();
+  const descriptionId = React.useId();
+  const resolvedDescription = description || line || '';
+  const resolvedPrimaryAction = primaryAction || action;
+  const isStructured = Boolean(title);
+
   return (
-    <div
-      className={`flex flex-col items-center justify-center gap-3 rounded-card border border-dashed border-ink/25 px-6 py-10 text-center ${className}`}
+    <section
+      className={`border border-dashed text-center ${
+        isStructured
+          ? 'border-ink/20 bg-[#F8F5EF] p-7 sm:p-10'
+          : 'flex flex-col items-center justify-center gap-3 rounded-card border-ink/25 px-6 py-10'
+      } ${className}`}
+      aria-labelledby={title ? headingId : undefined}
+      aria-describedby={descriptionId}
+      role={status ? 'status' : undefined}
     >
-      <Icon size={20} className="text-muted" />
-      <p className="max-w-xs font-mono text-xs leading-relaxed text-muted">{line}</p>
-      {action}
-    </div>
+      <div className={isStructured ? 'mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-[#8C7A65]/30 bg-white text-[#76562F]' : ''}>
+        <Icon size={isStructured ? 22 : 20} className={isStructured ? undefined : 'text-muted'} aria-hidden="true" />
+      </div>
+      {eyebrow && (
+        <p className="mb-2 font-mono text-[9px] font-bold uppercase tracking-widest text-subtle">
+          {eyebrow}
+        </p>
+      )}
+      {title && (
+        <h2 id={headingId} className="font-serif text-2xl font-bold italic">
+          {title}
+        </h2>
+      )}
+      <p
+        id={descriptionId}
+        className={isStructured
+          ? 'mx-auto mt-2 max-w-xl text-sm leading-relaxed text-subtle'
+          : 'max-w-xs font-mono text-xs leading-relaxed text-muted'}
+      >
+        {resolvedDescription}
+      </p>
+      {(resolvedPrimaryAction || secondaryAction || tertiaryAction) && (
+        <div className={isStructured ? 'mt-5 flex flex-wrap justify-center gap-2' : ''}>
+          {resolvedPrimaryAction}
+          {secondaryAction}
+          {tertiaryAction}
+        </div>
+      )}
+    </section>
   );
 }

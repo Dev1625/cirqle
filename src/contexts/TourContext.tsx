@@ -1,9 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { EVENTS, Joyride, STATUS, type EventHandler, type Placement, type Step } from 'react-joyride';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { useLocation, useNavigate } from 'react-router';
+import { deleteField, doc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { useAuth } from './AuthContext';
+import {
+  completedTourIds,
+  initialTourDecision,
+  tourSettlementUpdate,
+  tourStartUpdate,
+  tourStepUpdate,
+  type TourOutcome,
+} from './tourState';
 
 type TourContextType = {
   startTour: (tourId: string) => void;
@@ -205,6 +213,7 @@ export const TourProvider = ({ children }: { children: React.ReactNode }) => {
   const [completedTours, setCompletedTours] = useState<string[]>([]);
   const [run, setRun] = useState(false);
   const [activeTour, setActiveTour] = useState<string | null>(null);
+  const [initialStepIndex, setInitialStepIndex] = useState(0);
   const [hasBootstrapped, setHasBootstrapped] = useState(false);
 
   // `before` hooks are captured in a memo that must not re-run on every
@@ -217,12 +226,50 @@ export const TourProvider = ({ children }: { children: React.ReactNode }) => {
 
   // Guards the completion write, which several events can otherwise trigger.
   const settledRef = useRef(false);
+  // Avoids writing the same displayed step for Joyride's several lifecycle
+  // events. A step is persisted only when it actually becomes current.
+  const persistedStepRef = useRef<number | null>(null);
+
+  const launchTour = useCallback((
+    tourId: string,
+    options: { stepIndex?: number; recordStart?: boolean } = {},
+  ) => {
+    const tour = TOURS[tourId];
+    if (!tour) return;
+
+    const stepIndex = Math.min(
+      Math.max(Math.trunc(options.stepIndex ?? 0), 0),
+      Math.max(tour.steps.length - 1, 0),
+    );
+
+    settledRef.current = false;
+    persistedStepRef.current = null;
+    // Remount Joyride cleanly if a tour is already up, otherwise it keeps the
+    // previous tour's step index.
+    setRun(false);
+    setActiveTour(null);
+    window.setTimeout(() => {
+      setInitialStepIndex(stepIndex);
+      setActiveTour(tourId);
+      setRun(true);
+    }, 0);
+
+    if (options.recordStart !== false && user) {
+      void updateDoc(
+        doc(db, 'users', user.uid),
+        tourStartUpdate(tourId, stepIndex, serverTimestamp(), deleteField()),
+      ).catch(() => {
+        console.warn('[tour] start persistence temporarily unavailable');
+      });
+    }
+  }, [user]);
 
   useEffect(() => {
     if (!user) {
       setCompletedTours([]);
       setRun(false);
       setActiveTour(null);
+      setInitialStepIndex(0);
       setHasBootstrapped(false);
       return;
     }
@@ -234,16 +281,23 @@ export const TourProvider = ({ children }: { children: React.ReactNode }) => {
 
       if (snap.exists() && !cancelled) {
         const data = snap.data();
-        const done = data.completedTours || [];
+        const done = completedTourIds(data, Object.keys(TOURS));
         setCompletedTours(done);
 
-        const hasSeenInitialTour = Boolean(data.hasSeenInitialTour);
-        if (!hasSeenInitialTour) {
-          await updateDoc(userRef, { hasSeenInitialTour: true });
-
-          if (!done.includes('getting_started') && !cancelled) {
-            window.setTimeout(() => startTour('getting_started'), 800);
-          }
+        const decision = initialTourDecision(
+          data,
+          'getting_started',
+          TOURS.getting_started.steps.length,
+        );
+        if (decision.action !== 'none' && !cancelled) {
+          window.setTimeout(() => {
+            if (!cancelled) {
+              launchTour('getting_started', {
+                stepIndex: decision.stepIndex,
+                recordStart: decision.action === 'start',
+              });
+            }
+          }, 800);
         }
       }
 
@@ -251,20 +305,11 @@ export const TourProvider = ({ children }: { children: React.ReactNode }) => {
     };
     loadState();
     return () => { cancelled = true; };
-  }, [user]);
+  }, [launchTour, user]);
 
   const startTour = useCallback((tourId: string) => {
-    if (!TOURS[tourId]) return;
-    settledRef.current = false;
-    // Remount Joyride cleanly if a tour is already up, otherwise it keeps the
-    // previous tour's step index.
-    setRun(false);
-    setActiveTour(null);
-    window.setTimeout(() => {
-      setActiveTour(tourId);
-      setRun(true);
-    }, 0);
-  }, []);
+    launchTour(tourId);
+  }, [launchTour]);
 
   /**
    * Steps for the running tour, with each step's `before` hook responsible for
@@ -289,7 +334,7 @@ export const TourProvider = ({ children }: { children: React.ReactNode }) => {
     }));
   }, [activeTour]);
 
-  const finish = useCallback(async () => {
+  const settle = useCallback(async (outcome: TourOutcome, lastStep: number) => {
     if (settledRef.current) return;
     settledRef.current = true;
     setRun(false);
@@ -298,27 +343,55 @@ export const TourProvider = ({ children }: { children: React.ReactNode }) => {
     setActiveTour(null);
 
     if (finishedTour && user) {
-      const newCompleted = Array.from(new Set([...completedTours, finishedTour]));
-      setCompletedTours(newCompleted);
+      const newCompleted = outcome === 'completed'
+        ? Array.from(new Set([...completedTours, finishedTour]))
+        : completedTours;
+      if (outcome === 'completed') setCompletedTours(newCompleted);
+
+      const update = tourSettlementUpdate(
+        finishedTour,
+        outcome,
+        lastStep,
+        serverTimestamp(),
+        newCompleted,
+      );
+
       try {
-        await updateDoc(doc(db, 'users', user.uid), { completedTours: newCompleted });
-      } catch (err) {
-        // A tour finishing is not worth surfacing an error over; the next
-        // load simply won't show it as completed.
-        console.warn('Could not record tour completion', err);
+        await updateDoc(doc(db, 'users', user.uid), update);
+      } catch {
+        // Tour persistence should not trap the user in an overlay. If this
+        // fails, the lifecycle can resume safely on the next load.
+        console.warn(`[tour] ${outcome} persistence temporarily unavailable`);
       }
     }
   }, [activeTour, completedTours, user]);
 
   const handleEvent = useCallback<EventHandler>((data) => {
     if (data.type === EVENTS.TARGET_NOT_FOUND) {
-      console.warn(`[Cirqle tours] step ${data.index} target not found:`, data.step?.target);
+      console.warn(`[tour] step ${data.index} target unavailable`);
     }
 
-    if (data.status === STATUS.FINISHED || data.status === STATUS.SKIPPED) {
-      void finish();
+    if (
+      activeTour
+      && user
+      && data.type === EVENTS.STEP_BEFORE
+      && persistedStepRef.current !== data.index
+    ) {
+      persistedStepRef.current = data.index;
+      void updateDoc(
+        doc(db, 'users', user.uid),
+        tourStepUpdate(activeTour, data.index, serverTimestamp()),
+      ).catch(() => {
+        console.warn('[tour] step persistence temporarily unavailable');
+      });
     }
-  }, [finish]);
+
+    if (data.status === STATUS.FINISHED) {
+      void settle('completed', data.index);
+    } else if (data.status === STATUS.SKIPPED) {
+      void settle('skipped', data.index);
+    }
+  }, [activeTour, settle, user]);
 
   return (
     <TourContext.Provider value={{ startTour, completedTours, isTourRunning: run }}>
@@ -327,6 +400,7 @@ export const TourProvider = ({ children }: { children: React.ReactNode }) => {
           key={activeTour}
           steps={steps}
           run={run}
+          initialStepIndex={initialStepIndex}
           continuous
           onEvent={handleEvent}
           options={{

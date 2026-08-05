@@ -28,7 +28,16 @@ function getQueuePriority(row: any) {
   if (row.status === 'Responded' && !row.meetingHeld) return 95;
   if (row.status === 'Re-engage') return 90;
   if (row.nextAction) return 80;
-  if (row.status === 'Awaiting Response' && staleDays >= 7) return 70;
+  if (
+    [
+      'Sent',
+      'Sent (User Confirmed)',
+      'Sent (Provider Verified)',
+      'Delivered',
+      'Awaiting Response',
+    ].includes(row.status) &&
+    staleDays >= 7
+  ) return 70;
   return 0;
 }
 

@@ -1,0 +1,104 @@
+name: Security policy
+
+on:
+  pull_request:
+    paths:
+      - ".firebaserc"
+      - "firebase.json"
+      - "firebase.test.json"
+      - "firebase.functions-test.json"
+      - "firestore.rules"
+      - "vercel.json"
+      - "functions/**"
+      - "api/**"
+      - "package.json"
+      - "package-lock.json"
+      - "functions/package.json"
+      - "functions/package-lock.json"
+      - "tests/firestore-rules.test.mjs"
+      - "tests/**/*firestore*.test.mjs"
+      - "tests/security-config.test.mjs"
+      - "tests/firebase-admin-environment.test.mjs"
+      - "tests/firebase-environment-isolation.test.ts"
+      - "tests/google-integrations-security.test.mjs"
+      - "tests/public-capture-api.test.mjs"
+      - "tests/rate-limit.test.mjs"
+      - "tests/register-user.test.mjs"
+      - "scripts/verify-deployed-firestore-rules.mjs"
+      - "scripts/release-firestore-rules.mjs"
+      - ".github/workflows/security-policy.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - ".firebaserc"
+      - "firebase.json"
+      - "firebase.test.json"
+      - "firebase.functions-test.json"
+      - "firestore.rules"
+      - "vercel.json"
+      - "functions/**"
+      - "api/**"
+      - "package.json"
+      - "package-lock.json"
+      - "functions/package.json"
+      - "functions/package-lock.json"
+      - "tests/firestore-rules.test.mjs"
+      - "tests/**/*firestore*.test.mjs"
+      - "tests/security-config.test.mjs"
+      - "tests/firebase-admin-environment.test.mjs"
+      - "tests/firebase-environment-isolation.test.ts"
+      - "tests/google-integrations-security.test.mjs"
+      - "tests/public-capture-api.test.mjs"
+      - "tests/rate-limit.test.mjs"
+      - "tests/register-user.test.mjs"
+      - "scripts/verify-deployed-firestore-rules.mjs"
+      - "scripts/release-firestore-rules.mjs"
+      - ".github/workflows/security-policy.yml"
+  schedule:
+    - cron: "17 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  policy-tests:
+    name: Rules and deployment configuration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: npm ci
+      - run: npm run test:rules
+      - run: node tests/security-config.test.mjs
+
+  production-drift:
+    name: Production rules match main
+    if: github.event_name != 'pull_request'
+    needs: policy-tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Authenticate read-only rules verifier
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: cirqle-9dd06
+          workload_identity_provider: "${{ secrets.GCP_WIF_PROVIDER_CIRQLE }}"
+          service_account: "${{ secrets.GCP_RULES_VIEWER_SERVICE_ACCOUNT }}"
+      - run: node scripts/verify-deployed-firestore-rules.mjs

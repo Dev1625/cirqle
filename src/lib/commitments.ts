@@ -9,18 +9,20 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { generateJSON } from './ai';
+import {
+  generateGroundedJSON,
+  groundingDisplay,
+  type GroundedSource,
+  type GroundingDisplay,
+} from './grounding';
+import type { CommitmentFeedbackState } from './moat/commitmentFeedbackCore';
 
 /**
  * Commitment tracking.
  *
- * "I'll send the deck" is the most commonly broken promise in professional
- * networking, and it is broken by forgetting rather than by intent. The note
- * already contains the promise; nothing was ever reading it back out.
- *
- * Deliberately dismissible. An extraction model will produce false positives
- * ("I'll think about it" is not a commitment), and a tracker you cannot
- * silence becomes a tracker you stop reading.
+ * The original note remains the source of truth. Extraction records retain
+ * the exact source IDs the model cited so a false positive can be reviewed
+ * and dismissed without turning generated text into an unexplained fact.
  */
 
 export type CommitmentStatus = 'open' | 'done' | 'dismissed';
@@ -38,6 +40,8 @@ export interface Commitment {
   sourceType: 'note' | 'outreach' | 'voice';
   sourceId: string | null;
   createdAt: Date | null;
+  aiGrounding: GroundingDisplay | null;
+  feedback?: CommitmentFeedbackState | null;
 }
 
 function toDate(value: any): Date | null {
@@ -53,26 +57,21 @@ export async function listCommitments(
 ): Promise<Commitment[]> {
   const base = collection(db, `users/${uid}/commitments`);
 
-  // Only ONE equality filter goes to Firestore; the other is applied in
-  // memory. Two equality filters on different fields require a composite
-  // index, which the emulator creates on demand but production Firestore
-  // rejects outright with "The query requires an index" — a failure that
-  // would only ever show up after deploy. The collection is per-user and
-  // small, so filtering the remainder client-side costs nothing.
+  // Only one equality filter goes to Firestore; the other is applied in
+  // memory so production does not unexpectedly require a composite index.
   const snap = await getDocs(
     options.contactId ? query(base, where('contactId', '==', options.contactId)) : base
   );
 
   return snap.docs
-    .filter((d) => {
-      const data = d.data() as any;
-      if (options.status && (data.status || 'open') !== options.status) return false;
-      return true;
+    .filter((document) => {
+      const data = document.data() as any;
+      return !options.status || (data.status || 'open') === options.status;
     })
-    .map((d) => {
-      const data = d.data() as any;
+    .map((document) => {
+      const data = document.data() as any;
       return {
-        id: d.id,
+        id: document.id,
         contactId: data.contactId,
         contactName: data.contactName || '',
         text: data.text || '',
@@ -82,6 +81,8 @@ export async function listCommitments(
         sourceType: (data.sourceType || 'note') as Commitment['sourceType'],
         sourceId: data.sourceId || null,
         createdAt: toDate(data.createdAt),
+        aiGrounding: data.aiGrounding || null,
+        feedback: data.feedback || null,
       } as Commitment;
     })
     .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
@@ -101,7 +102,13 @@ export async function setCommitmentStatus(
 
 export async function createCommitment(
   uid: string,
-  input: Omit<Commitment, 'id' | 'createdAt' | 'status'> & { status?: CommitmentStatus }
+  input: Omit<
+    Commitment,
+    'id' | 'createdAt' | 'status' | 'aiGrounding' | 'feedback'
+  > & {
+    status?: CommitmentStatus;
+    aiGrounding?: GroundingDisplay | null;
+  }
 ): Promise<string> {
   const ref = await addDoc(collection(db, `users/${uid}/commitments`), {
     contactId: input.contactId,
@@ -112,6 +119,8 @@ export async function createCommitment(
     status: input.status || 'open',
     sourceType: input.sourceType,
     sourceId: input.sourceId || null,
+    aiGrounding: input.aiGrounding || null,
+    feedback: null,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
@@ -124,42 +133,102 @@ interface ExtractedCommitment {
   owedBy?: string;
 }
 
+export interface CommitmentExtraction {
+  commitments: { text: string; dueHint: string | null; owedBy: 'you' | 'them' }[];
+  grounding: GroundingDisplay;
+}
+
+export function commitmentExtractionSources(params: {
+  text: string;
+  contactName: string;
+  contactId?: string;
+  sourceType?: Commitment['sourceType'];
+  sourceId?: string | null;
+}): GroundedSource[] {
+  const kind =
+    params.sourceType === 'outreach'
+      ? 'outreach'
+      : params.sourceType === 'note' || params.sourceType === 'voice'
+        ? 'note'
+        : 'user-input';
+  const evidenceId = params.sourceId
+    ? `${kind === 'outreach' ? 'outreach' : 'note'}-${params.sourceId}`
+    : 'user-commitment-text';
+  const evidenceLabel =
+    params.sourceType === 'voice'
+      ? 'Voice memo'
+      : params.sourceType === 'outreach'
+        ? 'Outreach record'
+        : params.sourceType === 'note'
+          ? 'Saved note'
+          : 'Supplied text';
+  const sources: GroundedSource[] = [
+    {
+      id: evidenceId,
+      kind,
+      label: evidenceLabel,
+      text: params.text.slice(0, 4_000),
+    },
+  ];
+
+  if (params.contactId) {
+    sources.unshift({
+      id: `contact-${params.contactId}`,
+      kind: 'contact',
+      label: `Contact · ${params.contactName}`,
+      text: JSON.stringify({ name: params.contactName }),
+    });
+  }
+  return sources;
+}
+
 /**
- * Pulls commitments out of free text.
- *
- * The prompt is strict about what does *not* count, because the failure mode
- * here is a queue full of "great to connect!" noise that trains the user to
- * ignore it. Better to miss a soft commitment than to surface five false ones.
+ * Pulls only explicit promises out of free text. The model receives the note
+ * as untrusted evidence, never interpolated into its instructions.
  */
 export async function extractCommitments(params: {
   text: string;
   contactName: string;
-}): Promise<{ text: string; dueHint: string | null; owedBy: 'you' | 'them' }[]> {
-  const prompt = `Read this note about a conversation with ${params.contactName} and extract only concrete commitments — specific things someone said they would DO.
-
-Note:
-"""
-${params.text.slice(0, 4000)}
-"""
-
-Counts as a commitment: "I'll send the deck", "I'll intro you to Priya", "she'll review the memo and get back to me", "follow up next week".
-
-Does NOT count, and must be excluded:
-- Pleasantries: "great to connect", "let's stay in touch", "we should grab coffee sometime"
-- Vague intentions with no action: "I'll think about it", "we'll see"
-- Things already completed
-- Facts, opinions, or background about the person
-
-For each real commitment give: the action as a short imperative phrase (max 60 chars), any timing the note mentions (or null), and whether it is owed by "you" (the note's author) or "them" (${params.contactName}).
-
-Return JSON: {"commitments": [{"text": "...", "dueHint": "..." or null, "owedBy": "you" or "them"}]}
-If there are none, return {"commitments": []}. Returning an empty list is a correct and expected answer.`;
-
-  const result = await generateJSON<{ commitments?: ExtractedCommitment[] }>(prompt, {
-    tier: 'reasoning',
+  contactId?: string;
+  sourceType?: Commitment['sourceType'];
+  sourceId?: string | null;
+  signal?: AbortSignal;
+}): Promise<CommitmentExtraction> {
+  const sources = commitmentExtractionSources(params);
+  const grounded = await generateGroundedJSON<{ commitments?: ExtractedCommitment[] }>({
+    task: 'Extract only concrete commitments: specific actions the note author or the named contact explicitly said they would do.',
+    resultSchema: `{
+      "commitments": [{
+        "text": "short imperative action, maximum 60 characters",
+        "dueHint": "timing exactly as expressed, or null",
+        "owedBy": "you | them"
+      }]
+    }`,
+    sources,
+    rules: [
+      'Pleasantries such as "great to connect" and "stay in touch" are not commitments.',
+      'Vague intentions such as "think about it" and "we will see" are not commitments.',
+      'Exclude completed actions, facts, opinions, background, and suggestions with no promise.',
+      'Do not infer a due date or owner. If ownership is not explicit, omit the item.',
+      'An empty commitments list is correct when the evidence contains no concrete promise.',
+    ],
+    options: {
+      tier: 'reasoning',
+      maxTokens: 900,
+      feature: 'commitment-extraction',
+      signal: params.signal,
+    },
   });
+  const evidenceId = sources.find((source) => source.kind !== 'contact')?.id;
+  if (
+    (grounded.result?.commitments || []).length > 0 &&
+    evidenceId &&
+    !grounded.usedSourceIds.includes(evidenceId)
+  ) {
+    throw new Error('Commitment suggestions were withheld because they did not cite the source record.');
+  }
 
-  return (result.commitments || [])
+  const commitments = (grounded.result?.commitments || [])
     .filter((item) => (item.text || '').trim().length > 0)
     .slice(0, 6)
     .map((item) => ({
@@ -167,11 +236,17 @@ If there are none, return {"commitments": []}. Returning an empty list is a corr
       dueHint: item.dueHint ? String(item.dueHint).slice(0, 60) : null,
       owedBy: item.owedBy === 'them' ? ('them' as const) : ('you' as const),
     }));
+
+  return {
+    commitments,
+    grounding: groundingDisplay(grounded, sources),
+  };
 }
 
 /**
  * Extracts and persists in one step, skipping anything already tracked for
- * this contact so re-running over the same note does not duplicate the queue.
+ * this contact so re-running over the same source does not duplicate the
+ * queue.
  */
 export async function extractAndStore(params: {
   uid: string;
@@ -180,16 +255,36 @@ export async function extractAndStore(params: {
   text: string;
   sourceType: Commitment['sourceType'];
   sourceId?: string | null;
+  signal?: AbortSignal;
 }): Promise<Commitment[]> {
+  return (await extractAndStoreDetailed(params)).created;
+}
+
+export async function extractAndStoreDetailed(params: {
+  uid: string;
+  contactId: string;
+  contactName: string;
+  text: string;
+  sourceType: Commitment['sourceType'];
+  sourceId?: string | null;
+  signal?: AbortSignal;
+}): Promise<{ created: Commitment[]; grounding: GroundingDisplay }> {
   const [found, existing] = await Promise.all([
-    extractCommitments({ text: params.text, contactName: params.contactName }),
+    extractCommitments({
+      text: params.text,
+      contactName: params.contactName,
+      contactId: params.contactId,
+      sourceType: params.sourceType,
+      sourceId: params.sourceId,
+      signal: params.signal,
+    }),
     listCommitments(params.uid, { contactId: params.contactId }),
   ]);
 
-  const seen = new Set(existing.map((c) => c.text.trim().toLowerCase()));
+  const seen = new Set(existing.map((commitment) => commitment.text.trim().toLowerCase()));
   const created: Commitment[] = [];
 
-  for (const item of found) {
+  for (const item of found.commitments) {
     if (seen.has(item.text.trim().toLowerCase())) continue;
     const id = await createCommitment(params.uid, {
       contactId: params.contactId,
@@ -199,6 +294,7 @@ export async function extractAndStore(params: {
       owedBy: item.owedBy,
       sourceType: params.sourceType,
       sourceId: params.sourceId || null,
+      aiGrounding: found.grounding,
     });
     created.push({
       id,
@@ -211,8 +307,10 @@ export async function extractAndStore(params: {
       sourceType: params.sourceType,
       sourceId: params.sourceId || null,
       createdAt: new Date(),
+      aiGrounding: found.grounding,
+      feedback: null,
     });
   }
 
-  return created;
+  return { created, grounding: found.grounding };
 }

@@ -1,0 +1,92 @@
+name: Application CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "codex/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: application-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Build, app tests, rules, and audits (Node 24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Verify pinned toolchain
+        run: |
+          node -e "if (process.versions.node.split('.')[0] !== '24') process.exit(1)"
+          java -version
+      - name: Install application dependencies
+        run: npm ci
+      - name: Type-check
+        run: npm run lint
+      - name: API, unit, policy, and rules tests
+        run: npm run test:app
+      - name: Production build and bundle budgets
+        run: npm run build
+      - name: Runtime dependency audit
+        run: npm run audit:runtime
+      - name: Full dependency audit
+        run: npm run audit:dependencies
+      - name: Generate CycloneDX software bills of materials
+        run: |
+          npm sbom --package-lock-only --sbom-format cyclonedx > cirqle-web-sbom.cdx.json
+          npm sbom --prefix functions --package-lock-only --sbom-format cyclonedx > cirqle-functions-sbom.cdx.json
+      - name: Upload software bills of materials
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cirqle-sbom-${{ github.sha }}
+          path: |
+            cirqle-web-sbom.cdx.json
+            cirqle-functions-sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+  functions-emulator:
+    name: Cloud Functions emulator (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            functions/package-lock.json
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Verify Cloud Functions runtime toolchain
+        run: |
+          node -e "if (process.versions.node.split('.')[0] !== '22') process.exit(1)"
+          java -version
+      - name: Install Firebase test tooling
+        run: npm ci
+      - name: Install Cloud Functions dependencies
+        run: npm ci --prefix functions
+      - name: Run Cloud Functions trigger tests
+        run: npm run test:functions

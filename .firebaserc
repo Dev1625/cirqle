@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "preview": "cirqle-preview-dev-dalal",
+    "production": "cirqle-9dd06"
+  }
+}

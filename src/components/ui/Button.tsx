@@ -26,7 +26,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           // disabled button gave no cursor feedback at all. The `disabled`
           // attribute already blocks clicks natively — pointer-events-none
           // bought nothing and cost the only pointer affordance there was.
-          "inline-flex items-center justify-center whitespace-nowrap rounded-card font-mono text-[10px] uppercase font-bold tracking-widest transition-[color,background-color,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper disabled:cursor-not-allowed",
+          "inline-flex touch-manipulation items-center justify-center whitespace-nowrap rounded-card font-mono text-[10px] uppercase font-bold tracking-widest transition-[color,background-color,transform] duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:ring-offset-paper disabled:cursor-not-allowed",
           {
             "bg-ink text-paper hover:bg-zinc-800 active:scale-[0.98] disabled:opacity-50": variant === "default",
             // The single decision-point accent — reserve for true primary CTAs.
@@ -40,10 +40,10 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             "hover:bg-ink/10 disabled:opacity-50": variant === "ghost",
             "underline-offset-4 hover:underline hover:text-brand disabled:opacity-50": variant === "link",
             "bg-red-600 text-white hover:bg-red-700 active:scale-[0.98] disabled:opacity-50": variant === "danger",
-            "h-9 px-4 py-2": size === "default",
-            "h-8 px-3 text-[9px]": size === "sm",
-            "h-10 px-8": size === "lg",
-            "h-9 w-9": size === "icon",
+            "h-11 min-w-11 px-4 py-2": size === "default",
+            "h-11 min-w-11 px-3 text-[9px]": size === "sm",
+            "h-12 min-w-12 px-8": size === "lg",
+            "h-11 w-11": size === "icon",
           },
           className
         )}

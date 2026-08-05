@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Check, Handshake, X } from 'lucide-react';
+import { Link } from 'react-router';
+import { ChevronDown, Handshake } from 'lucide-react';
 import { AILabel } from '../ui/AISurface';
+import { AIProvenance } from '../ui/AIProvenance';
 import { EmptyState } from '../ui/EmptyState';
 import { useToast } from '../../contexts/ToastContext';
-import { listCommitments, setCommitmentStatus, type Commitment } from '../../lib/commitments';
+import { listCommitments, type Commitment } from '../../lib/commitments';
+import { PersistedCommitmentFeedbackControls } from '../commitments/CommitmentFeedbackControls';
 
 /**
  * Open commitments, in the Follow-Up Queue's visual language rather than a
@@ -23,19 +25,6 @@ export function CommitmentsPanel({ uid }: { uid: string }) {
   }, [uid]);
 
   useEffect(load, [load]);
-
-  const resolve = async (commitment: Commitment, status: 'done' | 'dismissed') => {
-    // Optimistic: the row leaves immediately. A failed write is recoverable
-    // (the commitment is still there on reload) and not worth a spinner.
-    setItems((current) => (current || []).filter((c) => c.id !== commitment.id));
-    try {
-      await setCommitmentStatus(uid, commitment.id, status);
-      if (status === 'done') toast('Marked done.', 'success');
-    } catch {
-      toast('Could not update that. It will still be here on reload.', 'error');
-      load();
-    }
-  };
 
   if (items === null) return null;
 
@@ -65,7 +54,7 @@ export function CommitmentsPanel({ uid }: { uid: string }) {
             {items.slice(0, 6).map((commitment, index) => (
               <li
                 key={commitment.id}
-                className="animate-fade-slide-up flex flex-col gap-3 rounded-card border border-ink/15 p-4 transition-colors hover:bg-paper lg:flex-row lg:items-center lg:justify-between"
+                className="animate-fade-slide-up rounded-card border border-ink/15 p-4 transition-colors hover:bg-paper"
                 style={{ animationDelay: `${Math.min(index * 35, 175)}ms` }}
               >
                 <div className="min-w-0">
@@ -80,26 +69,48 @@ export function CommitmentsPanel({ uid }: { uid: string }) {
                     <span>{commitment.owedBy === 'you' ? 'You owe' : 'They owe'}</span>
                     {commitment.dueHint && <span>{commitment.dueHint}</span>}
                   </div>
+                  {commitment.aiGrounding && (
+                    <AIProvenance
+                      className="mt-3"
+                      sourceIds={commitment.aiGrounding.usedSourceIds}
+                      sourceLabels={commitment.aiGrounding.sourceLabels}
+                      unsupportedAssumptions={commitment.aiGrounding.unsupportedAssumptions}
+                      privacyExclusions={commitment.aiGrounding.privacyExclusions}
+                      generatedAt={commitment.aiGrounding.generatedAt}
+                      sourceObservedAt={commitment.aiGrounding.sourceObservedAt}
+                      consideredSourceCount={commitment.aiGrounding.consideredSourceCount}
+                      dataFreshThrough={commitment.aiGrounding.dataFreshThrough}
+                      generation={commitment.aiGrounding.generation}
+                    />
+                  )}
                 </div>
 
-                <div className="flex shrink-0 gap-2">
-                  <button
-                    onClick={() => resolve(commitment, 'dismissed')}
-                    title="Not a real commitment"
-                    className="flex h-8 w-8 items-center justify-center rounded-card border border-ink/15 text-muted transition-colors hover:border-ink/25 hover:text-ink"
-                  >
-                    <X size={13} />
-                    <span className="sr-only">Dismiss</span>
-                  </button>
-                  <button
-                    onClick={() => resolve(commitment, 'done')}
-                    title="Done"
-                    className="flex h-8 w-8 items-center justify-center rounded-card bg-ink text-paper transition-colors hover:bg-zinc-800"
-                  >
-                    <Check size={13} />
-                    <span className="sr-only">Mark done</span>
-                  </button>
-                </div>
+                <details className="group mt-4 border-t border-ink/10 pt-3">
+                  <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 font-mono text-[10px] font-bold uppercase tracking-widest text-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
+                    Review commitment and outcome
+                    <ChevronDown
+                      size={14}
+                      aria-hidden="true"
+                      className="transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                    />
+                  </summary>
+                  <PersistedCommitmentFeedbackControls
+                    className="mt-3"
+                    uid={uid}
+                    commitmentId={commitment.id}
+                    state={commitment.feedback}
+                    onStateChange={(feedback) => {
+                      setItems((current) =>
+                        (current || []).map((item) =>
+                          item.id === commitment.id
+                            ? { ...item, feedback }
+                            : item,
+                        ),
+                      );
+                      toast('Commitment feedback saved.', 'success');
+                    }}
+                  />
+                </details>
               </li>
             ))}
           </ul>

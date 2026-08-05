@@ -1,5 +1,12 @@
-import { chat, AIUnavailableError, AIKeyMissingError } from './aiClient';
-import { modelFor, type ModelTier } from './aiConfig';
+import {
+  chat,
+  chatWithMetadata,
+  AICancelledError,
+  AIUnavailableError,
+  AIKeyMissingError,
+  type AIResponseMeta,
+} from './aiClient';
+import { modelFor, type AIFeatureId, type ModelTier } from './aiConfig';
 
 /**
  * The only way the app talks to a model.
@@ -17,23 +24,30 @@ import { modelFor, type ModelTier } from './aiConfig';
  *     that not handling it is a bug rather than a nicety
  */
 
-export { AIUnavailableError, AIKeyMissingError };
+export { AICancelledError, AIUnavailableError, AIKeyMissingError };
+export type { AIResponseMeta };
 
 export interface GenerateOptions {
   /** Defaults to 'fast' — the cheap tier. Opt *up*, never accidentally. */
-  tier?: ModelTier;
+  tier: ModelTier;
   timeoutMs?: number;
   temperature?: number;
   maxTokens?: number;
+  /** Stable product feature name used for spend and quality attribution. */
+  feature: AIFeatureId;
+  /** Optional UI cancellation signal. */
+  signal?: AbortSignal;
 }
 
-export async function generateText(prompt: string, options: GenerateOptions = {}): Promise<string> {
+export async function generateText(prompt: string, options: GenerateOptions): Promise<string> {
   return chat({
     model: modelFor(options.tier ?? 'fast'),
     prompt,
     timeoutMs: options.timeoutMs,
     temperature: options.temperature,
     maxTokens: options.maxTokens,
+    feature: options.feature,
+    signal: options.signal,
   });
 }
 
@@ -55,14 +69,36 @@ export function parseLooseJSON<T>(raw: string): T {
   }
 }
 
-export async function generateJSON<T>(prompt: string, options: GenerateOptions = {}): Promise<T> {
+export async function generateJSON<T>(prompt: string, options: GenerateOptions): Promise<T> {
   const raw = await chat({
-    model: modelFor(options.tier ?? 'fast'),
+    model: modelFor(options.tier),
     prompt,
     json: true,
     timeoutMs: options.timeoutMs,
     temperature: options.temperature,
     maxTokens: options.maxTokens,
+    feature: options.feature,
+    signal: options.signal,
   });
   return parseLooseJSON<T>(raw);
+}
+
+export async function generateJSONWithMetadata<T>(
+  prompt: string,
+  options: GenerateOptions,
+): Promise<{ value: T; meta: AIResponseMeta }> {
+  const completion = await chatWithMetadata({
+    model: modelFor(options.tier),
+    prompt,
+    json: true,
+    timeoutMs: options.timeoutMs,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    feature: options.feature,
+    signal: options.signal,
+  });
+  return {
+    value: parseLooseJSON<T>(completion.text),
+    meta: completion.meta,
+  };
 }

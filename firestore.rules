@@ -1,81 +1,2647 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isOwner(userId) {
-      return request.auth != null && request.auth.uid == userId;
+    function accountSecurity(userId) {
+      return get(
+        /databases/$(database)/documents/_accountSecurity/$(userId)
+      );
     }
 
-    match /users/{userId} {
-      allow read, write: if isOwner(userId);
+    function hasActiveAccount(userId) {
+      let security = accountSecurity(userId);
+      return request.auth != null
+             && request.auth.uid == userId
+             && request.auth.token.auth_time is int
+             && security.data.status == 'active'
+             && request.auth.token.auth_time
+                > security.data.revokedAfterSeconds;
+    }
 
-      match /{document=**} {
-        allow read, write: if isOwner(userId);
+    function isOwner(userId) {
+      return hasActiveAccount(userId);
+    }
+
+    function isPublicCardOwner() {
+      return request.auth != null
+             && request.auth.uid == resource.data.ownerUid
+             && hasActiveAccount(resource.data.ownerUid);
+    }
+
+    function hasVerifiedEmail() {
+      return request.auth != null
+             && request.auth.token.email_verified == true;
+    }
+
+    function canWritePrivateData(userId) {
+      return isOwner(userId) && hasVerifiedEmail();
+    }
+
+    function contactAcceptsLinkedWrites(userId, contactId) {
+      return contactId is string
+             && contactId.size() > 0
+             && contactId.size() <= 300
+             && exists(
+               /databases/$(database)/documents/users/$(userId)/contacts/$(contactId)
+             )
+             && !(
+               'purgeFence' in get(
+                 /databases/$(database)/documents/users/$(userId)/contacts/$(contactId)
+               ).data
+             );
+    }
+
+    function linkedContactAcceptsWrites(userId, data) {
+      return !('contactId' in data)
+             || data.contactId == null
+             || contactAcceptsLinkedWrites(userId, data.contactId);
+    }
+
+    function connectionAcceptsLinkedWrites(userId, collectionName, data) {
+      return collectionName != 'connections'
+             || (
+               data.sourceId is string
+               && data.targetId is string
+               && data.sourceId != data.targetId
+               && contactAcceptsLinkedWrites(userId, data.sourceId)
+               && contactAcceptsLinkedWrites(userId, data.targetId)
+             );
+    }
+
+    function browserMergeMetadataCreateAllowed(data) {
+      return !data.keys().hasAny([
+        'contactMergeOperationId', 'migratedFromContactId',
+        'migratedFromContactName', 'migratedFromHadContactName',
+        'migratedFromPath', 'migratedToPath',
+        'originalConnectionEndpoints', 'mergeHistorical',
+        'mergeSuppressed', 'mergeRecoverySourceOperationId',
+        'migrationRecordedAt'
+      ]);
+    }
+
+    function browserMergeMetadataUpdateAllowed(collectionName) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let hasRecoveryMarker =
+        'contactMergeOperationId' in resource.data;
+      return !changed.hasAny([
+               'contactMergeOperationId', 'migratedFromContactId',
+               'migratedFromContactName', 'migratedFromHadContactName',
+               'migratedFromPath', 'migratedToPath',
+               'originalConnectionEndpoints', 'mergeHistorical',
+               'mergeSuppressed', 'mergeRecoverySourceOperationId',
+               'migrationRecordedAt'
+             ])
+             && (
+               !hasRecoveryMarker
+               || (
+                 collectionName != 'connections'
+                 && !changed.hasAny(['contactId'])
+               )
+             );
+    }
+
+    function isValidCardId(cardId) {
+      // The application generates ten characters from this ambiguity-free
+      // alphabet. Checking both the path and payload prevents aliases and
+      // accidental publication under a malformed route.
+      return cardId.matches('^[23456789abcdefghjkmnpqrstuvwxyz]{10}$');
+    }
+
+    function isNullableString(value, maxLength) {
+      return value == null
+             || (value is string && value.size() <= maxLength);
+    }
+
+    function isSafePublicText(value, maxLength) {
+      return value is string
+             && value.size() <= maxLength
+             && value.matches('^[^\\x00-\\x1F\\x7F]*$');
+    }
+
+    function isSafePublicEmail(value) {
+      return value == null
+             || value == ''
+             || (value is string
+                 && value.size() <= 320
+                 && value.matches(
+                   '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$'
+                 ));
+    }
+
+    function hasOptionalBoundedString(data, field, maxLength) {
+      return !(field in data)
+             || isNullableString(data[field], maxLength);
+    }
+
+    function isValidPrivateGrounding(value) {
+      return value == null
+             || (value is map
+                 && value.keys().hasOnly([
+                   'usedSourceIds', 'unsupportedAssumptions',
+                   'privacyExclusions', 'sourceLabels', 'generatedAt',
+                   'generation', 'sourceObservedAt',
+                   'consideredSourceCount', 'dataFreshThrough'
+                 ])
+                 && value.usedSourceIds is list
+                 && value.usedSourceIds.size() <= 50
+                 && value.unsupportedAssumptions is list
+                 && value.unsupportedAssumptions.size() <= 20
+                 && value.sourceLabels is map
+                 && value.sourceLabels.size() <= 50
+                 && value.generatedAt is string
+                 && value.generatedAt.size() <= 64
+                 && (!('sourceObservedAt' in value)
+                     || (value.sourceObservedAt is map
+                         && value.sourceObservedAt.size() <= 50))
+                 && (!('consideredSourceCount' in value)
+                     || (value.consideredSourceCount is int
+                         && value.consideredSourceCount >= 0
+                         && value.consideredSourceCount <= 60))
+                 && (!('dataFreshThrough' in value)
+                     || isNullableString(value.dataFreshThrough, 64))
+                 && (!('privacyExclusions' in value)
+                     || (value.privacyExclusions is list
+                         && value.privacyExclusions.size() <= 50))
+                 && (!('generation' in value)
+                     || (value.generation is map
+                         && value.generation.size() <= 8)));
+    }
+
+    function isValidPrivateCard(value) {
+      return value == null
+             || (value is map
+                 && value.keys().hasOnly([
+                   'mode', 'accent', 'layout', 'name', 'role', 'company',
+                   'intro', 'portedUrl', 'links', 'email', 'published'
+                 ])
+                 && value.mode in ['ai', 'custom', 'ported']
+                 && value.accent in [
+                   'oxblood', 'slate', 'moss', 'brass', 'clay', 'ink'
+                 ]
+                 && value.layout in ['compact', 'expanded']
+                 && isNullableString(value.name, 120)
+                 && isNullableString(value.role, 160)
+                 && isNullableString(value.company, 160)
+                 && isNullableString(value.intro, 240)
+                 && (value.portedUrl == null
+                     || isSafePublicUrl(value.portedUrl))
+                 && value.links is list
+                 && value.links.size() <= 6
+                 && isNullableString(value.email, 320)
+                 && value.published is bool);
+    }
+
+    function isValidEventMode(value) {
+      return value == null
+             || (value is map
+                 && value.keys().hasOnly([
+                   'active', 'sessionId', 'eventName', 'startedAt',
+                   'endedAt', 'source'
+                 ])
+                 && value.active is bool
+                 && isNullableString(value.sessionId, 120)
+                 && isNullableString(value.eventName, 160)
+                 && (value.startedAt == null || value.startedAt is timestamp)
+                 && (value.endedAt == null || value.endedAt is timestamp)
+                 && value.source in ['manual', 'calendar']);
+    }
+
+    function isValidUserRoot(userId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+               'userId', 'createdAt', 'updatedAt', 'name', 'role',
+               'company', 'bio', 'resumeText', 'targetIndustries',
+               'cardId', 'card', 'cardAIGrounding', 'eventMode',
+               'completedTours', 'hasSeenInitialTour', 'tourProgress'
+             ])
+             && data.keys().hasAll([
+               'userId', 'createdAt', 'updatedAt', 'name', 'role',
+               'company', 'bio', 'resumeText', 'targetIndustries'
+             ])
+             && data.userId == userId
+             && data.createdAt is timestamp
+             && data.createdAt == resource.data.createdAt
+             && data.updatedAt is timestamp
+             && data.updatedAt == request.time
+             && isNullableString(data.name, 160)
+             && isNullableString(data.role, 240)
+             && isNullableString(data.company, 240)
+             && isNullableString(data.bio, 20000)
+             && isNullableString(data.resumeText, 200000)
+             && data.targetIndustries is list
+             && data.targetIndustries.size() <= 50
+             && hasOptionalBoundedString(data, 'cardId', 64)
+             && (!('card' in data) || isValidPrivateCard(data.card))
+             && (!('cardAIGrounding' in data)
+                 || isValidPrivateGrounding(data.cardAIGrounding))
+             && (!('eventMode' in data)
+                 || isValidEventMode(data.eventMode))
+             && (!('completedTours' in data)
+                 || (data.completedTours is list
+                     && data.completedTours.size() <= 24))
+             && (!('hasSeenInitialTour' in data)
+                 || data.hasSeenInitialTour is bool)
+             && (!('tourProgress' in data)
+                 || (data.tourProgress is map
+                     && data.tourProgress.size() <= 24));
+    }
+
+    function isBoundedPrivateDocument(userId) {
+      let data = request.resource.data;
+      return data.keys().size() <= 80
+             && (!('userId' in data) || data.userId == userId)
+             && hasOptionalBoundedString(data, 'name', 240)
+             && hasOptionalBoundedString(data, 'email', 320)
+             && hasOptionalBoundedString(data, 'normalizedEmail', 320)
+             && (!('normalizedEmail' in data)
+                 || data.normalizedEmail == data.email)
+             && hasOptionalBoundedString(data, 'phone', 80)
+             && hasOptionalBoundedString(data, 'company', 240)
+             && hasOptionalBoundedString(data, 'role', 240)
+             && hasOptionalBoundedString(data, 'location', 500)
+             && hasOptionalBoundedString(data, 'subject', 2000)
+             && hasOptionalBoundedString(data, 'body', 100000)
+             && hasOptionalBoundedString(data, 'content', 200000)
+             && hasOptionalBoundedString(data, 'summary', 20000)
+             && hasOptionalBoundedString(data, 'notes', 50000)
+             && hasOptionalBoundedString(data, 'aiSummary', 20000)
+             && (!('profileRevision' in data)
+                 || (data.profileRevision is int
+                     && data.profileRevision >= 0))
+             && (!('tags' in data)
+                 || (data.tags is list && data.tags.size() <= 100));
+    }
+
+    function hasOptionalTimestamp(data, field) {
+      return !(field in data)
+             || data[field] == null
+             || data[field] is timestamp;
+    }
+
+    function hasOptionalBool(data, field) {
+      return !(field in data)
+             || data[field] == null
+             || data[field] is bool;
+    }
+
+    function contactProfileKeys() {
+      return [
+        'name', 'email', 'phone', 'company', 'role', 'location',
+        'linkedinUrl', 'summary', 'relationshipTier', 'industry',
+        'subIndustry', 'school', 'seniority', 'connectionSource',
+        'whyTheyMatter', 'tags'
+      ];
+    }
+
+    function contactDocumentKeys() {
+      return contactProfileKeys().concat([
+        'userId', 'normalizedEmail', 'profileRevision',
+        'lifecycleStatus', 'archivedAt', 'deletedAt', 'purgeEligibleAt',
+        'restoredAt', 'aiAllowed', 'aiAllowedBeforeLifecycle',
+        'mergedIntoContactId', 'contactMergeOperationId',
+        'mergedFromContactIds', 'createdAt', 'updatedAt',
+        'lastContactedAt', 'privacyUpdatedAt', 'bulkOperationId',
+        'healthPinned', 'healthPinnedAt',
+        'introductionWillingness', 'activeIntroductionRequests',
+        'introductionCapacity', 'introductionRequestsLast90Days',
+        'lastIntroductionRequestAt', 'introductionStaleAfterDays',
+        'introductionConflicts', 'introductionMutualContext',
+        'introductionSignalsUpdatedAt',
+        'importProvenance', 'aiGrounding', 'capturedVia',
+        'captureChannel', 'capturedAt', 'capturedEventName',
+        'capturedEventSessionId', 'capturedEventSource',
+        'consentToFollowUp', 'consentRecordedAt',
+        'privacyNoticeVersion', 'captureProvenance',
+        'factSyncPending', 'factSyncAt', 'factSyncRecoveredAt',
+        'lastContactMergeRecoveryOperationId', 'purgeFence'
+      ]);
+    }
+
+    function isValidContactProfile(data) {
+      return data.keys().hasAll(contactProfileKeys())
+             && data.name is string
+             && data.name.size() > 0
+             && data.name.size() <= 160
+             && data.email is string
+             && data.email.size() <= 320
+             && data.phone is string
+             && data.phone.size() <= 80
+             && data.company is string
+             && data.company.size() <= 200
+             && data.role is string
+             && data.role.size() <= 200
+             && data.location is string
+             && data.location.size() <= 200
+             && data.linkedinUrl is string
+             && data.linkedinUrl.size() <= 2048
+             && data.summary is string
+             && data.summary.size() <= 4000
+             && data.relationshipTier in ['Cold', 'Warm', 'Strong']
+             && data.industry is string
+             && data.industry.size() <= 160
+             && data.subIndustry is string
+             && data.subIndustry.size() <= 160
+             && data.school is string
+             && data.school.size() <= 200
+             && data.seniority is string
+             && data.seniority.size() <= 120
+             && data.connectionSource is string
+             && data.connectionSource.size() <= 240
+             && data.whyTheyMatter is string
+             && data.whyTheyMatter.size() <= 2000
+             && data.tags is list
+             && data.tags.size() <= 40;
+    }
+
+    function isValidContactImportProvenance(value) {
+      return value is map
+             && value.keys().hasOnly([
+               'sourceType', 'sourceId', 'rowId', 'mapping', 'importedAt'
+             ])
+             && value.keys().hasAll([
+               'sourceType', 'sourceId', 'rowId', 'mapping', 'importedAt'
+             ])
+             && value.sourceType == 'csv'
+             && value.sourceId is string
+             && value.sourceId.size() > 0
+             && value.sourceId.size() <= 300
+             && isNullableString(value.rowId, 300)
+             && value.mapping in ['ai-grounded', 'deterministic']
+             && value.importedAt is timestamp;
+    }
+
+    function isValidContactCaptureProvenance(value) {
+      return value is map
+             && value.keys().hasOnly([
+               'sourceType', 'sourceId', 'cardId', 'eventSessionId',
+               'channel', 'channelEvidence', 'channelVerified'
+             ])
+             && value.keys().hasAll([
+               'sourceType', 'sourceId', 'cardId', 'eventSessionId',
+               'channel', 'channelEvidence', 'channelVerified'
+             ])
+             && value.sourceType == 'public-card'
+             && value.sourceId is string
+             && value.sourceId.size() > 0
+             && value.sourceId.size() <= 300
+             && value.cardId is string
+             && value.cardId.size() > 0
+             && value.cardId.size() <= 64
+             && isNullableString(value.eventSessionId, 120)
+             && value.channel in ['qr', 'nfc', 'link', 'direct']
+             && value.channelEvidence in [
+               'client-url-marker', 'unmarked-url'
+             ]
+             && value.channelVerified == false;
+    }
+
+    function isValidContactConflict(value) {
+      return value is map
+             && value.keys().hasOnly(['id', 'label', 'severity'])
+             && value.keys().hasAll(['id', 'label', 'severity'])
+             && value.id is string
+             && value.id.size() > 0
+             && value.id.size() <= 400
+             && value.label is string
+             && value.label.size() > 0
+             && value.label.size() <= 240
+             && value.severity in ['warning', 'block'];
+    }
+
+    function isValidContactOperationalFields(data) {
+      return hasOptionalTimestamp(data, 'lastContactedAt')
+             && hasOptionalTimestamp(data, 'privacyUpdatedAt')
+             && hasOptionalBool(data, 'healthPinned')
+             && hasOptionalTimestamp(data, 'healthPinnedAt')
+             && (!('introductionWillingness' in data)
+                 || data.introductionWillingness in [
+                   'yes', 'likely', 'unknown', 'reluctant', 'no'
+                 ])
+             && (!('activeIntroductionRequests' in data)
+                 || data.activeIntroductionRequests == null
+                 || (data.activeIntroductionRequests is int
+                     && data.activeIntroductionRequests >= 0
+                     && data.activeIntroductionRequests <= 100))
+             && (!('introductionCapacity' in data)
+                 || data.introductionCapacity == null
+                 || (data.introductionCapacity is int
+                     && data.introductionCapacity >= 1
+                     && data.introductionCapacity <= 100))
+             && (!('introductionRequestsLast90Days' in data)
+                 || data.introductionRequestsLast90Days == null
+                 || (data.introductionRequestsLast90Days is int
+                     && data.introductionRequestsLast90Days >= 0
+                     && data.introductionRequestsLast90Days <= 500))
+             && hasOptionalTimestamp(data, 'lastIntroductionRequestAt')
+             && (!('introductionStaleAfterDays' in data)
+                 || (data.introductionStaleAfterDays is int
+                     && data.introductionStaleAfterDays >= 30
+                     && data.introductionStaleAfterDays <= 1825))
+             && (!('introductionConflicts' in data)
+                 || (data.introductionConflicts is list
+                     && data.introductionConflicts.size() <= 1
+                     && (data.introductionConflicts.size() == 0
+                         || isValidContactConflict(
+                           data.introductionConflicts[0]
+                         ))))
+             && (!('introductionMutualContext' in data)
+                 || (data.introductionMutualContext is string
+                     && data.introductionMutualContext.size() <= 500))
+             && hasOptionalTimestamp(
+               data,
+               'introductionSignalsUpdatedAt'
+             );
+    }
+
+    function isValidBrowserContactCreate(userId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(contactDocumentKeys())
+             && isValidContactProfile(data)
+             && data.userId == userId
+             && data.normalizedEmail == data.email
+             && data.profileRevision == 0
+             && data.lifecycleStatus == 'active'
+             && data.aiAllowed is bool
+             && data.createdAt == request.time
+             && data.updatedAt == request.time
+             && isValidContactOperationalFields(data)
+             && !data.keys().hasAny([
+               'archivedAt', 'deletedAt', 'purgeEligibleAt', 'restoredAt',
+               'aiAllowedBeforeLifecycle', 'mergedIntoContactId',
+               'contactMergeOperationId', 'mergedFromContactIds',
+               'bulkOperationId', 'factSyncPending', 'factSyncAt',
+               'factSyncRecoveredAt',
+               'lastContactMergeRecoveryOperationId', 'purgeFence'
+             ])
+             && (!('importProvenance' in data)
+                 || isValidContactImportProvenance(
+                   data.importProvenance
+                 ))
+             && (!('aiGrounding' in data)
+                 || (data.aiGrounding is map
+                     && data.aiGrounding.size() <= 12))
+             && (!('capturedVia' in data)
+                 || data.capturedVia in [
+                   'qr-code', 'nfc-card', 'shared-link', 'public-card'
+                 ])
+             && (!('captureChannel' in data)
+                 || data.captureChannel in ['qr', 'nfc', 'link', 'direct'])
+             && hasOptionalTimestamp(data, 'capturedAt')
+             && hasOptionalBoundedString(data, 'capturedEventName', 160)
+             && hasOptionalBoundedString(
+               data,
+               'capturedEventSessionId',
+               120
+             )
+             && hasOptionalBoundedString(
+               data,
+               'capturedEventSource',
+               80
+             )
+             && hasOptionalBool(data, 'consentToFollowUp')
+             && hasOptionalTimestamp(data, 'consentRecordedAt')
+             && hasOptionalBoundedString(
+               data,
+               'privacyNoticeVersion',
+               80
+             )
+             && (!('captureProvenance' in data)
+                 || isValidContactCaptureProvenance(
+                   data.captureProvenance
+                 ));
+    }
+
+    function hasBrowserContactLifecycleTransition() {
+      let data = request.resource.data;
+      let before = resource.data.get('lifecycleStatus', 'active');
+      let after = data.get('lifecycleStatus', 'active');
+      return (
+               before == 'active'
+               && after == 'archived'
+               && data.archivedAt is timestamp
+               && data.get('deletedAt', null) == null
+               && data.get('purgeEligibleAt', null) == null
+               && data.get('restoredAt', null) == null
+               && data.aiAllowed == false
+               && data.aiAllowedBeforeLifecycle is bool
+             )
+             || (
+               before in ['active', 'archived']
+               && after == 'deleted'
+               && data.deletedAt is timestamp
+               && data.purgeEligibleAt is timestamp
+               && data.purgeEligibleAt > data.deletedAt
+               && data.get('restoredAt', null)
+                  == resource.data.get('restoredAt', null)
+               && data.aiAllowed == false
+               && data.aiAllowedBeforeLifecycle is bool
+             )
+             || (
+               before in ['archived', 'deleted']
+               && after == 'active'
+               && resource.data.get('mergedIntoContactId', null) == null
+               && (
+                 before != 'deleted'
+                 || (
+                   'purgeEligibleAt' in resource.data
+                   && request.time < resource.data.purgeEligibleAt
+                 )
+               )
+               && data.get('archivedAt', null) == null
+               && data.get('deletedAt', null) == null
+               && data.get('purgeEligibleAt', null) == null
+               && data.restoredAt is timestamp
+               && data.aiAllowed is bool
+               && data.get('aiAllowedBeforeLifecycle', null) == null
+             );
+    }
+
+    function isValidBrowserContactUpdate(userId) {
+      let data = request.resource.data;
+      let changed = data.diff(resource.data).affectedKeys();
+      return data.keys().hasOnly(contactDocumentKeys())
+             && data.userId == userId
+             && data.userId == resource.data.userId
+             && data.createdAt == resource.data.createdAt
+             && data.updatedAt == request.time
+             && data.profileRevision
+                == resource.data.get('profileRevision', 0)
+             && !('purgeFence' in resource.data)
+             && !('purgeFence' in data)
+             && (
+               (
+                 changed.hasAny(['lifecycleStatus'])
+                 && changed.hasOnly([
+                   'lifecycleStatus', 'archivedAt', 'deletedAt',
+                   'purgeEligibleAt', 'restoredAt', 'aiAllowed',
+                   'aiAllowedBeforeLifecycle', 'bulkOperationId',
+                   'updatedAt'
+                 ])
+                 && hasBrowserContactLifecycleTransition()
+                 && (
+                   !changed.hasAny(['bulkOperationId'])
+                   || (
+                     data.bulkOperationId is string
+                     && exists(
+                       /databases/$(database)/documents/users/$(userId)/contactBulkOperations/$(data.bulkOperationId)
+                     )
+                     && get(
+                       /databases/$(database)/documents/users/$(userId)/contactBulkOperations/$(data.bulkOperationId)
+                     ).data.actorUid == userId
+                     && get(
+                       /databases/$(database)/documents/users/$(userId)/contactBulkOperations/$(data.bulkOperationId)
+                     ).data.status == 'running'
+                     && data.get('lifecycleStatus', 'active') == 'deleted'
+                   )
+                 )
+               )
+               || (
+                 changed.hasOnly(['lastContactedAt', 'updatedAt'])
+                 && data.lastContactedAt is timestamp
+               )
+               || (
+                 changed.hasOnly([
+                   'healthPinned', 'healthPinnedAt', 'updatedAt'
+                 ])
+                 && data.healthPinned is bool
+                 && (
+                   (data.healthPinned
+                    && data.healthPinnedAt is timestamp)
+                   || (!data.healthPinned && data.healthPinnedAt == null)
+                 )
+               )
+               || (
+                 changed.hasOnly([
+                   'introductionWillingness',
+                   'activeIntroductionRequests',
+                   'introductionCapacity',
+                   'introductionRequestsLast90Days',
+                   'lastIntroductionRequestAt',
+                   'introductionStaleAfterDays',
+                   'introductionConflicts',
+                   'introductionMutualContext',
+                   'introductionSignalsUpdatedAt', 'updatedAt'
+                 ])
+                 && data.introductionSignalsUpdatedAt == request.time
+                 && isValidContactOperationalFields(data)
+               )
+               || (
+                 changed.hasOnly([
+                   'aiAllowed', 'privacyUpdatedAt', 'updatedAt'
+                 ])
+                 && resource.data.get('lifecycleStatus', 'active')
+                    == 'active'
+                 && data.aiAllowed is bool
+                 && data.privacyUpdatedAt == request.time
+               )
+             );
+    }
+
+    function isValidOutreachDocument(userId, data) {
+      return data.keys().hasOnly([
+               'userId', 'contactId', 'contactName', 'type', 'channel',
+               'subject', 'body', 'status', 'verification', 'threadId',
+               'nextFollowUpDate', 'responseReceived', 'dateOfResponse',
+               'meetingHeld', 'meetingDate', 'nextAction',
+               'referralGenerated', 'applicationLinked', 'notes',
+               'aiSummary', 'sentAt', 'openedAt', 'userConfirmedAt',
+               'createdAt', 'updatedAt', 'templateId', 'generatedBy',
+               'aiFeature', 'aiProvenance', 'replyProvenance',
+               'replyEvidence', 'responseSource', 'responseThreadId',
+               'deliveryMode', 'provider', 'providerSendState',
+               'providerRequestDigest', 'providerReservationAt',
+               'providerMessageId', 'providerVerifiedAt',
+               'trackerLifecycleStatus', 'trackerDeletedAt',
+               'trackerPurgeAfter', 'contactMergeOperationId',
+               'migratedFromContactId', 'migratedFromContactName',
+               'migratedFromHadContactName', 'migratedFromPath',
+               'migratedToPath', 'mergeHistorical', 'mergeSuppressed',
+               'mergeRecoverySourceOperationId', 'migrationRecordedAt'
+             ])
+             && data.keys().hasAll([
+               'userId', 'contactId', 'type', 'status', 'updatedAt'
+             ])
+             && data.userId == userId
+             && data.contactId is string
+             && data.contactId.size() > 0
+             && data.contactId.size() <= 300
+             && isBoundedPrivateDocument(userId)
+             && hasOptionalBoundedString(data, 'contactName', 240)
+             && data.type is string
+             && data.type.size() > 0
+             && data.type.size() <= 120
+             && data.status in [
+               'Drafted', 'Opened in Mail Client',
+               'Sent (User Confirmed)', 'Sent (Provider Verified)',
+               'Delivered', 'Responded', 'Pending Follow-Up',
+               'Meeting Scheduled', 'Meeting Complete', 'Referred',
+               'Closed (Positive)', 'Closed (No Response)', 'Re-engage',
+               'Sent', 'Awaiting Response'
+             ]
+             && (!('verification' in data)
+                 || data.verification in [
+                   'none', 'user-confirmed', 'provider-verified',
+                   'preview-simulated'
+                 ])
+             && (!('responseReceived' in data)
+                 || data.responseReceived == null
+                 || data.responseReceived in ['Yes', 'No'])
+             && hasOptionalBool(data, 'meetingHeld')
+             && hasOptionalBoundedString(data, 'nextAction', 20000)
+             && hasOptionalBool(data, 'referralGenerated')
+             && data.updatedAt is timestamp
+             && (!('generatedBy' in data)
+                 || data.generatedBy in ['ai', 'template', 'manual'])
+             && (!('aiProvenance' in data)
+                 || (data.aiProvenance is map
+                     && data.aiProvenance.size() <= 12))
+             && (!('replyProvenance' in data)
+                 || (data.replyProvenance is map
+                     && data.replyProvenance.size() <= 12))
+             && (!('replyEvidence' in data)
+                 || (data.replyEvidence is map
+                     && data.replyEvidence.keys().hasOnly([
+                       'occurredAt', 'source', 'sourceRecordId', 'provider',
+                       'threadId', 'messageId', 'eventId'
+                     ])
+                     && data.replyEvidence.occurredAt is timestamp
+                     && data.replyEvidence.source in ['user', 'provider']
+                     && isNullableString(
+                       data.replyEvidence.sourceRecordId,
+                       300
+                     )
+                     && isNullableString(data.replyEvidence.provider, 80)
+                     && isNullableString(data.replyEvidence.threadId, 500)
+                     && isNullableString(data.replyEvidence.messageId, 500)
+                     && isNullableString(data.replyEvidence.eventId, 500)))
+             && (!('deliveryMode' in data)
+                 || data.deliveryMode in ['mailto', 'provider', 'preview'])
+             && (!('providerSendState' in data)
+                 || data.providerSendState in ['reserved', 'completed'])
+             && (!('trackerLifecycleStatus' in data)
+                 || data.trackerLifecycleStatus in ['active', 'deleted']);
+    }
+
+    function browserOutreachProofCreateAllowed(data) {
+      return !data.keys().hasAny([
+               'provider', 'providerSendState', 'providerRequestDigest',
+               'providerReservationAt', 'providerMessageId',
+               'providerVerifiedAt'
+             ])
+             && (!('verification' in data)
+                 || data.verification != 'provider-verified')
+             && (!('deliveryMode' in data)
+                 || data.deliveryMode != 'provider')
+             && (!('threadId' in data) || data.threadId == null);
+    }
+
+    function browserOutreachProofUpdateAllowed() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return !changed.hasAny([
+               'provider', 'providerSendState', 'providerRequestDigest',
+               'providerReservationAt', 'providerMessageId',
+               'providerVerifiedAt', 'threadId'
+             ])
+             && (
+               !changed.hasAny(['verification'])
+               || request.resource.data.verification != 'provider-verified'
+             )
+             && (
+               !changed.hasAny(['deliveryMode'])
+               || request.resource.data.deliveryMode != 'provider'
+             );
+    }
+
+    function isValidCommitmentFeedback(value) {
+      return value == null
+             || (value is map
+                 && value.keys().hasOnly([
+                   'schemaVersion', 'reality', 'resolution',
+                   'snoozedUntil', 'dismissReason', 'dismissNote',
+                   'relationshipOutcome', 'relationshipOutcomeNote',
+                   'lastEventId', 'lastEventAt', 'counters'
+                 ])
+                 && value.keys().hasAll([
+                   'schemaVersion', 'reality', 'resolution',
+                   'snoozedUntil', 'dismissReason', 'dismissNote',
+                   'relationshipOutcome', 'relationshipOutcomeNote',
+                   'lastEventId', 'lastEventAt', 'counters'
+                 ])
+                 && value.schemaVersion == 1
+                 && value.reality in ['unreviewed', 'real', 'not-real']
+                 && value.resolution in [
+                   'open', 'completed', 'snoozed', 'dismissed'
+                 ]
+                 && isNullableString(value.snoozedUntil, 64)
+                 && (value.dismissReason == null
+                     || value.dismissReason in [
+                       'false-positive', 'duplicate', 'already-completed',
+                       'not-actionable', 'no-longer-relevant', 'other'
+                     ])
+                 && isNullableString(value.dismissNote, 500)
+                 && value.relationshipOutcome in [
+                   'unknown', 'improved', 'unchanged', 'worsened'
+                 ]
+                 && isNullableString(value.relationshipOutcomeNote, 500)
+                 && isNullableString(value.lastEventId, 160)
+                 && isNullableString(value.lastEventAt, 64)
+                 && value.counters is map
+                 && value.counters.keys().hasOnly([
+                   'events', 'realityReviews', 'markedReal',
+                   'markedNotReal', 'completed', 'snoozed', 'dismissed',
+                   'outcomesRecorded'
+                 ])
+                 && value.counters.keys().hasAll([
+                   'events', 'realityReviews', 'markedReal',
+                   'markedNotReal', 'completed', 'snoozed', 'dismissed',
+                   'outcomesRecorded'
+                 ])
+                 && value.counters.events is int
+                 && value.counters.events >= 0
+                 && value.counters.realityReviews is int
+                 && value.counters.realityReviews >= 0
+                 && value.counters.markedReal is int
+                 && value.counters.markedReal >= 0
+                 && value.counters.markedNotReal is int
+                 && value.counters.markedNotReal >= 0
+                 && value.counters.completed is int
+                 && value.counters.completed >= 0
+                 && value.counters.snoozed is int
+                 && value.counters.snoozed >= 0
+                 && value.counters.dismissed is int
+                 && value.counters.dismissed >= 0
+                 && value.counters.outcomesRecorded is int
+                 && value.counters.outcomesRecorded >= 0);
+    }
+
+    function isValidCommitmentDocument(data) {
+      return data.keys().hasOnly([
+               'contactId', 'contactName', 'text', 'dueHint', 'owedBy',
+               'status', 'sourceType', 'sourceId', 'aiGrounding',
+               'feedback', 'snoozedUntil', 'resolvedAt',
+               'feedbackUpdatedAt', 'createdAt', 'updatedAt',
+               'contactMergeOperationId', 'migratedFromContactId',
+               'migratedFromContactName', 'migratedFromHadContactName',
+               'migratedFromPath', 'migratedToPath', 'mergeHistorical',
+               'mergeSuppressed', 'mergeRecoverySourceOperationId',
+               'migrationRecordedAt'
+             ])
+             && data.keys().hasAll([
+               'contactId', 'contactName', 'text', 'dueHint', 'owedBy',
+               'status', 'sourceType', 'sourceId', 'aiGrounding',
+               'feedback', 'createdAt', 'updatedAt'
+             ])
+             && data.contactId is string
+             && data.contactId.size() > 0
+             && data.contactId.size() <= 300
+             && isNullableString(data.contactName, 240)
+             && data.text is string
+             && data.text.size() > 0
+             && data.text.size() <= 1000
+             && isNullableString(data.dueHint, 120)
+             && data.owedBy in ['you', 'them']
+             && data.status in ['open', 'done', 'dismissed']
+             && data.sourceType in ['note', 'outreach', 'voice']
+             && isNullableString(data.sourceId, 300)
+             && isValidPrivateGrounding(data.aiGrounding)
+             && isValidCommitmentFeedback(data.feedback)
+             && hasOptionalBoundedString(data, 'snoozedUntil', 64)
+             && hasOptionalTimestamp(data, 'resolvedAt')
+             && hasOptionalTimestamp(data, 'feedbackUpdatedAt')
+             && data.createdAt is timestamp
+             && data.updatedAt is timestamp;
+    }
+
+    function isValidTemplateDocument(userId, data) {
+      return data.keys().hasOnly([
+               'userId', 'lifecycleStatus', 'name', 'subject', 'body',
+               'source', 'createdAt', 'updatedAt', 'deletedAt', 'purgeAfter'
+             ])
+             && data.keys().hasAll([
+               'userId', 'name', 'subject', 'body', 'createdAt', 'updatedAt'
+             ])
+             && data.userId == userId
+             && data.name is string
+             && data.name.size() > 0
+             && data.name.size() <= 100
+             && isNullableString(data.subject, 2000)
+             && data.body is string
+             && data.body.size() <= 100000
+             && (!('source' in data)
+                 || data.source in ['outreach-draft', 'manual'])
+             && (!('lifecycleStatus' in data)
+                 || data.lifecycleStatus in ['active', 'deleted'])
+             && data.createdAt is timestamp
+             && data.updatedAt is timestamp
+             && hasOptionalTimestamp(data, 'deletedAt')
+             && hasOptionalTimestamp(data, 'purgeAfter');
+    }
+
+    function isValidMockIntegration(provider, data) {
+      return provider in ['gmail', 'calendar']
+             && data.keys().hasOnly([
+               'provider', 'connected', 'mode', 'email', 'connectedAt',
+               'lastSyncedAt', 'expiresAt', 'updatedAt'
+             ])
+             && data.keys().hasAll([
+               'provider', 'connected', 'mode', 'email', 'connectedAt',
+               'lastSyncedAt', 'expiresAt', 'updatedAt'
+             ])
+             && data.provider == provider
+             && data.connected is bool
+             && data.mode == 'mock'
+             && isNullableString(data.email, 320)
+             && data.connectedAt is timestamp
+             && data.lastSyncedAt is timestamp
+             && data.expiresAt is timestamp
+             && data.updatedAt is timestamp;
+    }
+
+    function isValidMockThread(userId, threadId, data) {
+      return data.keys().hasOnly([
+               'userId', 'threadId', 'contactId', 'contactName', 'subject',
+               'outreachId', 'status', 'sentAt', 'lastCheckedAt', 'mode',
+               'createdAt', 'updatedAt', 'providerVerified',
+               'contactMergeOperationId', 'migratedFromContactId',
+               'migratedFromContactName', 'migratedFromHadContactName',
+               'migratedFromPath', 'migratedToPath', 'mergeHistorical',
+               'mergeSuppressed', 'mergeRecoverySourceOperationId',
+               'migrationRecordedAt'
+             ])
+             && data.keys().hasAll([
+               'threadId', 'contactId', 'contactName', 'subject',
+               'outreachId', 'status', 'sentAt', 'lastCheckedAt', 'mode',
+               'createdAt'
+             ])
+             && (!('userId' in data) || data.userId == userId)
+             && data.threadId == threadId
+             && threadId.size() > 0
+             && threadId.size() <= 500
+             && data.contactId is string
+             && data.contactId.size() > 0
+             && data.contactId.size() <= 300
+             && isNullableString(data.contactName, 240)
+             && isNullableString(data.subject, 2000)
+             && isNullableString(data.outreachId, 300)
+             && data.status in ['sent', 'delivered', 'replied']
+             && data.sentAt is timestamp
+             && data.lastCheckedAt is timestamp
+             && data.mode == 'mock'
+             && data.createdAt is timestamp
+             && hasOptionalTimestamp(data, 'updatedAt')
+             && (!('providerVerified' in data)
+                 || data.providerVerified == false);
+    }
+
+    function isValidPrivacyBoundary(value) {
+      return value is map
+             && value.keys().hasOnly([
+               'id', 'scope', 'sourceType', 'sourceId', 'retentionMode',
+               'retentionDays', 'aiUse'
+             ])
+             && value.keys().size() == 7;
+    }
+
+    function isValidPrivacyPolicy(data) {
+      return data is map
+             && data.keys().hasOnly([
+               'schemaVersion', 'defaultRetentionMode',
+               'defaultRetentionDays', 'defaultAIUse', 'boundaries',
+               'updatedAt'
+             ])
+             && data.keys().hasAll([
+               'schemaVersion', 'defaultRetentionMode',
+               'defaultRetentionDays', 'defaultAIUse', 'boundaries'
+             ])
+             && data.schemaVersion == 1
+             && data.defaultRetentionMode in [
+               'forever', 'days', 'delete-on-disconnect'
+             ]
+             && (
+               (data.defaultRetentionMode == 'days'
+                && data.defaultRetentionDays is int
+                && data.defaultRetentionDays >= 1
+                && data.defaultRetentionDays <= 3650)
+               || (data.defaultRetentionMode != 'days'
+                   && data.defaultRetentionDays == null)
+             )
+             && data.defaultAIUse in ['allow', 'never']
+             && data.boundaries is list
+             && data.boundaries.size() <= 13
+             && (data.boundaries.size() < 1
+                 || isValidPrivacyBoundary(data.boundaries[0]))
+             && (data.boundaries.size() < 2
+                 || isValidPrivacyBoundary(data.boundaries[1]))
+             && (data.boundaries.size() < 3
+                 || isValidPrivacyBoundary(data.boundaries[2]))
+             && (data.boundaries.size() < 4
+                 || isValidPrivacyBoundary(data.boundaries[3]))
+             && (data.boundaries.size() < 5
+                 || isValidPrivacyBoundary(data.boundaries[4]))
+             && (data.boundaries.size() < 6
+                 || isValidPrivacyBoundary(data.boundaries[5]))
+             && (data.boundaries.size() < 7
+                 || isValidPrivacyBoundary(data.boundaries[6]))
+             && (data.boundaries.size() < 8
+                 || isValidPrivacyBoundary(data.boundaries[7]))
+             && (data.boundaries.size() < 9
+                 || isValidPrivacyBoundary(data.boundaries[8]))
+             && (data.boundaries.size() < 10
+                 || isValidPrivacyBoundary(data.boundaries[9]))
+             && (data.boundaries.size() < 11
+                 || isValidPrivacyBoundary(data.boundaries[10]))
+             && (data.boundaries.size() < 12
+                 || isValidPrivacyBoundary(data.boundaries[11]))
+             && (data.boundaries.size() < 13
+                 || isValidPrivacyBoundary(data.boundaries[12]))
+             && (!('updatedAt' in data) || data.updatedAt is timestamp);
+    }
+
+    function isValidBulkOperationCreate(userId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+               'type', 'actorUid', 'requestedCount', 'eligibleCount',
+               'status', 'startedAt', 'immutable'
+             ])
+             && data.keys().hasAll([
+               'type', 'actorUid', 'requestedCount', 'eligibleCount',
+               'status', 'startedAt', 'immutable'
+             ])
+             && data.type == 'soft-delete'
+             && data.actorUid == userId
+             && data.requestedCount is int
+             && data.requestedCount >= 1
+             && data.requestedCount <= 5000
+             && data.eligibleCount is int
+             && data.eligibleCount >= 0
+             && data.eligibleCount <= data.requestedCount
+             && data.status == 'running'
+             && data.startedAt == request.time
+             && data.immutable == true;
+    }
+
+    function isValidBulkOperationUpdate(userId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+               'type', 'actorUid', 'requestedCount', 'eligibleCount',
+               'status', 'startedAt', 'immutable', 'completedCount',
+               'updatedAt', 'completedAt', 'failedAt', 'recoveryReason'
+             ])
+             && data.type == resource.data.type
+             && data.actorUid == userId
+             && data.actorUid == resource.data.actorUid
+             && data.requestedCount == resource.data.requestedCount
+             && data.eligibleCount == resource.data.eligibleCount
+             && data.startedAt == resource.data.startedAt
+             && data.immutable == true
+             && data.status in [
+               'running', 'completed', 'partially-completed'
+             ]
+             && data.completedCount is int
+             && data.completedCount >= 0
+             && data.completedCount <= data.eligibleCount
+             && hasOptionalTimestamp(data, 'updatedAt')
+             && hasOptionalTimestamp(data, 'completedAt')
+             && hasOptionalTimestamp(data, 'failedAt')
+             && (!('recoveryReason' in data)
+                 || data.recoveryReason == 'bulk-write-failed');
+    }
+
+    function isValidVoiceGrounding(value) {
+      return value == null || isValidPrivateGrounding(value);
+    }
+
+    function isValidVoiceSummaryStep(value) {
+      return value is map
+             && value.keys().hasOnly([
+               'status', 'error', 'completedAt', 'grounding', 'text'
+             ])
+             && value.keys().hasAll([
+               'status', 'error', 'completedAt', 'grounding', 'text'
+             ])
+             && value.status in [
+               'pending', 'running', 'complete', 'failed', 'cancelled'
+             ]
+             && isNullableString(value.error, 500)
+             && isNullableString(value.completedAt, 64)
+             && isValidVoiceGrounding(value.grounding)
+             && isNullableString(value.text, 160);
+    }
+
+    function isValidVoiceCommitmentStep(value) {
+      return value is map
+             && value.keys().hasOnly([
+               'status', 'error', 'completedAt', 'grounding', 'createdCount'
+             ])
+             && value.keys().hasAll([
+               'status', 'error', 'completedAt', 'grounding', 'createdCount'
+             ])
+             && value.status in [
+               'pending', 'running', 'complete', 'failed', 'cancelled'
+             ]
+             && isNullableString(value.error, 500)
+             && isNullableString(value.completedAt, 64)
+             && isValidVoiceGrounding(value.grounding)
+             && value.createdCount is int
+             && value.createdCount >= 0
+             && value.createdCount <= 100;
+    }
+
+    function isValidVoiceEnrichmentJob(noteId, data) {
+      return data.keys().hasOnly([
+               'version', 'noteId', 'contactId', 'contactName', 'state',
+               'visible', 'cancelRequested', 'attempt', 'leaseOwner',
+               'leaseExpiresAtMs', 'queuedAt', 'startedAt', 'completedAt',
+               'updatedAt', 'summary', 'commitments',
+               'contactMergeOperationId', 'migratedFromContactId',
+               'migratedFromContactName', 'migratedFromHadContactName',
+               'migratedFromPath', 'migratedToPath', 'mergeHistorical',
+               'mergeSuppressed', 'mergeRecoverySourceOperationId',
+               'migrationRecordedAt'
+             ])
+             && data.keys().hasAll([
+               'version', 'noteId', 'contactId', 'contactName', 'state',
+               'visible', 'cancelRequested', 'attempt', 'leaseOwner',
+               'leaseExpiresAtMs', 'queuedAt', 'startedAt', 'completedAt',
+               'updatedAt', 'summary', 'commitments'
+             ])
+             && data.version == 1
+             && data.noteId == noteId
+             && data.contactId is string
+             && data.contactId.size() > 0
+             && data.contactId.size() <= 300
+             && isNullableString(data.contactName, 240)
+             && data.state in [
+               'queued', 'running', 'partial', 'complete', 'failed',
+               'cancelled'
+             ]
+             && data.visible is bool
+             && data.cancelRequested is bool
+             && data.attempt is int
+             && data.attempt >= 0
+             && data.attempt <= 100
+             && isNullableString(data.leaseOwner, 160)
+             && (data.leaseExpiresAtMs == null
+                 || (data.leaseExpiresAtMs is int
+                     && data.leaseExpiresAtMs >= 0))
+             && data.queuedAt is string
+             && data.queuedAt.size() > 0
+             && data.queuedAt.size() <= 64
+             && isNullableString(data.startedAt, 64)
+             && isNullableString(data.completedAt, 64)
+             && data.updatedAt is string
+             && data.updatedAt.size() > 0
+             && data.updatedAt.size() <= 64
+             && isValidVoiceSummaryStep(data.summary)
+             && isValidVoiceCommitmentStep(data.commitments);
+    }
+
+    function isValidConnectionConflict(value) {
+      return value is map
+             && value.keys().hasOnly(['id', 'label', 'severity'])
+             && value.keys().hasAll(['id', 'label', 'severity'])
+             && value.id is string
+             && value.id.size() > 0
+             && value.id.size() <= 700
+             && value.label is string
+             && value.label.size() > 0
+             && value.label.size() <= 240
+             && value.severity in ['warning', 'block'];
+    }
+
+    function isValidConnectionContext(value) {
+      return value == null
+             || (
+               value is map
+               && value.keys().hasOnly([
+                 'text', 'sourceType', 'sourceId'
+               ])
+               && value.keys().hasAll([
+                 'text', 'sourceType', 'sourceId'
+               ])
+               && value.text is string
+               && value.text.size() > 0
+               && value.text.size() <= 500
+               && value.sourceType == 'user-correction'
+               && value.sourceId is string
+               && value.sourceId.size() > 0
+               && value.sourceId.size() <= 700
+             );
+    }
+
+    function isValidConnectionProvenance(connectionId, value) {
+      return value is map
+             && value.keys().hasOnly([
+               'sourceType', 'sourceId', 'observedAt'
+             ])
+             && value.keys().hasAll([
+               'sourceType', 'sourceId', 'observedAt'
+             ])
+             && value.sourceType == 'user-correction'
+             && value.sourceId == 'connection:' + connectionId
+             && value.observedAt is timestamp;
+    }
+
+    function isValidConnectionDocument(userId, connectionId, data) {
+      return data.keys().hasOnly([
+               'userId', 'sourceId', 'targetId', 'type', 'inferred',
+               'direction', 'strength', 'weight', 'willingness',
+               'lastInteractionAt', 'activeIntroductionRequests',
+               'introductionCapacity', 'introductionRequestsLast90Days',
+               'lastIntroductionRequestAt', 'conflicts', 'mutualContext',
+               'provenance', 'createdAt', 'updatedAt'
+             ])
+             && data.keys().hasAll([
+               'userId', 'sourceId', 'targetId', 'type', 'inferred',
+               'direction', 'strength', 'weight', 'willingness',
+               'lastInteractionAt', 'activeIntroductionRequests',
+               'introductionCapacity', 'introductionRequestsLast90Days',
+               'lastIntroductionRequestAt', 'conflicts', 'mutualContext',
+               'provenance', 'createdAt', 'updatedAt'
+             ])
+             && data.userId == userId
+             && data.sourceId is string
+             && data.sourceId.size() > 0
+             && data.sourceId.size() <= 300
+             && data.targetId is string
+             && data.targetId.size() > 0
+             && data.targetId.size() <= 300
+             && data.sourceId != data.targetId
+             && data.type == 'user-recorded introduction path'
+             && data.inferred == false
+             && data.direction in ['directed', 'mutual']
+             && data.weight is int
+             && data.weight >= 1
+             && data.weight <= 5
+             && data.strength is number
+             && data.strength >= 0.2
+             && data.strength <= 1
+             && data.willingness in [
+               'yes', 'likely', 'unknown', 'reluctant', 'no'
+             ]
+             && data.lastInteractionAt is timestamp
+             && (data.activeIntroductionRequests == null
+                 || (data.activeIntroductionRequests is int
+                     && data.activeIntroductionRequests >= 0
+                     && data.activeIntroductionRequests <= 10000))
+             && (data.introductionCapacity == null
+                 || (data.introductionCapacity is int
+                     && data.introductionCapacity >= 1
+                     && data.introductionCapacity <= 10000))
+             && (data.introductionRequestsLast90Days == null
+                 || (data.introductionRequestsLast90Days is int
+                     && data.introductionRequestsLast90Days >= 0
+                     && data.introductionRequestsLast90Days <= 10000))
+             && (data.lastIntroductionRequestAt == null
+                 || data.lastIntroductionRequestAt is timestamp)
+             && data.conflicts is list
+             && data.conflicts.size() <= 1
+             && (data.conflicts.size() == 0
+                 || isValidConnectionConflict(data.conflicts[0]))
+             && isValidConnectionContext(data.mutualContext)
+             && isValidConnectionProvenance(
+               connectionId,
+               data.provenance
+             )
+             && data.provenance.observedAt == data.lastInteractionAt
+             && data.createdAt is timestamp
+             && data.updatedAt is timestamp;
+    }
+
+    function noteBaseKeys() {
+      return [
+        'noteSchemaVersion', 'userId', 'contactId', 'recordType',
+        'source', 'privacySourceType', 'sourceId', 'content',
+        'sensitive', 'aiAllowed', 'observedAt', 'factIds',
+        'createdAt', 'updatedAt'
+      ];
+    }
+
+    function noteServerMetadataKeys() {
+      return [
+        'contactName', 'contactMergeOperationId',
+        'migratedFromContactId', 'migratedFromContactName',
+        'migratedFromHadContactName', 'migratedAt'
+      ];
+    }
+
+    function isValidNoteBase(userId, noteId, data) {
+      return data.noteSchemaVersion == 2
+             && data.userId == userId
+             && data.contactId is string
+             && data.contactId.size() > 0
+             && data.contactId.size() <= 300
+             && data.recordType is string
+             && data.source is string
+             && data.privacySourceType is string
+             && data.sourceId == noteId
+             && data.sensitive is bool
+             && data.aiAllowed is bool
+             && data.observedAt is timestamp
+             && data.factIds is list
+             && data.factIds.size() <= 8
+             && data.createdAt is timestamp
+             && data.updatedAt is timestamp;
+    }
+
+    function isValidNoteAIProvenance(value, feature) {
+      return value is map
+             && value.keys().hasOnly([
+               'feature', 'sourceIds', 'sourceLabels',
+               'unsupportedAssumptions', 'privacyExclusions',
+               'generatedAt', 'sourceObservedAt',
+               'consideredSourceCount', 'dataFreshThrough', 'generation'
+             ])
+             && value.keys().hasAll([
+               'feature', 'sourceIds', 'sourceLabels',
+               'unsupportedAssumptions', 'privacyExclusions', 'generatedAt'
+             ])
+             && value.feature == feature
+             && value.sourceIds is list
+             && value.sourceIds.size() <= 50
+             && value.sourceLabels is map
+             && value.sourceLabels.size() <= 50
+             && value.unsupportedAssumptions is list
+             && value.unsupportedAssumptions.size() <= 20
+             && value.privacyExclusions is list
+             && value.privacyExclusions.size() <= 50
+             && value.generatedAt is string
+             && value.generatedAt.size() <= 64
+             && (!('sourceObservedAt' in value)
+                 || (value.sourceObservedAt is map
+                     && value.sourceObservedAt.size() <= 50))
+             && (!('consideredSourceCount' in value)
+                 || (value.consideredSourceCount is int
+                     && value.consideredSourceCount >= 0
+                     && value.consideredSourceCount <= 60))
+             && (!('dataFreshThrough' in value)
+                 || isNullableString(value.dataFreshThrough, 64))
+             && (!('generation' in value)
+                 || (value.generation is map
+                     && value.generation.size() <= 8));
+    }
+
+    function isBoundedBase64(value, minLength, maxLength) {
+      return value is string
+             && value.size() >= minLength
+             && value.size() <= maxLength
+             && value.matches('^[A-Za-z0-9+/]+={0,2}$');
+    }
+
+    function isValidSensitiveEnvelopeV1(value) {
+      return value is map
+             && value.keys().hasOnly([
+               'schemaVersion', 'algorithm', 'kdf', 'iterations',
+               'salt', 'iv', 'ciphertext'
+             ])
+             && value.keys().hasAll([
+               'schemaVersion', 'algorithm', 'kdf', 'iterations',
+               'salt', 'iv', 'ciphertext'
+             ])
+             && value.schemaVersion == 1
+             && value.algorithm == 'AES-GCM'
+             && value.kdf == 'PBKDF2-SHA256'
+             && value.iterations == 310000
+             && isBoundedBase64(value.salt, 24, 24)
+             && isBoundedBase64(value.iv, 16, 16)
+             && isBoundedBase64(value.ciphertext, 24, 106712);
+    }
+
+    function isValidSensitiveEnvelopeV2(value, userId, noteId) {
+      return value is map
+             && value.keys().hasOnly([
+               'schemaVersion', 'algorithm', 'kdf', 'iterations',
+               'salt', 'iv', 'ciphertext', 'aad'
+             ])
+             && value.keys().hasAll([
+               'schemaVersion', 'algorithm', 'kdf', 'iterations',
+               'salt', 'iv', 'ciphertext', 'aad'
+             ])
+             && value.schemaVersion == 2
+             && value.algorithm == 'AES-GCM'
+             && value.kdf == 'PBKDF2-SHA256'
+             && value.iterations == 310000
+             && isBoundedBase64(value.salt, 24, 24)
+             && isBoundedBase64(value.iv, 16, 16)
+             && isBoundedBase64(value.ciphertext, 24, 106712)
+             && value.aad is map
+             && value.aad.keys().hasOnly([
+               'version', 'scope', 'userId', 'noteId'
+             ])
+             && value.aad.keys().hasAll([
+               'version', 'scope', 'userId', 'noteId'
+             ])
+             && value.aad.version == 1
+             && value.aad.scope == 'user-note'
+             && value.aad.userId == userId
+             && value.aad.noteId == noteId;
+    }
+
+    function isValidQuickNoteCreate(userId, noteId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(noteBaseKeys())
+             && data.keys().hasAll(noteBaseKeys())
+             && isValidNoteBase(userId, noteId, data)
+             && data.recordType == 'note'
+             && data.source == 'quick-note'
+             && data.privacySourceType == 'note'
+             && data.content is string
+             && data.content.size() > 0
+             && data.content.size() <= 20000
+             && data.sensitive == false;
+    }
+
+    function isValidSensitiveNoteCreate(userId, noteId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(
+               noteBaseKeys().concat(['encryptedContent'])
+             )
+             && data.keys().hasAll(
+               noteBaseKeys().concat(['encryptedContent'])
+             )
+             && isValidNoteBase(userId, noteId, data)
+             && data.recordType == 'note'
+             && data.source == 'sensitive-note'
+             && data.privacySourceType == 'note'
+             && data.content == null
+             && data.sensitive == true
+             && data.aiAllowed == false
+             && data.factIds.size() == 0
+             && isValidSensitiveEnvelopeV2(
+               data.encryptedContent,
+               userId,
+               noteId
+             );
+    }
+
+    function isValidMeetingNoteCreate(userId, noteId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(
+               noteBaseKeys().concat(['occurredAt', 'meetingAt'])
+             )
+             && data.keys().hasAll(
+               noteBaseKeys().concat(['occurredAt', 'meetingAt'])
+             )
+             && isValidNoteBase(userId, noteId, data)
+             && data.recordType == 'meeting'
+             && data.source == 'meeting-log'
+             && data.privacySourceType == 'meeting'
+             && data.content is string
+             && data.content.size() > 0
+             && data.content.size() <= 70000
+             && data.sensitive == false
+             && data.occurredAt is timestamp
+             && data.meetingAt == data.occurredAt
+             && data.observedAt == data.occurredAt
+             && data.factIds.size() <= 4;
+    }
+
+    function isValidVoiceNoteShape(userId, noteId, data) {
+      return data.keys().hasOnly(
+               noteBaseKeys()
+                 .concat(noteServerMetadataKeys())
+                 .concat([
+                   'meetingTitle', 'aiSummary', 'aiSummaryGrounding'
+                 ])
+             )
+             && data.keys().hasAll(
+               noteBaseKeys().concat(['meetingTitle'])
+             )
+             && isValidNoteBase(userId, noteId, data)
+             && data.recordType == 'voice'
+             && data.source == 'voice-memo'
+             && data.privacySourceType == 'voice'
+             && data.content is string
+             && data.content.size() > 0
+             && data.content.size() <= 12000
+             && data.sensitive == false
+             && isNullableString(data.meetingTitle, 500)
+             && data.factIds.size() <= 2
+             && (!('aiSummary' in data)
+                 || (data.aiSummary is string
+                     && data.aiSummary.size() > 0
+                     && data.aiSummary.size() <= 160))
+             && (!('aiSummaryGrounding' in data)
+                 || isValidPrivateGrounding(data.aiSummaryGrounding));
+    }
+
+    function isValidVoiceNoteCreate(userId, noteId) {
+      return request.resource.data.keys().hasOnly(
+               noteBaseKeys().concat(['meetingTitle'])
+             )
+             && isValidVoiceNoteShape(
+               userId,
+               noteId,
+               request.resource.data
+             );
+    }
+
+    function isValidReplyNoteCreate(userId, noteId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(
+               noteBaseKeys().concat([
+                 'replyTargetOutreachId', 'replyTargetThreadId',
+                 'aiFeature', 'aiProvenance'
+               ])
+             )
+             && data.keys().hasAll(
+               noteBaseKeys().concat([
+                 'replyTargetOutreachId', 'replyTargetThreadId',
+                 'aiFeature', 'aiProvenance'
+               ])
+             )
+             && isValidNoteBase(userId, noteId, data)
+             && data.recordType == 'reply'
+             && data.source == 'pasted-reply'
+             && data.privacySourceType == 'reply'
+             && data.content is string
+             && data.content.size() > 0
+             && data.content.size() <= 5000
+             && data.sensitive == false
+             && data.aiAllowed == true
+             && data.factIds.size() == 0
+             && isNullableString(data.replyTargetOutreachId, 300)
+             && isNullableString(data.replyTargetThreadId, 300)
+             && data.aiFeature == 'contact.reply.process'
+             && isValidNoteAIProvenance(
+               data.aiProvenance,
+               'contact.reply.process'
+             );
+    }
+
+    function isValidAITagNoteCreate(userId, noteId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(
+               noteBaseKeys().concat(['aiFeature', 'aiProvenance'])
+             )
+             && data.keys().hasAll(
+               noteBaseKeys().concat(['aiFeature', 'aiProvenance'])
+             )
+             && isValidNoteBase(userId, noteId, data)
+             && data.recordType == 'ai-tag'
+             && data.source == 'ai-tag-extraction'
+             && data.privacySourceType == 'user-input'
+             && data.content is string
+             && data.content.size() > 0
+             && data.content.size() <= 2000
+             && data.sensitive == false
+             && data.aiAllowed == false
+             && data.factIds.size() == 0
+             && data.aiFeature == 'contact.tags.extract'
+             && isValidNoteAIProvenance(
+               data.aiProvenance,
+               'contact.tags.extract'
+             );
+    }
+
+    function isValidBrowserNoteCreate(userId, noteId) {
+      let data = request.resource.data;
+      return data.createdAt == request.time
+             && data.updatedAt == request.time
+             && (
+               isValidQuickNoteCreate(userId, noteId)
+               || isValidSensitiveNoteCreate(userId, noteId)
+               || isValidMeetingNoteCreate(userId, noteId)
+               || isValidVoiceNoteCreate(userId, noteId)
+               || isValidReplyNoteCreate(userId, noteId)
+               || isValidAITagNoteCreate(userId, noteId)
+             );
+    }
+
+    function isLegacySensitiveNote(data, userId) {
+      return data.userId == userId
+             && data.contactId is string
+             && data.source == 'sensitive-note'
+             && data.content == null
+             && data.sensitive == true
+             && data.aiAllowed == false
+             && isValidSensitiveEnvelopeV1(data.encryptedContent);
+    }
+
+    function isValidSensitiveNoteMigration(userId, noteId) {
+      let data = request.resource.data;
+      return isLegacySensitiveNote(resource.data, userId)
+             && data.diff(resource.data).affectedKeys().hasOnly([
+               'encryptedContent', 'encryptionMigratedAt', 'updatedAt'
+             ])
+             && data.userId == resource.data.userId
+             && data.contactId == resource.data.contactId
+             && data.source == resource.data.source
+             && data.content == resource.data.content
+             && data.sensitive == resource.data.sensitive
+             && data.aiAllowed == resource.data.aiAllowed
+             && data.createdAt == resource.data.createdAt
+             && data.updatedAt == request.time
+             && data.encryptionMigratedAt == request.time
+             && isValidSensitiveEnvelopeV2(
+               data.encryptedContent,
+               userId,
+               noteId
+             );
+    }
+
+    function isLegacyVoiceNote(data, userId) {
+      return data.userId == userId
+             && data.contactId is string
+             && data.recordType == 'voice'
+             && data.source == 'voice-memo'
+             && data.content is string
+             && data.content.size() > 0
+             && data.content.size() <= 12000
+             && data.sensitive == false;
+    }
+
+    function isValidVoiceEnrichmentUpdate(userId, noteId) {
+      let data = request.resource.data;
+      return (
+               isValidVoiceNoteShape(userId, noteId, resource.data)
+               || isLegacyVoiceNote(resource.data, userId)
+             )
+             && data.diff(resource.data).affectedKeys().hasOnly([
+               'aiSummary', 'aiSummaryGrounding', 'updatedAt'
+             ])
+             && data.userId == resource.data.userId
+             && data.contactId == resource.data.contactId
+             && data.recordType == resource.data.recordType
+             && data.source == resource.data.source
+             && data.content == resource.data.content
+             && data.sensitive == resource.data.sensitive
+             && data.aiAllowed == resource.data.aiAllowed
+             && data.createdAt == resource.data.createdAt
+             && data.updatedAt == request.time
+             && data.aiSummary is string
+             && data.aiSummary.size() > 0
+             && data.aiSummary.size() <= 160
+             && data.aiSummaryGrounding is map
+             && isValidPrivateGrounding(data.aiSummaryGrounding)
+             && data.aiSummaryGrounding.usedSourceIds.hasAny([
+               'note-' + noteId
+             ]);
+    }
+
+    function isValidTemporalFactCorrection(userId, contactId, factId) {
+      let data = request.resource.data;
+      return (data.correctionOf == null
+              && data.sourceType != 'user-correction')
+             || (
+               data.sourceType == 'user-correction'
+               && data.sourceId == data.correctionOf
+               && data.correctionOf != factId
+               && exists(
+                 /databases/$(database)/documents/users/$(userId)/contacts/$(contactId)/facts/$(data.correctionOf)
+               )
+               && get(
+                 /databases/$(database)/documents/users/$(userId)/contacts/$(contactId)/facts/$(data.correctionOf)
+               ).data.predicate == data.predicate
+               && get(
+                 /databases/$(database)/documents/users/$(userId)/contacts/$(contactId)/facts/$(data.correctionOf)
+               ).data.current == true
+               && getAfter(
+                 /databases/$(database)/documents/users/$(userId)/contacts/$(contactId)/facts/$(data.correctionOf)
+               ).data.current == false
+               && getAfter(
+                 /databases/$(database)/documents/users/$(userId)/contacts/$(contactId)/facts/$(data.correctionOf)
+               ).data.supersededBy == factId
+             );
+    }
+
+    function isValidBrowserFactProvenance() {
+      let data = request.resource.data;
+      let profilePredicate = data.predicate in [
+        'identity.name', 'identity.email', 'identity.phone',
+        'identity.company', 'identity.role', 'identity.location',
+        'identity.linkedinUrl', 'identity.summary', 'identity.industry',
+        'identity.subIndustry', 'identity.school', 'identity.seniority',
+        'relationship.tier', 'relationship.whyTheyMatter',
+        'relationship.connectionSource', 'relationship.tags'
+      ];
+      return data.sourceId is string
+             && data.sourceId.size() > 0
+             && data.sourceId.size() <= 300
+             && (
+               ((data.sourceType == 'profile'
+                 || data.sourceType == 'import')
+                && profilePredicate)
+               || (data.sourceType == 'note'
+                   && data.predicate == 'relationship.note')
+               || (data.sourceType == 'meeting'
+                   && data.predicate in [
+                     'meeting.date', 'meeting.discussed',
+                     'meeting.promised', 'meeting.nextSteps'
+                   ])
+               || (data.sourceType == 'voice'
+                   && data.predicate in [
+                     'relationship.voiceMemo', 'meeting.title'
+                   ])
+               || (data.sourceType == 'public-card-capture'
+                   && data.predicate in [
+                     'identity.name', 'identity.company', 'identity.email',
+                     'relationship.connectionSource', 'relationship.event',
+                     'relationship.captureEvidence'
+                   ])
+               || (data.sourceType == 'outreach'
+                   && data.predicate in [
+                     'outreach.subject', 'outreach.status',
+                     'outreach.outcome', 'outreach.context'
+                   ])
+               || data.sourceType == 'user-correction'
+             );
+    }
+
+    function isValidTemporalFactCreate(userId, contactId, factId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+               'predicate', 'value', 'normalizedValue', 'sourceType',
+               'sourceId', 'observedAt', 'confidence', 'current',
+               'aiAllowed', 'correctionOf', 'supersededBy', 'createdAt',
+               'updatedAt'
+             ])
+             && data.keys().hasAll([
+               'predicate', 'value', 'normalizedValue', 'sourceType',
+               'sourceId', 'observedAt', 'confidence', 'current',
+               'aiAllowed', 'correctionOf', 'supersededBy', 'createdAt',
+               'updatedAt'
+             ])
+             && data.predicate is string
+             && data.predicate.size() > 0
+             && data.predicate.size() <= 200
+             && data.value is string
+             && data.value.size() > 0
+             && data.value.size() <= 20000
+             && data.normalizedValue is string
+             && data.normalizedValue.size() <= 20000
+             && data.sourceType in [
+                'profile', 'import', 'note', 'meeting', 'outreach', 'voice',
+                'public-card-capture', 'user-correction'
+              ]
+             && isNullableString(data.sourceId, 300)
+             && data.observedAt is timestamp
+             && data.confidence is number
+             && data.confidence >= 0
+             && data.confidence <= 1
+             && data.current == true
+             && data.aiAllowed is bool
+             && isNullableString(data.correctionOf, 300)
+             && data.supersededBy == null
+             && data.createdAt == request.time
+             && data.updatedAt == request.time
+             && isValidBrowserFactProvenance()
+             && isValidTemporalFactCorrection(
+               userId,
+               contactId,
+               factId
+             );
+    }
+
+    function isValidTemporalFactUpdate() {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+               'predicate', 'value', 'normalizedValue', 'sourceType',
+               'sourceId', 'observedAt', 'confidence', 'current',
+               'aiAllowed', 'correctionOf', 'supersededBy', 'createdAt',
+               'updatedAt', 'supersededAt', 'privacyUpdatedAt',
+               'contactMergeOperationId', 'migratedFromContactId',
+               'migratedFromContactName', 'migratedFromHadContactName',
+               'migratedFromPath', 'originalHistoryLinks',
+               'originalCurrent', 'mergeHistorical',
+               'migrationRecordedAt', 'mergeRecoveryOperationId',
+               'contactMergeRecoveryOperationId'
+             ])
+             && data.predicate == resource.data.predicate
+             && data.value == resource.data.value
+             && data.normalizedValue == resource.data.normalizedValue
+             && data.sourceType == resource.data.sourceType
+             && data.sourceId == resource.data.sourceId
+             && data.observedAt == resource.data.observedAt
+             && data.confidence == resource.data.confidence
+             && data.correctionOf == resource.data.correctionOf
+             && data.createdAt == resource.data.createdAt
+             && data.current is bool
+             && data.aiAllowed is bool
+             && isNullableString(data.supersededBy, 300)
+             && (
+               (resource.data.current == true
+                && data.current == true
+                && data.supersededBy == null
+                && !('supersededAt' in data))
+               || (resource.data.current == true
+                   && data.current == false
+                   && data.supersededBy is string
+                   && data.supersededBy.size() > 0
+                   && data.supersededAt == request.time)
+               || (resource.data.current == false
+                   && data.current == false
+                   && data.supersededBy == resource.data.supersededBy
+                   && data.supersededAt == resource.data.supersededAt)
+             )
+             && data.updatedAt == request.time
+             && (!('supersededAt' in data)
+                 || data.supersededAt == request.time
+                 || (('supersededAt' in resource.data)
+                     && data.supersededAt
+                        == resource.data.supersededAt))
+             && (!('privacyUpdatedAt' in data)
+                 || data.privacyUpdatedAt == request.time
+                 || (('privacyUpdatedAt' in resource.data)
+                     && data.privacyUpdatedAt
+                        == resource.data.privacyUpdatedAt))
+             && request.resource.data.diff(resource.data)
+                .affectedKeys().hasOnly([
+                  'current', 'aiAllowed', 'supersededBy', 'supersededAt',
+                  'privacyUpdatedAt', 'updatedAt'
+                ]);
+    }
+
+    function isValidJobHistoryCreate(userId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+               'role', 'company', 'location', 'startedAt', 'endedAt',
+               'current', 'sourceType', 'sourceId', 'correctionOf',
+               'supersededBy', 'recordedAt', 'createdAt',
+               'immutableProvenance'
+             ])
+             && data.keys().hasAll([
+               'role', 'company', 'location', 'startedAt', 'endedAt',
+               'current', 'sourceType', 'sourceId', 'correctionOf',
+               'supersededBy', 'recordedAt', 'createdAt',
+               'immutableProvenance'
+             ])
+             && data.role is string
+             && data.role.size() <= 240
+             && data.company is string
+             && data.company.size() <= 240
+             && data.location is string
+             && data.location.size() <= 500
+             && (data.startedAt == null || data.startedAt is timestamp)
+             && (data.endedAt == null || data.endedAt is timestamp)
+             && data.current is bool
+             && data.sourceType in [
+               'profile', 'profile-backfill', 'import', 'user-correction'
+             ]
+             && isNullableString(data.sourceId, 300)
+             && isNullableString(data.correctionOf, 300)
+             && data.supersededBy == null
+             && data.recordedAt is timestamp
+             && data.createdAt == request.time
+             && data.immutableProvenance is map
+             && data.immutableProvenance.keys().hasOnly([
+               'sourceType', 'sourceId', 'recordedByUid'
+             ])
+             && data.immutableProvenance.recordedByUid == userId;
+    }
+
+    function isValidJobHistoryUpdate() {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+               'role', 'company', 'location', 'startedAt', 'endedAt',
+               'current', 'sourceType', 'sourceId', 'correctionOf',
+               'supersededBy', 'recordedAt', 'createdAt', 'closedAt',
+               'immutableProvenance'
+             ])
+             && data.role == resource.data.role
+             && data.company == resource.data.company
+             && data.location == resource.data.location
+             && data.startedAt == resource.data.startedAt
+             && data.sourceType == resource.data.sourceType
+             && data.sourceId == resource.data.sourceId
+             && data.correctionOf == resource.data.correctionOf
+             && data.recordedAt == resource.data.recordedAt
+             && data.createdAt == resource.data.createdAt
+             && data.immutableProvenance
+                == resource.data.immutableProvenance
+             && data.current == false
+             && data.endedAt is timestamp
+             && isNullableString(data.supersededBy, 300)
+             && data.closedAt == request.time
+             && data.diff(resource.data).affectedKeys().hasOnly([
+               'current', 'endedAt', 'supersededBy', 'closedAt'
+             ]);
+    }
+
+    function isValidBrowserContactEvent(userId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+               'contactId', 'type', 'actorUid', 'sourceType',
+               'sourceId', 'payload', 'occurredAt', 'immutable'
+             ])
+             && data.keys().hasAll([
+               'contactId', 'type', 'actorUid', 'sourceType',
+               'sourceId', 'payload', 'occurredAt', 'immutable'
+             ])
+             && data.actorUid == userId
+             && data.contactId is string
+             && data.contactId.size() > 0
+             && data.contactId.size() <= 300
+             && data.type in [
+                'profile-updated', 'archived', 'restored',
+                'soft-deleted', 'purge-requested'
+              ]
+             && data.sourceType == 'contact-management'
+             && isNullableString(data.sourceId, 300)
+             && data.payload is map
+             && data.payload.size() <= 20
+             && !data.payload.keys().hasAny([
+               'primaryContactId', 'duplicateContactId',
+               'mergedIntoContactId'
+             ])
+             && data.immutable == true
+             && data.occurredAt == request.time;
+    }
+
+    function isValidPrivacyPolicyEvent(userId) {
+      let data = request.resource.data;
+      let policy = data.policy;
+      return data.keys().hasOnly([
+               'schemaVersion', 'kind', 'policy', 'actorUid', 'recordedAt'
+             ])
+             && data.keys().hasAll([
+               'schemaVersion', 'kind', 'policy', 'actorUid', 'recordedAt'
+             ])
+             && data.schemaVersion == 1
+             && data.kind == 'privacy-policy-replaced'
+             && data.actorUid == userId
+             && data.recordedAt == request.time
+             && policy is map
+             && policy.keys().hasOnly([
+               'schemaVersion', 'defaultRetentionMode',
+               'defaultRetentionDays', 'defaultAIUse', 'boundaries'
+             ])
+             && policy.keys().hasAll([
+               'schemaVersion', 'defaultRetentionMode',
+               'defaultRetentionDays', 'defaultAIUse', 'boundaries'
+             ])
+             && policy.schemaVersion == 1
+             && policy.defaultRetentionMode in [
+               'forever', 'days', 'delete-on-disconnect'
+             ]
+             && (
+               (policy.defaultRetentionMode == 'days'
+                && policy.defaultRetentionDays is int
+                && policy.defaultRetentionDays >= 1
+                && policy.defaultRetentionDays <= 3650)
+               || (policy.defaultRetentionMode != 'days'
+                   && policy.defaultRetentionDays == null)
+             )
+             && policy.defaultAIUse in ['allow', 'never']
+             && policy.boundaries is list
+             && policy.boundaries.size() <= 200;
+    }
+
+    function isValidCommitmentFeedbackEvent(userId, eventId) {
+      let data = request.resource.data;
+      let baseKeys = [
+        'id', 'commitmentId', 'actorUid', 'occurredAt', 'source',
+        'kind', 'recordedAt'
+      ];
+      return data.keys().hasAll(baseKeys)
+             && data.id == eventId
+             && eventId.matches('^[A-Za-z0-9._:-]{1,160}$')
+             && data.commitmentId is string
+             && data.commitmentId.matches('^[A-Za-z0-9._:-]{1,160}$')
+             && data.actorUid == userId
+             && data.occurredAt is string
+             && data.occurredAt.size() > 0
+             && data.occurredAt.size() <= 64
+             && data.source == 'user-explicit'
+             && data.recordedAt == request.time
+             && exists(
+               /databases/$(database)/documents/users/$(userId)/commitments/$(data.commitmentId)
+             )
+             && linkedContactAcceptsWrites(
+               userId,
+               get(
+                 /databases/$(database)/documents/users/$(userId)/commitments/$(data.commitmentId)
+               ).data
+             )
+             && (
+               (data.kind == 'completed'
+                && data.keys().hasOnly(baseKeys))
+               || (data.kind == 'reality-reviewed'
+                   && data.keys().hasOnly(
+                     baseKeys.concat(['reality'])
+                   )
+                   && data.reality in ['real', 'not-real'])
+               || (data.kind == 'snoozed'
+                   && data.keys().hasOnly(
+                     baseKeys.concat(['snoozedUntil'])
+                   )
+                   && data.snoozedUntil is string
+                   && data.snoozedUntil.size() > 0
+                   && data.snoozedUntil.size() <= 64)
+               || (data.kind == 'dismissed'
+                   && data.keys().hasOnly(
+                     baseKeys.concat(['reason', 'note'])
+                   )
+                   && data.reason in [
+                     'false-positive', 'duplicate', 'already-completed',
+                     'not-actionable', 'no-longer-relevant', 'other'
+                   ]
+                   && isNullableString(data.note, 500))
+               || (data.kind == 'relationship-outcome-recorded'
+                   && data.keys().hasOnly(
+                     baseKeys.concat(['outcome', 'note'])
+                   )
+                   && data.outcome in [
+                     'improved', 'unchanged', 'worsened'
+                   ]
+                   && isNullableString(data.note, 500))
+             );
+    }
+
+    function isValidPurgeRequest(userId, requestId) {
+      let data = request.resource.data;
+      let plan = data.plan;
+      return data.keys().hasOnly([
+               'actorUid', 'contactId', 'status', 'plan',
+               'requestedAt', 'requiresServerExecution'
+             ])
+             && data.keys().hasAll([
+               'actorUid', 'contactId', 'status', 'plan',
+               'requestedAt', 'requiresServerExecution'
+             ])
+             && data.actorUid == userId
+             && data.contactId == requestId
+             && requestId.size() > 0
+             && requestId.size() <= 300
+             && data.status == 'queued'
+             && data.requiresServerExecution == true
+             && data.requestedAt == request.time
+             && plan is map
+             && plan.keys().hasOnly([
+               'contactId', 'eligible', 'eligibleAt', 'collectionPaths',
+               'relatedCollections', 'requiresServerExecution'
+             ])
+             && plan.keys().hasAll([
+               'contactId', 'eligible', 'eligibleAt', 'collectionPaths',
+               'relatedCollections', 'requiresServerExecution'
+             ])
+             && plan.contactId == requestId
+             && plan.eligible == true
+             && plan.eligibleAt is timestamp
+             && plan.eligibleAt <= request.time
+             && plan.collectionPaths == [
+               'users/' + userId + '/contacts/' + requestId + '/facts',
+               'users/' + userId + '/contacts/' + requestId + '/jobHistory',
+               'users/' + userId + '/contacts/' + requestId
+             ]
+             && plan.relatedCollections == [
+               'note', 'outreach', 'commitment',
+               'commitment-feedback', 'thread', 'voice-enrichment',
+               'connection', 'contact-event'
+             ]
+             && plan.requiresServerExecution == true;
+    }
+
+    function isValidMergeRecoveryRequest(userId, requestId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly([
+               'operationId', 'primaryContactId', 'duplicateContactId',
+               'actorUid', 'status', 'requestedAt',
+               'requiresServerExecution', 'recoveryProtocolVersion'
+             ])
+             && data.keys().hasAll([
+               'operationId', 'primaryContactId', 'duplicateContactId',
+               'actorUid', 'status', 'requestedAt',
+               'requiresServerExecution', 'recoveryProtocolVersion'
+             ])
+             && data.operationId == requestId
+             && data.actorUid == userId
+             && data.primaryContactId is string
+             && data.primaryContactId.size() > 0
+             && data.primaryContactId.size() <= 300
+             && data.duplicateContactId is string
+             && data.duplicateContactId.size() > 0
+             && data.duplicateContactId.size() <= 300
+             && data.primaryContactId != data.duplicateContactId
+             && data.status == 'queued'
+             && data.requiresServerExecution == true
+             && data.recoveryProtocolVersion == 1
+             && data.requestedAt == request.time;
+    }
+
+    function isSafePublicUrl(value) {
+      // Public card links open in a visitor's browser. Restrict them to HTTPS
+      // so a malicious/modified client cannot persist javascript:, data:, or
+      // insecure transport URLs into an otherwise trusted Cirqle page.
+      return value is string
+             && value.size() <= 2048
+             && value.matches(
+               '^https://[^/@?#\\s]+(?::[0-9]{1,5})?(?:/[^\\s]*)?(?:\\?[^\\s#]*)?(?:#[^\\s]*)?$'
+             );
+    }
+
+    function isValidPublicLink(value) {
+      return value is map
+             && value.keys().hasOnly(['label', 'url'])
+             && value.keys().hasAll(['label', 'url'])
+             && isSafePublicText(value.label, 80)
+             && value.label.size() > 0
+             && isSafePublicUrl(value.url);
+    }
+
+    function isValidPublicLinks(values) {
+      // Rules do not support a general list loop. The product caps this small
+      // display list, so each possible slot is checked explicitly.
+      return values is list
+             && values.size() <= 6
+             && (values.size() < 1 || isValidPublicLink(values[0]))
+             && (values.size() < 2 || isValidPublicLink(values[1]))
+             && (values.size() < 3 || isValidPublicLink(values[2]))
+             && (values.size() < 4 || isValidPublicLink(values[3]))
+             && (values.size() < 5 || isValidPublicLink(values[4]))
+             && (values.size() < 6 || isValidPublicLink(values[5]));
+    }
+
+    function isValidPublicCard(cardId) {
+      // This collection is deliberately public. Keep its schema explicit so
+      // a future client refactor cannot accidentally denormalise a secret
+      // profile field (for example apiKey or integration metadata) into it.
+      return request.resource.data.keys().hasOnly([
+               'cardId', 'ownerUid', 'mode', 'accent', 'layout', 'name',
+               'role', 'company', 'intro', 'portedUrl', 'links', 'email',
+               'published', 'updatedAt'
+             ])
+             && request.resource.data.keys().hasAll([
+               'cardId', 'ownerUid', 'mode', 'accent', 'layout', 'name',
+               'role', 'company', 'intro', 'portedUrl', 'links', 'email',
+               'published', 'updatedAt'
+             ])
+             && request.resource.data.cardId == cardId
+             && isValidCardId(cardId)
+             && request.resource.data.ownerUid is string
+             && request.resource.data.mode in ['ai', 'custom', 'ported']
+             && request.resource.data.accent in [
+                  'oxblood', 'slate', 'moss', 'brass', 'clay', 'ink'
+                ]
+             && request.resource.data.layout in ['compact', 'expanded']
+             && isSafePublicText(request.resource.data.name, 120)
+             && request.resource.data.name.size() > 0
+             && isSafePublicText(request.resource.data.role, 160)
+             && isSafePublicText(request.resource.data.company, 160)
+             && isSafePublicText(request.resource.data.intro, 240)
+             && (request.resource.data.portedUrl == null
+                 || isSafePublicUrl(request.resource.data.portedUrl))
+             && isValidPublicLinks(request.resource.data.links)
+             && isSafePublicEmail(request.resource.data.email)
+             && request.resource.data.published is bool
+             && request.resource.data.updatedAt is timestamp
+             && request.resource.data.updatedAt == request.time;
+    }
+
+    // All private CRM state is scoped beneath an active authenticated owner's
+    // uid. A server-pending account gets no CRM access; once active, an owner
+    // whose email is still unverified may read existing data but cannot write.
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if false;
+      allow update: if canWritePrivateData(userId)
+                    && isValidUserRoot(userId);
+      // Full account deletion is a server-only orchestration that removes
+      // credentials and integrations before this root document.
+      allow delete: if false;
+
+      match /contactEvents/{eventId} {
+        allow read: if isOwner(userId);
+        allow create: if canWritePrivateData(userId)
+                      && isValidBrowserContactEvent(userId)
+                      && contactAcceptsLinkedWrites(
+                        userId,
+                        request.resource.data.contactId
+                      );
+        allow update, delete: if false;
+      }
+
+      match /privacyPolicyEvents/{eventId} {
+        allow read: if isOwner(userId);
+        allow create: if canWritePrivateData(userId)
+                      && isValidPrivacyPolicyEvent(userId);
+        allow update, delete: if false;
+      }
+
+      match /commitmentFeedbackEvents/{eventId} {
+        allow read: if isOwner(userId);
+        allow create: if canWritePrivateData(userId)
+                      && isValidCommitmentFeedbackEvent(
+                        userId,
+                        eventId
+                      );
+        allow update, delete: if false;
+      }
+
+      // Privacy-safe activity registry. It records a random tab-session ID
+      // and coarse browser/platform labels, never an IP address, token,
+      // fingerprint, full user agent, or credential.
+      match /sessions/{sessionId} {
+        function validSessionShape() {
+          return request.resource.data.keys().hasOnly([
+                   'userId', 'sessionId', 'deviceLabel', 'browser',
+                   'platform', 'createdAt', 'lastSeenAt', 'expiresAt'
+                 ])
+                 && request.resource.data.keys().hasAll([
+                   'userId', 'sessionId', 'deviceLabel', 'browser',
+                   'platform', 'createdAt', 'lastSeenAt', 'expiresAt'
+                 ])
+                 && request.resource.data.userId == userId
+                 && request.resource.data.sessionId == sessionId
+                 && sessionId.matches('^[A-Za-z0-9_-]{20,80}$')
+                 && request.resource.data.deviceLabel is string
+                 && request.resource.data.deviceLabel.size() <= 100
+                 && request.resource.data.browser is string
+                 && request.resource.data.browser.size() <= 50
+                 && request.resource.data.platform is string
+                 && request.resource.data.platform.size() <= 50
+                 && request.resource.data.createdAt is timestamp
+                 && request.resource.data.lastSeenAt is timestamp
+                 && request.resource.data.expiresAt is timestamp
+                 && request.resource.data.expiresAt > request.time
+                 && request.resource.data.expiresAt
+                    < request.time + duration.value(91, 'd');
+        }
+
+        allow read: if isOwner(userId);
+        allow create: if canWritePrivateData(userId)
+                      && validSessionShape()
+                      && request.resource.data.createdAt == request.time
+                      && request.resource.data.lastSeenAt == request.time;
+        allow update: if canWritePrivateData(userId)
+                      && validSessionShape()
+                      && request.resource.data.createdAt
+                         == resource.data.createdAt
+                      && request.resource.data.lastSeenAt == request.time
+                      && request.resource.data.diff(resource.data)
+                         .affectedKeys().hasOnly([
+                           'deviceLabel', 'browser', 'platform',
+                           'lastSeenAt', 'expiresAt'
+                         ]);
+        allow delete: if canWritePrivateData(userId);
+      }
+
+      // A browser may enqueue its own already-validated recovery operation.
+      // Only the Admin worker may change status or delete the request.
+      match /contactPurgeRequests/{requestId} {
+        allow read: if isOwner(userId);
+        allow create: if canWritePrivateData(userId)
+                      && isValidPurgeRequest(userId, requestId);
+        allow update, delete: if false;
+      }
+
+      match /contactMergeRecoveryRequests/{requestId} {
+        allow read: if isOwner(userId);
+        allow create: if canWritePrivateData(userId)
+                      && isValidMergeRecoveryRequest(userId, requestId);
+        allow update, delete: if false;
+      }
+
+      // A merge changes contacts, root references, nested immutable history,
+      // and audit records together. Only the authenticated Admin endpoint may
+      // author or change this transaction receipt.
+      match /contactMergeOperations/{operationId} {
+        allow read: if isOwner(userId);
+        allow create, update, delete: if false;
+      }
+
+      match /contacts/{contactId} {
+        allow read: if isOwner(userId);
+        allow create:
+          if canWritePrivateData(userId)
+             && isValidBrowserContactCreate(userId);
+        allow update:
+          if canWritePrivateData(userId)
+             && isValidBrowserContactUpdate(userId);
+        allow delete: if false;
+
+        match /facts/{factId} {
+          allow read: if isOwner(userId);
+          allow create: if canWritePrivateData(userId)
+                        && isValidTemporalFactCreate(
+                          userId,
+                          contactId,
+                          factId
+                        )
+                        && contactAcceptsLinkedWrites(userId, contactId);
+          allow update: if canWritePrivateData(userId)
+                        && isValidTemporalFactUpdate()
+                        && contactAcceptsLinkedWrites(userId, contactId);
+          allow delete: if false;
+        }
+
+        match /jobHistory/{entryId} {
+          allow read: if isOwner(userId);
+          allow create: if canWritePrivateData(userId)
+                        && isValidJobHistoryCreate(userId)
+                        && contactAcceptsLinkedWrites(userId, contactId);
+          allow update: if canWritePrivateData(userId)
+                        && isValidJobHistoryUpdate()
+                        && contactAcceptsLinkedWrites(userId, contactId);
+          allow delete: if false;
+        }
+      }
+
+      match /notes/{noteId} {
+        allow read: if isOwner(userId);
+        allow create:
+          if canWritePrivateData(userId)
+             && isValidBrowserNoteCreate(userId, noteId)
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             );
+        allow update:
+          if canWritePrivateData(userId)
+             && contactAcceptsLinkedWrites(
+               userId,
+               resource.data.contactId
+             )
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             )
+             && (
+               isValidSensitiveNoteMigration(userId, noteId)
+               || isValidVoiceEnrichmentUpdate(userId, noteId)
+             );
+        allow delete:
+          if canWritePrivateData(userId)
+             && resource.data.noteSchemaVersion == 2
+             && resource.data.userId == userId
+             && resource.data.recordType == 'ai-tag'
+             && resource.data.source == 'ai-tag-extraction'
+             && resource.data.privacySourceType == 'user-input'
+             && resource.data.sourceId == noteId
+             && resource.data.factIds is list
+             && resource.data.factIds.size() == 0
+             && contactAcceptsLinkedWrites(
+               userId,
+               resource.data.contactId
+             );
+      }
+
+      match /outreaches/{outreachId} {
+        allow read: if isOwner(userId);
+        allow create:
+          if canWritePrivateData(userId)
+             && isValidOutreachDocument(
+               userId,
+               request.resource.data
+             )
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             )
+             && browserOutreachProofCreateAllowed(request.resource.data)
+             && browserMergeMetadataCreateAllowed(
+               request.resource.data
+             );
+        allow update:
+          if canWritePrivateData(userId)
+             && isValidOutreachDocument(
+               userId,
+               request.resource.data
+             )
+             && contactAcceptsLinkedWrites(
+               userId,
+               resource.data.contactId
+             )
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             )
+             && request.resource.data.userId == resource.data.userId
+             && request.resource.data.contactId == resource.data.contactId
+             && browserOutreachProofUpdateAllowed()
+             && browserMergeMetadataUpdateAllowed('outreaches');
+        allow delete: if false;
+      }
+
+      match /commitments/{commitmentId} {
+        allow read: if isOwner(userId);
+        allow create:
+          if canWritePrivateData(userId)
+             && isValidCommitmentDocument(request.resource.data)
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             )
+             && browserMergeMetadataCreateAllowed(request.resource.data);
+        allow update:
+          if canWritePrivateData(userId)
+             && isValidCommitmentDocument(request.resource.data)
+             && contactAcceptsLinkedWrites(
+               userId,
+               resource.data.contactId
+             )
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             )
+             && request.resource.data.contactId == resource.data.contactId
+             && request.resource.data.createdAt == resource.data.createdAt
+             && browserMergeMetadataUpdateAllowed('commitments');
+        allow delete: if false;
+      }
+
+      match /templates/{templateId} {
+        allow read: if isOwner(userId);
+        allow create:
+          if canWritePrivateData(userId)
+             && isValidTemplateDocument(userId, request.resource.data)
+             && request.resource.data.createdAt == request.time
+             && request.resource.data.updatedAt == request.time;
+        allow update:
+          if canWritePrivateData(userId)
+             && isValidTemplateDocument(userId, request.resource.data)
+             && request.resource.data.userId == resource.data.userId
+             && request.resource.data.createdAt == resource.data.createdAt
+             && request.resource.data.updatedAt == request.time;
+        allow delete: if false;
+      }
+
+      match /integrations/{provider} {
+        allow read: if isOwner(userId);
+        // Live connection state, provider cursors, and verification status
+        // are written only by the Admin integration service. The browser can
+        // exercise the intentionally synthetic preview state.
+        allow create, update:
+          if canWritePrivateData(userId)
+             && isValidMockIntegration(provider, request.resource.data)
+             && request.resource.data.updatedAt == request.time
+             && (
+               !exists(
+                 /databases/$(database)/documents/users/$(userId)/integrations/$(provider)
+               )
+               || resource.data.mode == 'mock'
+             );
+        allow delete: if false;
+      }
+
+      match /threads/{threadId} {
+        allow read: if isOwner(userId);
+        // Provider-verified live threads and their poll cursor are server
+        // receipts. Only deterministic preview threads are browser mutable.
+        allow create:
+          if canWritePrivateData(userId)
+             && isValidMockThread(
+               userId,
+               threadId,
+               request.resource.data
+             )
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             )
+             && browserMergeMetadataCreateAllowed(request.resource.data);
+        allow update:
+          if canWritePrivateData(userId)
+             && resource.data.mode == 'mock'
+             && isValidMockThread(
+               userId,
+               threadId,
+               request.resource.data
+             )
+             && request.resource.data.contactId == resource.data.contactId
+             && request.resource.data.threadId == resource.data.threadId
+             && request.resource.data.createdAt == resource.data.createdAt
+             && contactAcceptsLinkedWrites(
+               userId,
+               resource.data.contactId
+             )
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             )
+             && browserMergeMetadataUpdateAllowed('threads');
+        allow delete: if false;
+      }
+
+      match /settings/{settingId} {
+        allow read: if isOwner(userId);
+        allow create, update:
+          if settingId == 'privacy'
+             && canWritePrivateData(userId)
+             && isValidPrivacyPolicy(request.resource.data)
+             && request.resource.data.updatedAt == request.time;
+        allow delete: if false;
+      }
+
+      match /contactBulkOperations/{operationId} {
+        allow read: if isOwner(userId);
+        allow create:
+          if canWritePrivateData(userId)
+             && isValidBulkOperationCreate(userId);
+        allow update:
+          if canWritePrivateData(userId)
+             && isValidBulkOperationUpdate(userId);
+        allow delete: if false;
+      }
+
+      // Event mode is stored on the exact user root. No current product flow
+      // writes a second, mutable event-session document.
+      match /eventSessions/{eventSessionId} {
+        allow read: if isOwner(userId);
+        allow create, update, delete: if false;
+      }
+
+      match /voiceEnrichmentJobs/{noteId} {
+        allow read: if isOwner(userId);
+        allow create:
+          if canWritePrivateData(userId)
+             && isValidVoiceEnrichmentJob(
+               noteId,
+               request.resource.data
+             )
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             )
+             && exists(
+               /databases/$(database)/documents/users/$(userId)/notes/$(noteId)
+             )
+             && get(
+               /databases/$(database)/documents/users/$(userId)/notes/$(noteId)
+             ).data.contactId == request.resource.data.contactId
+             && browserMergeMetadataCreateAllowed(request.resource.data);
+        allow update:
+          if canWritePrivateData(userId)
+             && isValidVoiceEnrichmentJob(
+               noteId,
+               request.resource.data
+             )
+             && request.resource.data.noteId == resource.data.noteId
+             && request.resource.data.contactId == resource.data.contactId
+             && request.resource.data.contactName
+                == resource.data.contactName
+             && contactAcceptsLinkedWrites(
+               userId,
+               resource.data.contactId
+             )
+             && contactAcceptsLinkedWrites(
+               userId,
+               request.resource.data.contactId
+             )
+             && browserMergeMetadataUpdateAllowed(
+               'voiceEnrichmentJobs'
+             );
+        allow delete: if false;
+      }
+
+      match /connections/{connectionId} {
+        allow read: if isOwner(userId);
+        allow create:
+          if canWritePrivateData(userId)
+             && isValidConnectionDocument(
+               userId,
+               connectionId,
+               request.resource.data
+             )
+             && request.resource.data.createdAt == request.time
+             && request.resource.data.updatedAt == request.time
+             && connectionAcceptsLinkedWrites(
+               userId,
+               'connections',
+               request.resource.data
+             );
+        allow update:
+          if canWritePrivateData(userId)
+             && isValidConnectionDocument(
+               userId,
+               connectionId,
+               request.resource.data
+             )
+             && request.resource.data.userId == resource.data.userId
+             && request.resource.data.sourceId == resource.data.sourceId
+             && request.resource.data.targetId == resource.data.targetId
+             && request.resource.data.createdAt == resource.data.createdAt
+             && request.resource.data.updatedAt == request.time
+             && connectionAcceptsLinkedWrites(
+               userId,
+               'connections',
+               resource.data
+             )
+             && connectionAcceptsLinkedWrites(
+               userId,
+               'connections',
+               request.resource.data
+             );
+        allow delete: if false;
       }
     }
 
-    // ── OAuth refresh tokens: server-only, no exceptions ─────────────────
-    //
-    // Written and read exclusively by Cloud Functions via the Admin SDK,
-    // which bypasses these rules. Denying every client operation outright is
-    // belt-and-braces — an unmatched path is already denied by default — but
-    // it states the invariant where someone editing this file will see it.
-    //
-    // A refresh token is a standing key to a mailbox that outlives the user's
-    // password change. `users/{uid}/integrations/{provider}` is the
-    // client-readable half and holds status metadata only; nothing here is
-    // ever returned to a browser.
+    // OAuth refresh tokens are server-only. Cloud Functions use the Admin SDK
+    // and bypass these client rules. Nothing in this collection is returned
+    // to a browser, including to the token owner.
     match /oauthTokens/{userId} {
+      allow read, write: if false;
+
+      match /{credentialDocument=**} {
+        allow read, write: if false;
+      }
+    }
+
+    // OAuth state is an opaque, short-lived, single-use server record. The
+    // browser receives only the random state value; it cannot read, mint, or
+    // consume the Firestore binding that contains UID, provider, and PKCE.
+    match /_oauthStates/{stateId} {
       allow read, write: if false;
     }
 
-    // ── NFC card: the one deliberately public surface ────────────────────
-    //
-    // A card page has to be readable by a stranger who just tapped a chip,
-    // with no login. `cards/{cardId}` is therefore a denormalised, opt-in
-    // snapshot containing only what the owner chose to put on their card —
-    // never a window onto users/{uid}, which stays owner-only above.
-    //
-    // Card ids are 10 chars of a 31-symbol alphabet (~2^49), so the
-    // collection is not meaningfully enumerable by guessing.
-    match /cards/{cardId} {
-      allow read: if true;
-      allow create: if request.auth != null
-                    && request.auth.uid == request.resource.data.ownerUid;
-      allow update: if request.auth != null
-                    && request.auth.uid == resource.data.ownerUid
-                    && request.resource.data.ownerUid == resource.data.ownerUid;
-      allow delete: if request.auth != null
-                    && request.auth.uid == resource.data.ownerUid;
+    // Opaque account-deletion receipts are Admin-only. They intentionally
+    // contain no user identifier or CRM content and expire operationally.
+    match /_accountDeletionReceipts/{receiptId} {
+      allow read, write: if false;
+    }
 
-      // Reverse capture. An unauthenticated viewer may drop one record here
-      // when they save the contact — create-only, shape-checked, length-
-      // capped. They cannot read the subcollection, so a stranger can leave
-      // a card but can never enumerate who else has.
+    // Durable session-revocation and deletion locks are server-owned. Client
+    // rules read them to authorize requests, but no browser may create,
+    // reactivate, weaken, or remove its own lock.
+    match /_accountSecurity/{userId} {
+      allow read, write: if false;
+    }
+
+    // The one deliberately public surface. A published card is an opt-in,
+    // denormalised snapshot containing only the fields validated above. A
+    // retired card remains readable by its owner for editing, but not by a
+    // stranger who retained the old link.
+    match /cards/{cardId} {
+      allow get: if resource.data.published == true
+                 || isPublicCardOwner();
+      allow list: if false;
+
+      allow create: if request.auth != null
+                    && request.auth.uid == request.resource.data.ownerUid
+                    && hasActiveAccount(
+                      request.resource.data.ownerUid
+                    )
+                    && hasVerifiedEmail()
+                    && isValidPublicCard(cardId);
+
+      allow update: if isPublicCardOwner()
+                    && hasVerifiedEmail()
+                    && request.resource.data.ownerUid == resource.data.ownerUid
+                    && request.resource.data.cardId == resource.data.cardId
+                    && isValidPublicCard(cardId);
+
+      allow delete: if isPublicCardOwner();
+
+      // Reverse capture. Public writes go through /api/cards/capture, where
+      // App Check, per-visitor/per-card throttling, a honeypot, deduplication,
+      // and the card's current publication status are enforced. The Admin SDK
+      // bypasses these rules; browsers cannot bypass that server boundary.
       match /captures/{captureId} {
-        function validCapture() {
-          return request.resource.data.keys().hasOnly([
-                   'visitorName', 'visitorEmail', 'visitorCompany',
-                   'note', 'capturedAt', 'processed'
-                 ])
-                 && request.resource.data.visitorName is string
-                 && request.resource.data.visitorName.size() > 0
-                 && request.resource.data.visitorName.size() <= 120
-                 && (request.resource.data.visitorEmail == null
-                     || (request.resource.data.visitorEmail is string
-                         && request.resource.data.visitorEmail.size() <= 200))
-                 && (request.resource.data.visitorCompany == null
-                     || (request.resource.data.visitorCompany is string
-                         && request.resource.data.visitorCompany.size() <= 200))
-                 && (request.resource.data.note == null
-                     || (request.resource.data.note is string
-                         && request.resource.data.note.size() <= 500))
-                 && request.resource.data.processed == false;
+        function parentCard() {
+          return get(
+            /databases/$(database)/documents/cards/$(cardId)
+          );
         }
 
-        allow create: if validCapture();
-        allow read, delete: if request.auth != null
-                            && request.auth.uid ==
-                               get(/databases/$(database)/documents/cards/$(cardId)).data.ownerUid;
+        function isCaptureOwner() {
+          return request.auth != null
+                 && request.auth.uid == parentCard().data.ownerUid
+                 && hasActiveAccount(
+                   parentCard().data.ownerUid
+                 );
+        }
+
+        allow create: if false;
+        allow read, delete: if isCaptureOwner();
         allow update: if false;
       }
     }

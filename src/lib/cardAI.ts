@@ -1,13 +1,14 @@
-import { generateJSON } from './ai';
 import type { CardConfig } from './card';
+import {
+  generateGroundedJSON,
+  groundingDisplay,
+  type GroundedSource,
+  type GroundingDisplay,
+} from './grounding';
 
 /**
  * AI-drafted card copy from what Cirqle already knows about the owner.
- *
- * This is the default suggested route for a reason: the manual customiser is
- * a blank canvas, and a blank canvas is where card setup goes to die. Starting
- * from a draft the owner edits is far less friction than starting from an
- * empty intro field.
+ * Every output carries the profile source IDs it actually cited.
  */
 
 export interface CardDraft {
@@ -16,13 +17,12 @@ export interface CardDraft {
   layout: 'compact' | 'expanded';
 }
 
-/**
- * Deterministic fallback used when the AI gateway is absent or fails.
- *
- * Worth stating plainly: this is not a silent substitution. The caller shows
- * the error state with a retry, and this is offered as an explicit "compose
- * without AI" choice. The user always knows which one they got.
- */
+export interface GeneratedCardDraft {
+  draft: CardDraft;
+  grounding: GroundingDisplay;
+}
+
+/** Deterministic fallback offered explicitly when generation is unavailable. */
 export function composeFallbackIntro(profile: {
   name?: string | null;
   role?: string | null;
@@ -34,17 +34,67 @@ export function composeFallbackIntro(profile: {
   const bio = (profile.bio || '').trim();
 
   if (bio) {
-    // First sentence or two of the bio, trimmed to card length.
     const sentences = bio.split(/(?<=[.!?])\s+/).filter(Boolean);
     const take = sentences.slice(0, 2).join(' ');
     if (take.length <= 220) return take;
-    return take.slice(0, 217).trimEnd() + '…';
+    return `${take.slice(0, 217).trimEnd()}…`;
   }
 
   if (role && company) return `${role} at ${company}. Always up for a conversation about the work.`;
   if (role) return `${role}. Always up for a conversation about the work.`;
   if (company) return `At ${company}. Always up for a conversation about the work.`;
   return 'Good to meet you — here are my details.';
+}
+
+export function cardDraftSources(profile: {
+  name?: string | null;
+  role?: string | null;
+  company?: string | null;
+  bio?: string | null;
+  resumeText?: string | null;
+  targetIndustries?: string[] | null;
+}): GroundedSource[] {
+  const candidates: GroundedSource[] = [
+    {
+      id: 'profile-name',
+      kind: 'profile',
+      label: 'Profile name',
+      text: profile.name || '',
+    },
+    {
+      id: 'profile-role',
+      kind: 'profile',
+      label: 'Profile role',
+      text: profile.role || '',
+    },
+    {
+      id: 'profile-company',
+      kind: 'profile',
+      label: 'Profile company',
+      text: profile.company || '',
+    },
+    {
+      id: 'profile-bio',
+      kind: 'profile',
+      label: 'Profile bio and goals',
+      text: profile.bio || '',
+    },
+    {
+      id: 'profile-resume',
+      kind: 'profile',
+      label: 'Resume excerpt',
+      text: (profile.resumeText || '').slice(0, 3_000),
+    },
+    {
+      id: 'profile-target-industries',
+      kind: 'profile',
+      label: 'Target industries',
+      text: Array.isArray(profile.targetIndustries)
+        ? profile.targetIndustries.join(', ')
+        : '',
+    },
+  ];
+  return candidates.filter((source) => source.text.trim());
 }
 
 export async function generateCardDraft(profile: {
@@ -54,37 +104,52 @@ export async function generateCardDraft(profile: {
   bio?: string | null;
   resumeText?: string | null;
   targetIndustries?: string[] | null;
-}): Promise<CardDraft> {
-  const prompt = `You are writing the intro line for someone's digital business card — the page that opens when a stranger taps their NFC card, usually seconds after shaking hands.
+  signal?: AbortSignal;
+}): Promise<GeneratedCardDraft> {
+  const sources = cardDraftSources(profile);
+  if (!sources.some((source) => source.id !== 'profile-name')) {
+    throw new Error('Add a role, company, bio, resume, or target industry before generating.');
+  }
 
-Their details:
-- Name: ${profile.name || '(unknown)'}
-- Role: ${profile.role || '(unknown)'}
-- Company: ${profile.company || '(unknown)'}
-- Bio / goals: ${profile.bio || '(none provided)'}
-- Resume excerpt: ${(profile.resumeText || '(none provided)').slice(0, 1500)}
-
-Write a single intro of 1-2 sentences, max 220 characters. Rules:
-- First person, plain and direct. No marketing voice, no "passionate about", no buzzwords.
-- Say what they actually do and what is worth talking to them about.
-- Do not repeat their name, role or company verbatim — those are already printed above the intro.
-- Dry and specific beats warm and generic.
-
-Also pick an accent from exactly this list, matching their field: oxblood, slate, moss, brass, clay, ink.
-And pick a layout: "compact" if their details are thin, "expanded" if there is enough substance to justify the space.
-
-Return JSON exactly: {"intro": "...", "accent": "...", "layout": "..."}`;
-
-  const raw = await generateJSON<{ intro?: string; accent?: string; layout?: string }>(prompt, {
-    tier: 'draft',
+  const grounded = await generateGroundedJSON<{
+    intro?: string;
+    accent?: string;
+    layout?: string;
+  }>({
+    task: 'Draft the intro line and visual defaults for a digital business card that opens immediately after someone meets the owner.',
+    resultSchema:
+      '{"intro": "1-2 first-person sentences, maximum 220 characters", "accent": "oxblood | slate | moss | brass | clay | ink", "layout": "compact | expanded"}',
+    sources,
+    rules: [
+      'Use first person, plain and direct language with no marketing voice, buzzwords, or "passionate about".',
+      'Say only what the owner actually does or explicitly wants to discuss.',
+      'Do not repeat the owner name, role, or company verbatim because those fields appear above the intro.',
+      'Never add credentials, clients, achievements, interests, availability, or current work that the profile does not state.',
+      'Choose compact when evidence is thin and expanded only when the saved profile has substantive detail.',
+    ],
+    options: {
+      tier: 'draft',
+      maxTokens: 450,
+      feature: 'digital-card-draft',
+      signal: profile.signal,
+    },
   });
 
   const allowedAccents = ['oxblood', 'slate', 'moss', 'brass', 'clay', 'ink'];
-  const accent = allowedAccents.includes(raw.accent || '') ? (raw.accent as string) : 'oxblood';
-  const layout = raw.layout === 'compact' ? 'compact' : 'expanded';
-  const intro = (raw.intro || '').trim() || composeFallbackIntro(profile);
+  const accent = allowedAccents.includes(grounded.result?.accent || '')
+    ? (grounded.result.accent as string)
+    : 'oxblood';
+  const layout = grounded.result?.layout === 'compact' ? 'compact' : 'expanded';
+  const intro = (grounded.result?.intro || '').trim();
+  if (!intro) throw new Error('The model did not produce a grounded intro.');
+  if (!grounded.usedSourceIds.some((id) => id !== 'profile-name')) {
+    throw new Error('The card draft did not cite substantive profile details.');
+  }
 
-  return { intro: intro.slice(0, 240), accent, layout };
+  return {
+    draft: { intro: intro.slice(0, 240), accent, layout },
+    grounding: groundingDisplay(grounded, sources),
+  };
 }
 
 /** Seeds a card config from the owner's profile, before any drafting. */

@@ -1,14 +1,17 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
 import { Copy, Check, Flame, Mail, Sunrise } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AILabel, AISurface } from '../ui/AISurface';
+import { AIProvenance } from '../ui/AIProvenance';
 import { PreviewBadge } from '../ui/PreviewBadge';
 import { LastSynced } from '../ui/LastSynced';
 import { HealthPill } from '../ui/HealthPill';
 import { useToast } from '../../contexts/ToastContext';
 import { buildDigest, draftRevivalNote, sendDigestEmail, type Digest, type DigestItem } from '../../lib/digest';
 import { emailMode } from '../../lib/integrations/config';
+import type { GroundingDisplay } from '../../lib/grounding';
+import { AICancelledError } from '../../lib/ai';
 
 /**
  * "Worth reviving this week."
@@ -116,27 +119,57 @@ function DigestRow({
 }) {
   const { toast } = useToast();
   const [draft, setDraft] = useState<string | null>(null);
+  const [grounding, setGrounding] = useState<GroundingDisplay | null>(null);
   const [draftState, setDraftState] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle');
+  const [draftError, setDraftError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const requestRef = useRef<AbortController | null>(null);
 
   const runDraft = async () => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     setDraftState('loading');
+    setDraftError(null);
+    setGrounding(null);
     try {
-      const text = await draftRevivalNote({
+      const generated = await draftRevivalNote({
+        contactId: item.contactId,
         contactName: item.name,
         company: item.company,
         role: item.role,
         reason: item.reason,
         lastTouchDays: item.health.lastTouchDays,
         neverContacted: item.health.neverContacted,
+        whyTheyMatter: item.whyTheyMatter,
         senderName,
+        signal: controller.signal,
       });
-      setDraft(text);
+      setDraft(generated.text);
+      setGrounding(generated.grounding);
       setDraftState('ready');
-    } catch {
+    } catch (error) {
+      if (requestRef.current !== controller) return;
+      setDraftError(
+        error instanceof AICancelledError
+          ? 'Drafting canceled. Your contact record is unchanged.'
+          : error instanceof Error
+            ? error.message
+            : "Couldn't write that one.",
+      );
       setDraftState('error');
+    } finally {
+      if (requestRef.current === controller) requestRef.current = null;
     }
   };
+
+  useEffect(
+    () => () => {
+      requestRef.current?.abort();
+      requestRef.current = null;
+    },
+    [],
+  );
 
   const copy = async () => {
     if (!draft) return;
@@ -181,12 +214,32 @@ function DigestRow({
           <AILabel className="mb-2">Drafted opener</AILabel>
           <AISurface
             state={draftState === 'loading' ? 'loading' : draftState === 'error' ? 'error' : 'ready'}
-            error="Couldn't write that one."
+            error={draftError}
             onRetry={runDraft}
-            loadingLine="Finding a reason to reach out…"
+            onCancel={() => requestRef.current?.abort()}
+            loadingStages={[
+              'Reading the contact record…',
+              'Drafting a grounded reason to reach out…',
+              'Checking every factual claim…',
+            ]}
+            usageLabel="Reasoning AI"
             emptyLine="Nothing to draft from."
           >
             <p className="whitespace-pre-wrap font-mono text-xs leading-relaxed text-subtle">{draft}</p>
+            {grounding && (
+              <AIProvenance
+                className="mt-3"
+                sourceIds={grounding.usedSourceIds}
+                sourceLabels={grounding.sourceLabels}
+                unsupportedAssumptions={grounding.unsupportedAssumptions}
+                privacyExclusions={grounding.privacyExclusions}
+                generatedAt={grounding.generatedAt}
+                sourceObservedAt={grounding.sourceObservedAt}
+                consideredSourceCount={grounding.consideredSourceCount}
+                dataFreshThrough={grounding.dataFreshThrough}
+                generation={grounding.generation}
+              />
+            )}
             <div className="mt-3 flex gap-2">
               <Button variant="ghost" size="sm" onClick={copy}>
                 {copied ? <Check size={11} className="mr-1.5" /> : <Copy size={11} className="mr-1.5" />}

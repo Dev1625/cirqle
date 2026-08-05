@@ -1,20 +1,21 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Check,
   Copy,
   ExternalLink,
-  Link2,
+  Plus,
   Radio,
   Sparkles,
   SquarePen,
   Globe,
-  Users,
+  Trash2,
 } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { Input } from '../ui/Input';
 import { AILabel, AISurface } from '../ui/AISurface';
-import { EmptyState } from '../ui/EmptyState';
+import { AIProvenance } from '../ui/AIProvenance';
 import { QRCode } from './QRCode';
+import { EventModeRecap } from './EventModeRecap';
 import { useToast } from '../../contexts/ToastContext';
 import {
   CARD_ACCENTS,
@@ -24,6 +25,7 @@ import {
   generateCardId,
   publishCard,
   type CardConfig,
+  type CardCaptureChannel,
   type CardLayout,
   type CardMode,
 } from '../../lib/card';
@@ -38,9 +40,18 @@ import {
   type EventRecap,
 } from '../../lib/eventMode';
 import type { CalendarEvent } from '../../lib/integrations/calendar';
+import type { GroundingDisplay } from '../../lib/grounding';
+import { AICancelledError } from '../../lib/ai';
+import {
+  hasCardValidationErrors,
+  validateCardConfig,
+  type CardField,
+  type CardValidationErrors,
+} from '../../lib/cardValidation';
 
 /**
- * Owner-side setup for the NFC card, lives in Settings → Connections.
+ * Owner-side setup for the public card and its NFC, QR, and shared-link
+ * distribution paths. Lives in Settings → Connections.
  *
  * Three routes to a published card, in the order they reduce friction:
  * AI draft (default), manual customiser, or port an existing page. The AI
@@ -70,24 +81,51 @@ export function CardSetup({
     cardFromProfile(profile, existingConfig || DEFAULT_CARD)
   );
   const [publishing, setPublishing] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<CardCaptureChannel | null>(null);
 
   const [aiState, setAiState] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle');
   const [aiError, setAiError] = useState<string | null>(null);
+  const [aiGrounding, setAiGrounding] = useState<GroundingDisplay | null>(
+    profile?.cardAIGrounding || null,
+  );
+  const [draftMode, setDraftMode] = useState<'model' | 'local' | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<CardValidationErrors>({});
+  const aiRequestRef = useRef<AbortController | null>(null);
 
   const cardId = useMemo(() => existingCardId || generateCardId(), [existingCardId]);
   const url = cardUrl(cardId);
+  const qrUrl = cardUrl(cardId, 'qr');
+  const nfcUrl = cardUrl(cardId, 'nfc');
+  const sharedLinkUrl = cardUrl(cardId, 'link');
 
   useEffect(() => {
     setConfig((current) => cardFromProfile(profile, existingConfig || current));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.name, profile?.role, profile?.company, profile?.cardId]);
 
+  useEffect(
+    () => () => {
+      aiRequestRef.current?.abort();
+      aiRequestRef.current = null;
+    },
+    [],
+  );
+
   const runAIDraft = async () => {
+    aiRequestRef.current?.abort();
+    const controller = new AbortController();
+    aiRequestRef.current = controller;
     setAiState('loading');
     setAiError(null);
+    setAiGrounding(null);
+    setDraftMode(null);
     try {
-      const draft = await generateCardDraft(profile || {});
+      const generated = await generateCardDraft({
+        ...(profile || {}),
+        signal: controller.signal,
+      });
+      const draft = generated.draft;
       setConfig((current) => ({
         ...current,
         mode: 'ai' as CardMode,
@@ -95,51 +133,99 @@ export function CardSetup({
         accent: draft.accent,
         layout: draft.layout,
       }));
+      setAiGrounding(generated.grounding);
+      setDraftMode('model');
       setAiState('ready');
     } catch (error: any) {
-      setAiError(error?.message || 'The model did not come back.');
+      if (aiRequestRef.current !== controller) return;
+      setAiError(
+        error instanceof AICancelledError
+          ? 'Card drafting canceled. Your current card fields are unchanged.'
+          : error?.message || 'The model did not come back.',
+      );
       setAiState('error');
+    } finally {
+      if (aiRequestRef.current === controller) aiRequestRef.current = null;
     }
   };
 
   const useFallbackDraft = () => {
+    aiRequestRef.current?.abort();
+    aiRequestRef.current = null;
     setConfig((current) => ({
       ...current,
       mode: 'ai' as CardMode,
       intro: composeFallbackIntro(profile || {}),
     }));
+    setAiGrounding(null);
+    setDraftMode('local');
     setAiState('ready');
   };
 
   const handlePublish = async () => {
-    if (!config.name.trim()) {
-      toast('Your card needs a name on it.', 'error');
+    setPublishError(null);
+    const errors = validateCardConfig(config);
+    setFieldErrors(errors);
+    if (hasCardValidationErrors(errors)) {
+      toast(Object.values(errors)[0] || 'Check the highlighted card fields.', 'error');
       return;
     }
     setPublishing(true);
     const isFirstPublish = !existingConfig;
     try {
-      await publishCard(uid, cardId, { ...config, published: true });
+      await publishCard(
+        uid,
+        cardId,
+        { ...config, published: true },
+        config.mode === 'ai' ? aiGrounding : null,
+      );
+      if (config.mode !== 'ai') setAiGrounding(null);
       onPublished(cardId, { ...config, published: true });
       // Return to the published view. Staying in the editor left the user
       // with no confirmation the card was live and no sight of its URL or
       // QR — the two things they came here for.
       setRoute('choose');
       toast(isFirstPublish ? 'Card published. Tap-ready.' : 'Card updated.', 'success');
-    } catch {
-      toast('Could not publish the card. Try again.', 'error');
+    } catch (error: any) {
+      const code = String(error?.code || '').replace(/^firestore\//, '');
+      const message =
+        code === 'permission-denied'
+          ? 'Your draft is preserved. Card publishing was rejected by the current Firestore policy; verify the deployed card rules, then retry here.'
+          : !navigator.onLine
+            ? 'Your draft is preserved. Reconnect to the internet, then retry publishing here.'
+            : 'Your draft is preserved. The card service did not accept this publish; wait a moment and retry here.';
+      setPublishError(message);
+      toast(message, 'error');
     } finally {
       setPublishing(false);
     }
   };
 
-  const copyLink = async () => {
+  const clearFieldError = (field: CardField) => {
+    setFieldErrors((current) => {
+      if (!current[field]) return current;
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  };
+
+  const copyLink = async (
+    value: string,
+    channel: CardCaptureChannel,
+  ) => {
     try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      await navigator.clipboard.writeText(value);
+      setCopied(channel);
+      window.setTimeout(
+        () =>
+          setCopied((current) =>
+            current === channel ? null : current,
+          ),
+        2000,
+      );
     } catch {
-      toast('Clipboard blocked — the link is shown above.', 'error');
+      toast('Clipboard blocked — copy the visible card URL instead.', 'error');
     }
   };
 
@@ -149,7 +235,10 @@ export function CardSetup({
       <div className="space-y-6">
         <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
           <div className="shrink-0">
-            <QRCode value={url} size={140} />
+            <QRCode value={qrUrl} size={140} />
+            <p className="mt-2 text-center font-mono text-[9px] font-bold uppercase tracking-widest text-muted">
+              QR-marked URL
+            </p>
           </div>
 
           <div className="min-w-0 flex-1 space-y-4">
@@ -161,9 +250,28 @@ export function CardSetup({
             </div>
 
             <p className="font-mono text-xs leading-relaxed text-subtle">
-              No physical card yet? Open this link and you'll see exactly what someone sees the moment
-              they tap.
+              Each distribution path gets its own URL marker, so the private
+              recap can distinguish a QR scan, NFC tap, shared link, or direct
+              preview. It records the issued URL, not verified hardware.
             </p>
+
+            {config.mode === 'ai' && aiGrounding && (
+              <AIProvenance
+                sourceIds={aiGrounding.usedSourceIds || []}
+                sourceLabels={aiGrounding.sourceLabels || {}}
+                unsupportedAssumptions={
+                  aiGrounding.unsupportedAssumptions || []
+                }
+                privacyExclusions={
+                  aiGrounding.privacyExclusions || []
+                }
+                generatedAt={aiGrounding.generatedAt}
+                sourceObservedAt={aiGrounding.sourceObservedAt}
+                consideredSourceCount={aiGrounding.consideredSourceCount}
+                dataFreshThrough={aiGrounding.dataFreshThrough}
+                generation={aiGrounding.generation}
+              />
+            )}
 
             <div className="flex flex-wrap gap-2">
               <a href={url} target="_blank" rel="noopener noreferrer">
@@ -172,9 +280,32 @@ export function CardSetup({
                   Preview my card
                 </Button>
               </a>
-              <Button variant="outline" size="sm" onClick={copyLink}>
-                {copied ? <Check size={12} className="mr-1.5" /> : <Copy size={12} className="mr-1.5" />}
-                {copied ? 'Copied' : 'Copy link'}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => copyLink(sharedLinkUrl, 'link')}
+                title={sharedLinkUrl}
+              >
+                {copied === 'link' ? <Check size={12} className="mr-1.5" /> : <Copy size={12} className="mr-1.5" />}
+                {copied === 'link' ? 'Copied' : 'Copy share link'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => copyLink(nfcUrl, 'nfc')}
+                title={nfcUrl}
+              >
+                {copied === 'nfc' ? <Check size={12} className="mr-1.5" /> : <Copy size={12} className="mr-1.5" />}
+                {copied === 'nfc' ? 'Copied' : 'Copy NFC URL'}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => copyLink(qrUrl, 'qr')}
+                title={qrUrl}
+              >
+                {copied === 'qr' ? <Check size={12} className="mr-1.5" /> : <Copy size={12} className="mr-1.5" />}
+                {copied === 'qr' ? 'Copied' : 'Copy QR URL'}
               </Button>
               <Button variant="ghost" size="sm" onClick={() => setRoute(config.mode === 'ported' ? 'ported' : 'custom')}>
                 <SquarePen size={12} className="mr-1.5" />
@@ -237,17 +368,41 @@ export function CardSetup({
     <div className="space-y-6">
       {route === 'ai' && (
         <div className="space-y-3">
-          <AILabel>Drafted from your profile</AILabel>
+          <AILabel>
+            {draftMode === 'local' ? 'Composed locally from your profile' : 'Drafted from your profile'}
+          </AILabel>
           <AISurface
             state={aiState === 'idle' ? 'loading' : aiState === 'ready' ? 'ready' : aiState}
             error={aiError}
             onRetry={runAIDraft}
-            loadingLine="Reading your bio and resume…"
+            onCancel={() => aiRequestRef.current?.abort()}
+            loadingStages={[
+              'Reading eligible profile sources…',
+              'Drafting the card introduction…',
+              'Checking every claim against your profile…',
+            ]}
+            usageLabel="Premium drafting AI"
             emptyLine="Nothing to draft from yet — add a bio in Settings first."
           >
             <p className="font-mono text-xs leading-relaxed text-muted">
-              Draft ready below. Change anything you like before publishing.
+              {draftMode === 'local'
+                ? 'Local fallback ready below; no model was used.'
+                : 'Draft ready below. Change anything you like before publishing.'}
             </p>
+            {aiGrounding && (
+              <AIProvenance
+                className="mt-3"
+                sourceIds={aiGrounding.usedSourceIds}
+                sourceLabels={aiGrounding.sourceLabels}
+                unsupportedAssumptions={aiGrounding.unsupportedAssumptions}
+                privacyExclusions={aiGrounding.privacyExclusions}
+                generatedAt={aiGrounding.generatedAt}
+                sourceObservedAt={aiGrounding.sourceObservedAt}
+                consideredSourceCount={aiGrounding.consideredSourceCount}
+                dataFreshThrough={aiGrounding.dataFreshThrough}
+                generation={aiGrounding.generation}
+              />
+            )}
           </AISurface>
           {aiState === 'error' && (
             <Button variant="ghost" size="sm" onClick={useFallbackDraft}>
@@ -259,14 +414,22 @@ export function CardSetup({
 
       {route === 'ported' && (
         <div>
-          <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
+          <label htmlFor="card-ported-url" className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
             Your existing page
           </label>
           <Input
+            id="card-ported-url"
             value={config.portedUrl || ''}
-            onChange={(e) => setConfig({ ...config, portedUrl: e.target.value })}
+            maxLength={2048}
+            aria-invalid={Boolean(fieldErrors.portedUrl)}
+            aria-describedby={fieldErrors.portedUrl ? 'card-ported-url-error' : undefined}
+            onChange={(e) => {
+              clearFieldError('portedUrl');
+              setConfig({ ...config, portedUrl: e.target.value });
+            }}
             placeholder="https://your-portfolio.com"
           />
+          <FieldError id="card-ported-url-error" message={fieldErrors.portedUrl} />
           <p className="mt-2 font-mono text-[11px] leading-relaxed text-muted">
             Visitors still get the name prompt and the save-contact action — your page sits behind it.
           </p>
@@ -275,49 +438,182 @@ export function CardSetup({
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
-          <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
+          <label htmlFor="card-name" className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
             Name on the card
           </label>
-          <Input value={config.name} onChange={(e) => setConfig({ ...config, name: e.target.value })} />
+          <Input
+            id="card-name"
+            value={config.name}
+            maxLength={120}
+            aria-invalid={Boolean(fieldErrors.name)}
+            aria-describedby={fieldErrors.name ? 'card-name-error' : undefined}
+            onChange={(e) => {
+              clearFieldError('name');
+              setConfig({ ...config, name: e.target.value });
+            }}
+          />
+          <FieldError id="card-name-error" message={fieldErrors.name} />
         </div>
         <div>
-          <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
+          <label htmlFor="card-role" className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
             Role
           </label>
-          <Input value={config.role} onChange={(e) => setConfig({ ...config, role: e.target.value })} />
+          <Input
+            id="card-role"
+            value={config.role}
+            maxLength={160}
+            aria-invalid={Boolean(fieldErrors.role)}
+            aria-describedby={fieldErrors.role ? 'card-role-error' : undefined}
+            onChange={(e) => {
+              clearFieldError('role');
+              setConfig({ ...config, role: e.target.value });
+            }}
+          />
+          <FieldError id="card-role-error" message={fieldErrors.role} />
         </div>
         <div>
-          <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
+          <label htmlFor="card-company" className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
             Company
           </label>
-          <Input value={config.company} onChange={(e) => setConfig({ ...config, company: e.target.value })} />
+          <Input
+            id="card-company"
+            value={config.company}
+            maxLength={160}
+            aria-invalid={Boolean(fieldErrors.company)}
+            aria-describedby={fieldErrors.company ? 'card-company-error' : undefined}
+            onChange={(e) => {
+              clearFieldError('company');
+              setConfig({ ...config, company: e.target.value });
+            }}
+          />
+          <FieldError id="card-company-error" message={fieldErrors.company} />
         </div>
         <div>
-          <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
+          <label htmlFor="card-email" className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
             Contact email
           </label>
           <Input
+            id="card-email"
             value={config.email || ''}
-            onChange={(e) => setConfig({ ...config, email: e.target.value })}
+            maxLength={320}
+            type="email"
+            aria-invalid={Boolean(fieldErrors.email)}
+            aria-describedby={fieldErrors.email ? 'card-email-error' : undefined}
+            onChange={(e) => {
+              clearFieldError('email');
+              setConfig({ ...config, email: e.target.value });
+            }}
             placeholder="you@company.com"
           />
+          <FieldError id="card-email-error" message={fieldErrors.email} />
         </div>
       </div>
 
       <div>
-        <label className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
+        <label htmlFor="card-intro" className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
           Intro
         </label>
         <textarea
+          id="card-intro"
           className="h-24 w-full rounded-card border border-ink/15 bg-paper/50 p-3 font-mono text-sm transition-colors focus-visible:border-brand/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
           value={config.intro}
           maxLength={240}
-          onChange={(e) => setConfig({ ...config, intro: e.target.value })}
+          aria-invalid={Boolean(fieldErrors.intro)}
+          aria-describedby={fieldErrors.intro ? 'card-intro-error' : undefined}
+          onChange={(e) => {
+            clearFieldError('intro');
+            setConfig({ ...config, intro: e.target.value });
+          }}
           placeholder="One or two lines. What's worth talking to you about?"
         />
         <p className="mt-1 text-right font-mono text-[10px] uppercase tracking-widest text-muted">
           {config.intro.length}/240
         </p>
+        <FieldError id="card-intro-error" message={fieldErrors.intro} />
+      </div>
+
+      <div>
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div>
+            <span className="block font-mono text-[10px] uppercase tracking-widest text-muted">
+              Links
+            </span>
+            <span className="font-mono text-[10px] text-muted">
+              Up to six full HTTPS links
+            </span>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={(config.links || []).length >= 6}
+            onClick={() => {
+              clearFieldError('links');
+              setConfig({
+                ...config,
+                links: [...(config.links || []), { label: '', url: '' }],
+              });
+            }}
+          >
+            <Plus size={11} className="mr-1.5" />
+            Add link
+          </Button>
+        </div>
+        {(config.links || []).length > 0 && (
+          <div className="space-y-2">
+            {(config.links || []).map((link, index) => (
+              <div
+                key={index}
+                className="grid gap-2 rounded-card border border-ink/15 bg-paper/40 p-3 sm:grid-cols-[0.8fr_1.4fr_auto]"
+              >
+                <Input
+                  value={link.label}
+                  maxLength={80}
+                  aria-label={`Link ${index + 1} label`}
+                  aria-invalid={Boolean(fieldErrors.links)}
+                  aria-describedby={fieldErrors.links ? 'card-links-error' : undefined}
+                  placeholder="Portfolio"
+                  onChange={(event) => {
+                    clearFieldError('links');
+                    const links = [...(config.links || [])];
+                    links[index] = { ...links[index], label: event.target.value };
+                    setConfig({ ...config, links });
+                  }}
+                />
+                <Input
+                  value={link.url}
+                  maxLength={2048}
+                  inputMode="url"
+                  aria-label={`Link ${index + 1} HTTPS URL`}
+                  aria-invalid={Boolean(fieldErrors.links)}
+                  aria-describedby={fieldErrors.links ? 'card-links-error' : undefined}
+                  placeholder="https://example.com"
+                  onChange={(event) => {
+                    clearFieldError('links');
+                    const links = [...(config.links || [])];
+                    links[index] = { ...links[index], url: event.target.value };
+                    setConfig({ ...config, links });
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label={`Remove link ${index + 1}`}
+                  onClick={() => {
+                    clearFieldError('links');
+                    setConfig({
+                      ...config,
+                      links: (config.links || []).filter((_, itemIndex) => itemIndex !== index),
+                    });
+                  }}
+                  className="flex h-9 w-9 items-center justify-center rounded-card border border-ink/15 text-muted transition-colors hover:border-red-300 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <FieldError id="card-links-error" message={fieldErrors.links} />
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">
@@ -387,7 +683,22 @@ export function CardSetup({
       </div>
 
       <div className="flex justify-end gap-2 border-t border-ink/15 pt-5">
-        <Button variant="ghost" onClick={() => setRoute('choose')}>
+        {publishError && (
+          <p
+            className="mr-auto max-w-md border border-amber-300 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950"
+            role="alert"
+          >
+            {publishError}
+          </p>
+        )}
+        <Button
+          variant="ghost"
+          onClick={() => {
+            aiRequestRef.current?.abort();
+            aiRequestRef.current = null;
+            setRoute('choose');
+          }}
+        >
           Back
         </Button>
         <Button variant="brand" onClick={handlePublish} disabled={publishing}>
@@ -395,6 +706,15 @@ export function CardSetup({
         </Button>
       </div>
     </div>
+  );
+}
+
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} role="alert" className="mt-1.5 font-mono text-[11px] leading-relaxed text-red-700">
+      {message}
+    </p>
   );
 }
 
@@ -449,8 +769,32 @@ function EventModePanel({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setState(readEventMode(profile));
-  }, [profile?.eventMode]);
+    let cancelled = false;
+    const nextState = readEventMode(profile);
+    setState(nextState);
+    if (
+      !nextState.active &&
+      nextState.sessionId &&
+      nextState.eventName
+    ) {
+      buildEventRecap(
+        uid,
+        nextState.eventName,
+        nextState.sessionId,
+        nextState,
+      )
+        .then((result) => {
+          if (!cancelled) setRecap(result);
+        })
+        .catch(() => {
+          // The recap is derived from saved contacts. A temporary read
+          // failure must not make the card or Event Mode unavailable.
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.eventMode, uid]);
 
   const suggestion = useMemo(() => suggestedEvent(events), [events]);
 
@@ -458,9 +802,17 @@ function EventModePanel({
     if (!name.trim()) return;
     setBusy(true);
     try {
-      await startEventMode(uid, name.trim(), source);
-      setState({ active: true, eventName: name.trim(), startedAt: new Date(), endedAt: null, source });
+      const sessionId = await startEventMode(uid, name.trim(), source);
+      setState({
+        active: true,
+        sessionId,
+        eventName: name.trim(),
+        startedAt: new Date(),
+        endedAt: null,
+        source,
+      });
       setRecap(null);
+      setManualName('');
       toast(`Event Mode on — captures tag as "${name.trim()}".`, 'success');
     } catch {
       toast('Could not start Event Mode.', 'error');
@@ -471,11 +823,26 @@ function EventModePanel({
 
   const end = async () => {
     const name = state.eventName;
+    const sessionId = state.sessionId;
     setBusy(true);
     try {
       await stopEventMode(uid);
-      setState({ ...state, active: false, endedAt: new Date() });
-      if (name) setRecap(await buildEventRecap(uid, name));
+      const completedState = {
+        ...state,
+        active: false,
+        endedAt: new Date(),
+      };
+      setState(completedState);
+      if (name) {
+        setRecap(
+          await buildEventRecap(
+            uid,
+            name,
+            sessionId,
+            completedState,
+          ),
+        );
+      }
     } catch {
       toast('Could not end Event Mode.', 'error');
     } finally {
@@ -493,9 +860,15 @@ function EventModePanel({
           </span>
           <p className="mt-1.5 font-mono text-xs leading-relaxed text-subtle">
             {state.active
-              ? `On. Every capture is filed under "${state.eventName}".`
+              ? `On. Every capture is filed under "${state.eventName}" in session ${state.sessionId?.slice(0, 8)}.`
               : 'Batch-tag everyone who taps your card during a conference.'}
           </p>
+          {state.active && (
+            <p className="mt-1 font-mono text-[10px] leading-relaxed text-muted">
+              Captures keep their consent state, timestamp, and recorded
+              QR/NFC/public-card provenance.
+            </p>
+          )}
         </div>
         {state.active && (
           <Button variant="outline" size="sm" onClick={end} disabled={busy}>
@@ -538,29 +911,10 @@ function EventModePanel({
       )}
 
       {recap && (
-        <div className="animate-fade-slide-up mt-4 rounded-card border border-ink/15 bg-white p-4">
-          <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted">Recap</span>
-          <p className="mt-1.5 font-serif text-lg font-bold italic">{recap.headline}</p>
-          {recap.contacts.length > 0 ? (
-            <ul className="mt-3 space-y-1.5 border-t border-ink/15 pt-3">
-              {recap.contacts.slice(0, 6).map((contact) => (
-                <li key={contact.id} className="flex items-center gap-2 font-mono text-xs text-subtle">
-                  <Users size={11} className="shrink-0 text-muted" />
-                  <span className="truncate">
-                    {contact.name}
-                    {contact.company ? ` — ${contact.company}` : ''}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <EmptyState
-              className="mt-3"
-              icon={Link2}
-              line="Nobody tapped during that window. The card link still works if you'd rather send it."
-            />
-          )}
-        </div>
+        <EventModeRecap
+          recap={recap}
+          organizerLabel={profile?.name || null}
+        />
       )}
     </div>
   );

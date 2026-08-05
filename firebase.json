@@ -1,6 +1,11 @@
 {
   "firestore": {
-    "rules": "firestore.rules"
+    "database": "(default)",
+    "rules": "firestore.rules",
+    "predeploy": [
+      "npm run test:rules",
+      "node tests/security-config.test.mjs"
+    ]
   },
   "functions": [
     {

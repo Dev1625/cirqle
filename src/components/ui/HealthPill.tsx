@@ -71,6 +71,7 @@ export function HealthPanel({
             <Icon
               size={16}
               className={health.trend === 'falling' || health.trend === 'pinned' ? 'text-brand' : 'text-muted'}
+              aria-hidden="true"
             />
           </p>
           {/* detail, not summary — the score is already set in 3xl serif
@@ -80,20 +81,27 @@ export function HealthPanel({
 
         {onTogglePin && (
           <button
+            type="button"
             onClick={onTogglePin}
             disabled={busy}
+            aria-pressed={health.pinned}
+            aria-label={
+              health.pinned
+                ? 'Unpin relationship health'
+                : 'Pin relationship health so time alone does not lower it'
+            }
             title={
               health.pinned
                 ? 'Unpin — the score will decay again'
                 : 'Pin — stop this relationship decaying. For the ones that are quarterly by design.'
             }
-            className={`flex shrink-0 items-center gap-1.5 rounded-card border px-2.5 py-1.5 font-mono text-[10px] font-bold uppercase tracking-widest transition-colors duration-150 disabled:opacity-50 ${
+            className={`flex min-h-11 min-w-11 shrink-0 items-center gap-1.5 rounded-card border px-2.5 py-2 font-mono text-[10px] font-bold uppercase tracking-widest transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand disabled:opacity-50 ${
               health.pinned
                 ? 'border-brand/40 bg-brand text-brand-on'
                 : 'border-ink/15 text-muted hover:border-ink/25 hover:text-ink'
             }`}
           >
-            <Pin size={11} />
+            <Pin size={11} aria-hidden="true" />
             {health.pinned ? 'Pinned' : 'Pin'}
           </button>
         )}

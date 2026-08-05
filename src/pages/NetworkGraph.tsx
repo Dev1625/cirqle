@@ -9,22 +9,35 @@ import {
 } from 'firebase/firestore';
 import {
   AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
   Flame,
   Link2,
   Network,
   Pin,
   Radar,
   Search,
-  Users
+  ShieldAlert,
+  Users,
+  Waypoints
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { db } from '../config/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '../components/ui/Button';
 import { Input } from '../components/ui/Input';
 import { TierBadge } from '../components/ui/TierBadge';
 import { AccentRule } from '../components/ui/AccentRule';
+import { IntroductionEdgeEditor } from '../components/contact/IntroductionEdgeEditor';
 import { computeHealth } from '../lib/health';
+import {
+  rankWarmIntroductionPaths,
+  type IntroductionConflict,
+  type IntroductionEdgeProvenance,
+  type IntroductionRelationshipEdge,
+  type IntroductionWillingness,
+  type RankedIntroductionPath
+} from '../lib/moat/introductionPaths';
 
 type Tier = 'Strong' | 'Warm' | 'Cold' | 'Dormant';
 
@@ -44,6 +57,17 @@ type ContactRecord = {
   lastContactedAt?: any;
   createdAt?: any;
   updatedAt?: any;
+  introductionWillingness?: string | null;
+  activeIntroductionRequests?: number | null;
+  introductionCapacity?: number | null;
+  introductionRequestsLast90Days?: number | null;
+  lastIntroductionRequestAt?: any;
+  introductionConflicts?: IntroductionConflict[] | null;
+  introductionStaleAfterDays?: number | null;
+  introductionMutualContext?: string | null;
+  introductionSignalsUpdatedAt?: any;
+  lifecycleStatus?: string | null;
+  mergedIntoContactId?: string | null;
 };
 
 type OutreachRecord = {
@@ -73,6 +97,58 @@ type ConnectionRecord = {
   type?: string | null;
   inferred?: boolean | null;
   weight?: number | null;
+  strength?: number | null;
+  direction?: 'directed' | 'mutual' | null;
+  willingness?: string | null;
+  lastInteractionAt?: any;
+  activeIntroductionRequests?: number | null;
+  introductionCapacity?: number | null;
+  introductionRequestsLast90Days?: number | null;
+  lastIntroductionRequestAt?: any;
+  staleAfterDays?: number | null;
+  conflicts?: IntroductionConflict[] | null;
+  mutualContext?: {
+    text?: string | null;
+    sourceType?: IntroductionEdgeProvenance['sourceType'] | null;
+    sourceId?: string | null;
+  } | null;
+  provenance?: {
+    sourceType?: IntroductionEdgeProvenance['sourceType'] | null;
+    sourceId?: string | null;
+    observedAt?: any;
+  } | null;
+  createdAt?: any;
+  updatedAt?: any;
+  mergeHistorical?: boolean | null;
+  mergeSuppressed?: boolean | null;
+};
+
+type IntroductionEvidenceGap = {
+  id: string;
+  label: string;
+  detail: string;
+  targetId?: string;
+};
+
+type IntroductionEdgeEvidence = {
+  edgeId: string;
+  fromId: string;
+  toId: string;
+  relation: string;
+  strengthLabel: string;
+  lastInteractionAt: Date;
+  strengthKnown: boolean;
+  freshnessKnown: boolean;
+  willingnessKnown: boolean;
+  loadKnown: boolean;
+  fatigueKnown: boolean;
+  directionKnown: boolean;
+};
+
+type IntroductionEvidenceModel = {
+  edges: IntroductionRelationshipEdge[];
+  evidenceByEdgeId: Record<string, IntroductionEdgeEvidence>;
+  gaps: IntroductionEvidenceGap[];
 };
 
 type ContactInsight = {
@@ -337,6 +413,448 @@ function formatDays(days: number) {
   if (days === 0) return 'Touched today';
   if (days === 1) return '1 day ago';
   return `${days} days ago`;
+}
+
+const INTRODUCTION_WILLINGNESS = new Set<IntroductionWillingness>([
+  'yes',
+  'likely',
+  'unknown',
+  'reluctant',
+  'no'
+]);
+
+function normalizeIntroductionWillingness(value: unknown): {
+  value: IntroductionWillingness;
+  recorded: boolean;
+} {
+  const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (INTRODUCTION_WILLINGNESS.has(normalized as IntroductionWillingness)) {
+    return {
+      value: normalized as IntroductionWillingness,
+      recorded: true
+    };
+  }
+  return { value: 'unknown', recorded: false };
+}
+
+function finiteNumber(value: unknown): number | null {
+  if (
+    value === null ||
+    value === undefined ||
+    (typeof value === 'string' && !value.trim())
+  ) {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeIntroductionConflicts(value: unknown): IntroductionConflict[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item, index) => {
+    if (!item || typeof item !== 'object') return [];
+    const candidate = item as Partial<IntroductionConflict>;
+    const label = typeof candidate.label === 'string' ? candidate.label.trim() : '';
+    const severity = candidate.severity === 'block' || candidate.severity === 'warning'
+      ? candidate.severity
+      : null;
+    if (!label || !severity) return [];
+    return [{
+      id: typeof candidate.id === 'string' && candidate.id.trim()
+        ? candidate.id.trim()
+        : `conflict-${index}`,
+      label,
+      severity
+    }];
+  });
+}
+
+function isIntroductionProvenanceSourceType(
+  value: unknown
+): value is IntroductionEdgeProvenance['sourceType'] {
+  return (
+    value === 'profile' ||
+    value === 'note' ||
+    value === 'meeting' ||
+    value === 'outreach' ||
+    value === 'user-correction' ||
+    value === 'system'
+  );
+}
+
+function normalizeProvenanceSourceType(
+  value: unknown
+): IntroductionEdgeProvenance['sourceType'] {
+  return isIntroductionProvenanceSourceType(value) ? value : 'system';
+}
+
+function newestUserRelationshipEvidence(params: {
+  contact: ContactRecord;
+  notes: NoteRecord[];
+  outreaches: OutreachRecord[];
+}): IntroductionEdgeProvenance | null {
+  const candidates: IntroductionEdgeProvenance[] = [];
+  const lastContactedAt = toDate(params.contact.lastContactedAt);
+  if (lastContactedAt) {
+    candidates.push({
+      sourceType: 'profile',
+      sourceId: `${params.contact.id}:lastContactedAt`,
+      observedAt: lastContactedAt
+    });
+  }
+
+  params.notes.forEach((note) => {
+    if (note.contactId !== params.contact.id) return;
+    const observedAt = toDate(note.createdAt);
+    if (!observedAt) return;
+    candidates.push({
+      sourceType: 'note',
+      sourceId: note.id,
+      observedAt
+    });
+  });
+
+  params.outreaches.forEach((outreach) => {
+    if (outreach.contactId !== params.contact.id) return;
+    const observedAt = toDate(outreach.sentAt);
+    if (!observedAt) return;
+    candidates.push({
+      sourceType: 'outreach',
+      sourceId: outreach.id,
+      observedAt
+    });
+  });
+
+  return candidates.sort((left, right) => {
+    const leftAt = toDate(left.observedAt)?.getTime() || 0;
+    const rightAt = toDate(right.observedAt)?.getTime() || 0;
+    return rightAt - leftAt;
+  })[0] || null;
+}
+
+function buildIntroductionEvidenceModel(params: {
+  contacts: ContactRecord[];
+  notes: NoteRecord[];
+  outreaches: OutreachRecord[];
+  connections: ConnectionRecord[];
+  insights: Record<string, ContactInsight>;
+}): IntroductionEvidenceModel {
+  const contactById = new Map(params.contacts.map((contact) => [contact.id, contact]));
+  const edges: IntroductionRelationshipEdge[] = [];
+  const evidenceByEdgeId: Record<string, IntroductionEdgeEvidence> = {};
+  const gaps: IntroductionEvidenceGap[] = [];
+
+  const addEdge = (
+    edge: IntroductionRelationshipEdge,
+    evidence: Omit<IntroductionEdgeEvidence, 'edgeId' | 'fromId' | 'toId'>
+  ) => {
+    edges.push(edge);
+    evidenceByEdgeId[edge.id] = {
+      edgeId: edge.id,
+      fromId: edge.fromId,
+      toId: edge.toId,
+      ...evidence
+    };
+  };
+
+  params.contacts.forEach((contact) => {
+    const relationshipEvidence = newestUserRelationshipEvidence({
+      contact,
+      notes: params.notes,
+      outreaches: params.outreaches
+    });
+    if (!relationshipEvidence) {
+      gaps.push({
+        id: `relationship-date:${contact.id}`,
+        label: `You → ${contact.name}`,
+        detail: 'No dated note, sent outreach, or last-contacted field is available, so this relationship cannot anchor a warm path.',
+        targetId: contact.id
+      });
+      return;
+    }
+
+    const insight = params.insights[contact.id];
+    if (!insight) return;
+    const willingness = normalizeIntroductionWillingness(contact.introductionWillingness);
+    const activeRequests = finiteNumber(contact.activeIntroductionRequests);
+    const capacity = finiteNumber(contact.introductionCapacity);
+    const loadKnown = activeRequests !== null && capacity !== null && capacity > 0;
+    const recentRequests = finiteNumber(contact.introductionRequestsLast90Days);
+    const fatigueKnown = recentRequests !== null;
+    const lastIntroductionRequestAt = toDate(contact.lastIntroductionRequestAt);
+    const lastInteractionAt = toDate(relationshipEvidence.observedAt) as Date;
+    const edgeId = `relationship:me:${contact.id}`;
+    const directContext =
+      typeof contact.introductionMutualContext === 'string'
+        ? contact.introductionMutualContext.trim().slice(0, 500)
+        : '';
+
+    addEdge(
+      {
+        id: edgeId,
+        fromId: 'me',
+        toId: contact.id,
+        direction: 'directed',
+        strength: clamp(insight.score / 100, 0, 1),
+        willingness: willingness.value,
+        lastInteractionAt,
+        // Unknown operational dimensions are scored conservatively. The UI
+        // labels them unknown and never displays these sentinels as facts.
+        activeIntroductionRequests: loadKnown ? Math.max(0, activeRequests) : 1,
+        introductionCapacity: loadKnown ? Math.max(1, capacity) : 1,
+        introductionRequestsLast90Days: fatigueKnown
+          ? Math.max(0, recentRequests)
+          : 5,
+        lastIntroductionRequestAt,
+        conflicts: normalizeIntroductionConflicts(contact.introductionConflicts),
+        mutualContext: directContext
+          ? {
+              text: directContext,
+              sourceType: 'user-correction',
+              sourceId: `contact:${contact.id}:introduction-context`,
+            }
+          : null,
+        staleAfterDays: finiteNumber(contact.introductionStaleAfterDays) || undefined,
+        provenance: relationshipEvidence
+      },
+      {
+        relation: 'Your recorded relationship',
+        strengthLabel: `CRM relationship signal ${Math.round(insight.score)}/100`,
+        lastInteractionAt,
+        strengthKnown: true,
+        freshnessKnown: true,
+        willingnessKnown: willingness.recorded,
+        loadKnown,
+        fatigueKnown,
+        directionKnown: true
+      }
+    );
+  });
+
+  params.connections.forEach((connection) => {
+    const source = contactById.get(connection.sourceId);
+    const target = contactById.get(connection.targetId);
+    const gapTargetId = target?.id || connection.targetId;
+    const label = `${source?.name || connection.sourceId} → ${target?.name || connection.targetId}`;
+
+    if (connection.inferred === true) {
+      gaps.push({
+        id: `inferred:${connection.id}`,
+        label,
+        detail: 'This edge is marked inferred, so it remains visible as graph context but is never used for an introduction path.',
+        targetId: gapTargetId
+      });
+      return;
+    }
+    if (!source || !target || source.id === target.id) {
+      gaps.push({
+        id: `endpoint:${connection.id}`,
+        label,
+        detail: 'The recorded connection does not resolve to two current contact records.',
+        targetId: gapTargetId
+      });
+      return;
+    }
+
+    const rawStrength = finiteNumber(connection.strength);
+    const graphWeight = finiteNumber(connection.weight);
+    let strength: number | null = null;
+    let strengthLabel = '';
+    if (rawStrength !== null) {
+      strength = clamp(rawStrength, 0, 1);
+      strengthLabel = `Recorded relationship strength ${Math.round(strength * 100)}%`;
+    } else if (graphWeight !== null && graphWeight > 0) {
+      strength = graphWeight <= 1
+        ? clamp(graphWeight, 0, 1)
+        : clamp(graphWeight / 3.4, 0, 1);
+      strengthLabel = `Recorded graph weight ${graphWeight.toFixed(1)} (normalized for ranking)`;
+    }
+
+    const strengthKnown = strength !== null;
+    const recordedLastInteractionAt = toDate(connection.lastInteractionAt);
+    const freshnessKnown = Boolean(recordedLastInteractionAt);
+    const observedAt =
+      toDate(connection.provenance?.observedAt) ||
+      toDate(connection.updatedAt) ||
+      toDate(connection.createdAt) ||
+      recordedLastInteractionAt;
+    if (!observedAt) {
+      gaps.push({
+        id: `provenance-date:${connection.id}`,
+        label,
+        detail: 'The connection has no dated provenance, so it cannot enter an evidence-backed path.',
+        targetId: target.id
+      });
+      return;
+    }
+    const lastInteractionAt = recordedLastInteractionAt || new Date(0);
+    const rankedStrength = strength ?? 0;
+    if (!strengthKnown) strengthLabel = 'Unknown — not recorded';
+
+    const willingness = normalizeIntroductionWillingness(connection.willingness);
+    const activeRequests = finiteNumber(connection.activeIntroductionRequests);
+    const capacity = finiteNumber(connection.introductionCapacity);
+    const loadKnown = activeRequests !== null && capacity !== null && capacity > 0;
+    const recentRequests = finiteNumber(connection.introductionRequestsLast90Days);
+    const fatigueKnown = recentRequests !== null;
+    const sourceId =
+      typeof connection.provenance?.sourceId === 'string' &&
+      connection.provenance.sourceId.trim()
+        ? connection.provenance.sourceId.trim()
+        : connection.id;
+    const contextText =
+      typeof connection.mutualContext?.text === 'string'
+        ? connection.mutualContext.text.trim()
+        : '';
+    const contextSourceId =
+      typeof connection.mutualContext?.sourceId === 'string'
+        ? connection.mutualContext.sourceId.trim()
+        : '';
+    const contextSourceType = connection.mutualContext?.sourceType;
+    const mutualContext =
+      contextText &&
+      contextSourceId &&
+      isIntroductionProvenanceSourceType(contextSourceType)
+        ? {
+            text: contextText,
+            sourceType: contextSourceType,
+            sourceId: contextSourceId
+          }
+        : null;
+    if (contextText && !mutualContext) {
+      gaps.push({
+        id: `context-provenance:${connection.id}`,
+        label,
+        detail: 'Mutual context exists but has no complete source type and source ID, so it is omitted from the narrative.',
+        targetId: target.id
+      });
+    }
+
+    const directionKnown =
+      connection.direction === 'directed' || connection.direction === 'mutual';
+    addEdge(
+      {
+        id: `connection:${connection.id}`,
+        fromId: source.id,
+        toId: target.id,
+        direction: directionKnown ? connection.direction as 'directed' | 'mutual' : 'mutual',
+        strength: rankedStrength,
+        willingness: willingness.value,
+        lastInteractionAt,
+        activeIntroductionRequests: loadKnown ? Math.max(0, activeRequests) : 1,
+        introductionCapacity: loadKnown ? Math.max(1, capacity) : 1,
+        introductionRequestsLast90Days: fatigueKnown
+          ? Math.max(0, recentRequests)
+          : 5,
+        lastIntroductionRequestAt: toDate(connection.lastIntroductionRequestAt),
+        conflicts: normalizeIntroductionConflicts(connection.conflicts),
+        mutualContext,
+        staleAfterDays: finiteNumber(connection.staleAfterDays) || undefined,
+        provenance: {
+          sourceType: normalizeProvenanceSourceType(connection.provenance?.sourceType),
+          sourceId,
+          observedAt
+        }
+      },
+      {
+        relation: connection.type?.trim() || 'Recorded connection',
+        strengthLabel,
+        lastInteractionAt,
+        strengthKnown,
+        freshnessKnown,
+        willingnessKnown: willingness.recorded,
+        loadKnown,
+        fatigueKnown,
+        directionKnown
+      }
+    );
+  });
+
+  params.contacts.forEach((contact) => {
+    const sourceName = contact.connectionSource?.trim();
+    if (!sourceName) return;
+    const matchingSources = params.contacts.filter(
+      (candidate) => lower(candidate.name) === lower(sourceName)
+    );
+    if (matchingSources.length > 1) {
+      gaps.push({
+        id: `ambiguous-source:${contact.id}`,
+        label: `${sourceName} → ${contact.name}`,
+        detail: 'More than one contact has this introducer name, so Cirqle will not guess which record forms the edge.',
+        targetId: contact.id
+      });
+      return;
+    }
+    const source = matchingSources[0];
+    if (!source || source.id === contact.id) return;
+    const coveredByConnection = params.connections.some((connection) => {
+      const endpoints = new Set([connection.sourceId, connection.targetId]);
+      return endpoints.has(source.id) && endpoints.has(contact.id);
+    });
+    if (coveredByConnection) return;
+    const observedAt =
+      toDate(contact.createdAt) ||
+      toDate(contact.updatedAt) ||
+      toDate(
+        newestUserRelationshipEvidence({
+          contact,
+          notes: params.notes,
+          outreaches: params.outreaches
+        })?.observedAt
+      );
+    if (!observedAt) {
+      gaps.push({
+        id: `manual-source:${source.id}:${contact.id}`,
+        label: `${source.name} → ${contact.name}`,
+        detail: 'The introducer name is recorded, but its profile evidence has no date, so the edge is not ranked.',
+        targetId: contact.id
+      });
+      return;
+    }
+    const edgeId = `manual-source:${source.id}:${contact.id}`;
+    addEdge(
+      {
+        id: edgeId,
+        fromId: source.id,
+        toId: contact.id,
+        direction: 'directed',
+        // The edge itself is explicit. Missing scoring dimensions use
+        // conservative sentinels internally and remain labelled unknown.
+        strength: 0,
+        willingness: 'unknown',
+        lastInteractionAt: new Date(0),
+        activeIntroductionRequests: 1,
+        introductionCapacity: 1,
+        introductionRequestsLast90Days: 5,
+        provenance: {
+          sourceType: 'profile',
+          sourceId: `${contact.id}:connectionSource`,
+          observedAt
+        }
+      },
+      {
+        relation: 'Recorded introducer link',
+        strengthLabel: 'Unknown — not recorded',
+        lastInteractionAt: new Date(0),
+        strengthKnown: false,
+        freshnessKnown: false,
+        willingnessKnown: false,
+        loadKnown: false,
+        fatigueKnown: false,
+        directionKnown: true
+      }
+    );
+  });
+
+  return { edges, evidenceByEdgeId, gaps };
+}
+
+function formatIntroductionDate(value: Date) {
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  }).format(value);
 }
 
 function createRadialAnchorForce(strength = 0.055) {
@@ -814,11 +1332,234 @@ function MetricCard({
   );
 }
 
+function IntroductionPathCard({
+  path,
+  evidenceByEdgeId,
+  selected,
+  onSelect
+}: {
+  path: RankedIntroductionPath;
+  evidenceByEdgeId: Record<string, IntroductionEdgeEvidence>;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const limitingIndex = path.edges.findIndex(
+    (edge) => edge.id === path.limitingEdgeId
+  );
+  const limitingLabel = limitingIndex >= 0
+    ? `${path.labels[limitingIndex]} → ${path.labels[limitingIndex + 1]}`
+    : 'the lowest-scoring recorded edge';
+  const unknownCount = path.edges.reduce((count, edge) => {
+    const evidence = evidenceByEdgeId[edge.id];
+    if (!evidence) return count;
+    return count
+      + (evidence.strengthKnown ? 0 : 1)
+      + (evidence.freshnessKnown ? 0 : 1)
+      + (evidence.willingnessKnown ? 0 : 1)
+      + (evidence.loadKnown ? 0 : 1)
+      + (evidence.fatigueKnown ? 0 : 1)
+      + (evidence.directionKnown ? 0 : 1);
+  }, 0);
+
+  return (
+    <article
+      className={`border p-4 transition-colors motion-reduce:transition-none ${
+        selected
+          ? 'border-[#8C7A65] bg-[#F7F0E5]'
+          : 'border-ink/15 bg-white'
+      }`}
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-subtle">
+              {path.nodeIds.length - 1} hop{path.nodeIds.length === 2 ? '' : 's'}
+            </span>
+            <span className="border border-ink/15 bg-white px-2 py-1 font-mono text-[9px] uppercase tracking-widest text-subtle">
+              {unknownCount > 0
+                ? `${unknownCount} unknown signal${unknownCount === 1 ? '' : 's'}`
+                : 'Complete operating signals'}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5" aria-label={`Path: ${path.labels.join(' to ')}`}>
+            {path.labels.map((label, index) => (
+              <React.Fragment key={`${path.id}:${path.nodeIds[index]}`}>
+                {index > 0 && <ArrowRight size={13} className="text-[#8C7A65]" aria-hidden="true" />}
+                <span className="font-serif text-lg font-bold">{label}</span>
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+        <div className="shrink-0 text-left sm:text-right">
+          <div className="font-serif text-3xl font-black">{path.score.toFixed(1)}</div>
+          <div className="font-mono text-[9px] uppercase tracking-widest text-subtle">
+            Conservative signal / 100
+          </div>
+        </div>
+      </div>
+
+      <p className="mt-3 text-sm leading-relaxed text-subtle">
+        This route uses {path.edges.length} recorded relationship edge{path.edges.length === 1 ? '' : 's'}.
+        {' '}Its limiting connection is {limitingLabel}. Unknown introduction-specific signals are penalized
+        conservatively and are never treated as zero activity.
+      </p>
+
+      <div className="mt-4 space-y-3">
+        {path.edges.map((edge, index) => {
+          const evidence = evidenceByEdgeId[edge.id];
+          const edgeScore = path.edgeScores[index];
+          if (!evidence || !edgeScore) return null;
+          const activeRequests = Number(edge.activeIntroductionRequests);
+          const capacity = Number(edge.introductionCapacity);
+          const recentRequests = Number(edge.introductionRequestsLast90Days);
+          const lastIntroductionRequestAt = toDate(edge.lastIntroductionRequestAt);
+          const lastAskDays = lastIntroductionRequestAt
+            ? daysSince(lastIntroductionRequestAt)
+            : null;
+          const loadWarning =
+            evidence.loadKnown && capacity > 0 && activeRequests >= capacity;
+          const fatigueWarning =
+            evidence.fatigueKnown &&
+            (recentRequests >= 3 || (lastAskDays !== null && lastAskDays < 15));
+          const conflicts = edge.conflicts || [];
+          const warningConflicts = conflicts.filter((conflict) => conflict.severity === 'warning');
+
+          return (
+            <div key={edge.id} className="border-l-2 border-[#8C7A65]/50 pl-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="font-semibold">
+                  {path.labels[index]} → {path.labels[index + 1]}
+                </div>
+                <span className="font-mono text-[9px] uppercase tracking-widest text-subtle">
+                  Edge {edgeScore.score.toFixed(1)}/100
+                </span>
+              </div>
+              <div className="mt-2 grid gap-2 text-xs text-subtle sm:grid-cols-2">
+                <div>
+                  <span className="font-semibold text-ink">Strength:</span> {evidence.strengthLabel}
+                </div>
+                <div>
+                  <span className="font-semibold text-ink">Freshness:</span>{' '}
+                  {evidence.freshnessKnown
+                    ? `${formatIntroductionDate(evidence.lastInteractionAt)} (${formatDays(Math.floor(edgeScore.ageDays))})`
+                    : 'Unknown — no last-interaction date'}
+                </div>
+                <div>
+                  <span className="font-semibold text-ink">Willingness:</span>{' '}
+                  {evidence.willingnessKnown
+                    ? edge.willingness === 'unknown'
+                      ? 'Unknown (recorded)'
+                      : edge.willingness
+                    : 'Unknown — not recorded'}
+                </div>
+                <div>
+                  <span className="font-semibold text-ink">Introduction load:</span>{' '}
+                  {evidence.loadKnown ? `${activeRequests}/${capacity} active` : 'Unknown — not recorded'}
+                </div>
+                <div>
+                  <span className="font-semibold text-ink">Ask fatigue:</span>{' '}
+                  {evidence.fatigueKnown
+                    ? `${recentRequests} ask${recentRequests === 1 ? '' : 's'} in 90 days${
+                        lastIntroductionRequestAt
+                          ? `; last asked ${formatIntroductionDate(lastIntroductionRequestAt)}`
+                          : '; last-ask date unknown'
+                      }`
+                    : 'Unknown — not recorded'}
+                </div>
+                <div>
+                  <span className="font-semibold text-ink">Direction:</span>{' '}
+                  {evidence.directionKnown
+                    ? edge.direction === 'mutual' ? 'Mutual' : 'Recorded direction'
+                    : 'Undirected in the current graph schema'}
+                </div>
+              </div>
+
+              {((edgeScore.stale && evidence.freshnessKnown) ||
+                !evidence.strengthKnown ||
+                !evidence.freshnessKnown ||
+                !evidence.willingnessKnown ||
+                !evidence.loadKnown ||
+                !evidence.fatigueKnown ||
+                !evidence.directionKnown ||
+                edge.willingness === 'reluctant' ||
+                loadWarning ||
+                fatigueWarning ||
+                warningConflicts.length > 0) && (
+                <ul className="mt-2 space-y-1 text-xs text-[#76562F]">
+                  {edgeScore.stale && evidence.freshnessKnown && (
+                    <li>Freshness warning: this relationship is beyond its recorded stale threshold.</li>
+                  )}
+                  {!evidence.strengthKnown && (
+                    <li>Relationship strength is unknown and was scored conservatively.</li>
+                  )}
+                  {!evidence.freshnessKnown && (
+                    <li>Relationship freshness is unknown and was scored conservatively.</li>
+                  )}
+                  {!evidence.willingnessKnown && (
+                    <li>Willingness is unknown; confirm before asking for an introduction.</li>
+                  )}
+                  {edge.willingness === 'reluctant' && (
+                    <li>Willingness is recorded as reluctant.</li>
+                  )}
+                  {!evidence.loadKnown && (
+                    <li>Current introduction load is unknown and was scored conservatively.</li>
+                  )}
+                  {loadWarning && (
+                    <li>Load warning: the recorded introduction capacity is currently full.</li>
+                  )}
+                  {!evidence.fatigueKnown && (
+                    <li>Recent ask fatigue is unknown and was scored conservatively.</li>
+                  )}
+                  {fatigueWarning && (
+                    <li>Fatigue warning: recent introduction asks suggest waiting or confirming capacity.</li>
+                  )}
+                  {!evidence.directionKnown && (
+                    <li>Connection direction is not stored; confirm this person can introduce in this direction.</li>
+                  )}
+                  {warningConflicts.map((conflict) => (
+                    <li key={conflict.id}>Conflict warning: {conflict.label}</li>
+                  ))}
+                </ul>
+              )}
+
+              {edge.mutualContext && (
+                <div className="mt-2 border border-[#617672]/25 bg-[#F0F3EC] p-2 text-xs leading-relaxed text-ink">
+                  <span className="font-semibold">Mutual context:</span> {edge.mutualContext.text}
+                  <span className="block font-mono text-[9px] uppercase tracking-widest text-subtle mt-1">
+                    Evidence {edge.mutualContext.sourceType} · {edge.mutualContext.sourceId}
+                  </span>
+                </div>
+              )}
+              <div className="mt-2 font-mono text-[9px] uppercase tracking-widest text-subtle">
+                {evidence.relation} · Evidence {edge.provenance.sourceType} · {edge.provenance.sourceId}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        onClick={onSelect}
+        aria-pressed={selected}
+        className={`mt-4 min-h-11 border px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors motion-reduce:transition-none ${
+          selected
+            ? 'border-ink bg-ink text-white'
+            : 'border-ink/20 bg-white hover:bg-paper'
+        }`}
+      >
+        {selected ? 'Focused on graph' : 'Focus this path'}
+      </button>
+    </article>
+  );
+}
+
 export default function NetworkGraph() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const introductionSearchRef = useRef<HTMLInputElement>(null);
 
   const [profile, setProfile] = useState<any>(null);
   const [contacts, setContacts] = useState<ContactRecord[]>([]);
@@ -828,6 +1569,10 @@ export default function NetworkGraph() {
   const [searchText, setSearchText] = useState('');
   const [focusIndustry, setFocusIndustry] = useState<string | null>(null);
   const [detailMode, setDetailMode] = useState(false);
+  const [introductionMode, setIntroductionMode] = useState(false);
+  const [introductionSearch, setIntroductionSearch] = useState('');
+  const [introductionTargetId, setIntroductionTargetId] = useState<string | null>(null);
+  const [selectedIntroductionPathId, setSelectedIntroductionPathId] = useState<string | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 960, height: 440 });
@@ -901,7 +1646,15 @@ export default function NetworkGraph() {
         query(collection(db, `users/${user.uid}/contacts`), where('userId', '==', user.uid)),
         (snapshot) => {
           setGraphError(null);
-          setContacts(snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as ContactRecord)));
+          setContacts(
+            snapshot.docs
+              .map((item) => ({ id: item.id, ...item.data() } as ContactRecord))
+              .filter(
+                (contact) =>
+                  contact.lifecycleStatus !== 'deleted' &&
+                  !contact.mergedIntoContactId,
+              ),
+          );
         },
         (error) => {
           if (error instanceof Error && error.message.includes('Missing or insufficient permissions')) {
@@ -924,7 +1677,16 @@ export default function NetworkGraph() {
         }
       ),
       onSnapshot(collection(db, `users/${user.uid}/connections`), (snapshot) => {
-        setConnections(snapshot.docs.map((item) => ({ id: item.id, ...item.data() } as ConnectionRecord)));
+        setConnections(
+          snapshot.docs
+            .map((item) => ({ id: item.id, ...item.data() } as ConnectionRecord))
+            .filter(
+              (connection) =>
+                connection.mergeHistorical !== true &&
+                connection.mergeSuppressed !== true &&
+                connection.sourceId !== connection.targetId,
+            ),
+        );
       })
     ];
 
@@ -947,6 +1709,146 @@ export default function NetworkGraph() {
       })
     );
   }, [profile, contacts, outreaches, notes, connections, deferredSearch, focusIndustry, detailMode]);
+
+  useEffect(() => {
+    if (!introductionMode) return;
+    const handle = window.setTimeout(() => introductionSearchRef.current?.focus(), 0);
+    return () => window.clearTimeout(handle);
+  }, [introductionMode]);
+
+  useEffect(() => {
+    if (
+      introductionTargetId &&
+      !contacts.some((contact) => contact.id === introductionTargetId)
+    ) {
+      setIntroductionTargetId(null);
+      setSelectedIntroductionPathId(null);
+    }
+  }, [contacts, introductionTargetId]);
+
+  const introductionEvidence = useMemo(
+    () => buildIntroductionEvidenceModel({
+      contacts,
+      notes,
+      outreaches,
+      connections,
+      insights: analysis.insights
+    }),
+    [contacts, notes, outreaches, connections, analysis.insights]
+  );
+  const introductionTarget = introductionTargetId
+    ? contacts.find((contact) => contact.id === introductionTargetId) || null
+    : null;
+  const introductionCandidates = useMemo(() => {
+    const queryText = lower(introductionSearch);
+    return contacts
+      .filter((contact) => {
+        if (!queryText) return true;
+        return [
+          contact.name,
+          contact.company,
+          contact.role,
+          contact.industry,
+          contact.location
+        ].some((value) => lower(value).includes(queryText));
+      })
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .slice(0, 8);
+  }, [contacts, introductionSearch]);
+  const introductionRanking = useMemo(() => {
+    if (!introductionTargetId) {
+      return { paths: [], excludedEdges: [] };
+    }
+    const ranked = rankWarmIntroductionPaths({
+      nodes: [
+        { id: 'me', label: profile?.name || 'You' },
+        ...contacts.map((contact) => ({ id: contact.id, label: contact.name }))
+      ],
+      edges: introductionEvidence.edges,
+      startId: 'me',
+      targetId: introductionTargetId,
+      maxDepth: 4,
+      maxPaths: 20
+    });
+    return {
+      ...ranked,
+      // A one-hop result is a direct relationship, not a warm introduction.
+      // It remains visible in the selected contact card, while this mode only
+      // describes routes through at least one recorded intermediary.
+      paths: ranked.paths
+        .filter((path) => path.nodeIds.length >= 3)
+        .slice(0, 3)
+    };
+  }, [
+    contacts,
+    introductionEvidence.edges,
+    introductionTargetId,
+    profile?.name
+  ]);
+  const activeIntroductionPath = introductionMode
+    ? introductionRanking.paths.find((path) => path.id === selectedIntroductionPathId) ||
+      introductionRanking.paths[0] ||
+      null
+    : null;
+  const activeIntroductionNodeIds = useMemo(
+    () => new Set(activeIntroductionPath?.nodeIds || []),
+    [activeIntroductionPath]
+  );
+  const activeIntroductionLinkPairs = useMemo(() => {
+    const pairs = new Set<string>();
+    const nodeIds = activeIntroductionPath?.nodeIds || [];
+    for (let index = 0; index < nodeIds.length - 1; index += 1) {
+      pairs.add([nodeIds[index], nodeIds[index + 1]].sort().join(':'));
+    }
+    return pairs;
+  }, [activeIntroductionPath]);
+  const introductionTargetGaps = useMemo(() => {
+    if (!introductionTargetId) return [];
+    return introductionEvidence.gaps
+      .filter((gap) => gap.targetId === introductionTargetId)
+      .slice(0, 4);
+  }, [introductionEvidence.gaps, introductionTargetId]);
+  const introductionDirectRelationship = introductionTargetId
+    ? introductionEvidence.edges.find(
+        (edge) => edge.fromId === 'me' && edge.toId === introductionTargetId
+      ) || null
+    : null;
+  const introductionExcludedDetails = useMemo(() => {
+    const contactNames = new Map(contacts.map((contact) => [contact.id, contact.name]));
+    if (!introductionTargetId) return [];
+    const targetNeighbors = new Set<string>();
+    introductionEvidence.edges.forEach((edge) => {
+      if (edge.fromId === introductionTargetId) targetNeighbors.add(edge.toId);
+      if (edge.toId === introductionTargetId) targetNeighbors.add(edge.fromId);
+    });
+    return introductionRanking.excludedEdges
+      .filter((excluded) => {
+        if (
+          excluded.fromId === introductionTargetId ||
+          excluded.toId === introductionTargetId
+        ) {
+          return true;
+        }
+        return (
+          (excluded.fromId === 'me' && targetNeighbors.has(excluded.toId)) ||
+          (excluded.toId === 'me' && targetNeighbors.has(excluded.fromId))
+        );
+      })
+      .slice(0, 4)
+      .map((excluded) => ({
+        id: `${excluded.edgeId}:${excluded.fromId}:${excluded.toId}`,
+        label: `${excluded.fromId === 'me' ? profile?.name || 'You' : contactNames.get(excluded.fromId) || excluded.fromId} → ${
+          excluded.toId === 'me' ? profile?.name || 'You' : contactNames.get(excluded.toId) || excluded.toId
+        }`,
+        reasons: excluded.reasons
+      }));
+  }, [
+    contacts,
+    introductionEvidence.edges,
+    introductionRanking.excludedEdges,
+    introductionTargetId,
+    profile?.name
+  ]);
 
   useEffect(() => {
     if (!graphRef.current) return;
@@ -978,8 +1880,39 @@ export default function NetworkGraph() {
     return () => window.clearTimeout(handle);
   }, [analysis.nodes.length, focusIndustry]);
 
+  useEffect(() => {
+    if (!graphRef.current) return;
+    if (!activeIntroductionPath) {
+      if (!introductionMode && introductionTargetId) {
+        const restoreHandle = window.setTimeout(
+          () => graphRef.current?.zoomToFit?.(0, 48),
+          80
+        );
+        return () => window.clearTimeout(restoreHandle);
+      }
+      return;
+    }
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    const handle = window.setTimeout(() => {
+      graphRef.current?.zoomToFit?.(
+        reduceMotion ? 0 : 450,
+        64,
+        (node: GraphNodeDatum) => activeIntroductionNodeIds.has(node.id)
+      );
+    }, 80);
+    return () => window.clearTimeout(handle);
+  }, [
+    activeIntroductionNodeIds,
+    activeIntroductionPath,
+    introductionMode,
+    introductionTargetId
+  ]);
+
   const isNodeFaded = (node: GraphNodeDatum) => {
     if (node.kind === 'contact' || node.kind === 'industry') {
+      if (node.kind === 'contact' && activeIntroductionPath) {
+        return !activeIntroductionNodeIds.has(node.id);
+      }
       const searchFaded = node.matchesSearch === false;
       const focusFaded = node.matchesFocus === false;
       return searchFaded || focusFaded;
@@ -1055,6 +1988,12 @@ export default function NetworkGraph() {
     const targetNode = analysis.nodeById[targetId];
     return (!!sourceNode && isNodeFaded(sourceNode)) || (!!targetNode && isNodeFaded(targetNode));
   };
+  const isActiveIntroductionLink = (link: GraphLinkDatum) => {
+    if (link.kind !== 'explicit' || activeIntroductionLinkPairs.size === 0) return false;
+    const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
+    const targetId = typeof link.target === 'string' ? link.target : link.target.id;
+    return activeIntroductionLinkPairs.has([sourceId, targetId].sort().join(':'));
+  };
 
   const selectedNode = selectedNodeId ? analysis.nodeById[selectedNodeId] : null;
   const selectedInsight = selectedNode?.contact ? analysis.insights[selectedNode.id] : null;
@@ -1069,6 +2008,18 @@ export default function NetworkGraph() {
     : selectedNode?.industryKey
       ? analysis.clusterStats.find((cluster) => cluster.key === selectedNode.industryKey) || null
       : analysis.clusterStats[0] || null;
+
+  const selectIntroductionTarget = (contact: ContactRecord) => {
+    setIntroductionTargetId(contact.id);
+    setIntroductionSearch(contact.name);
+    setSelectedIntroductionPathId(null);
+    setSelectedNodeId(contact.id);
+  };
+
+  const openIntroductionModeFor = (contact: ContactRecord) => {
+    setIntroductionMode(true);
+    selectIntroductionTarget(contact);
+  };
 
   const handleNodeHover = (node: any) => {
     const datum = node as GraphNodeDatum | null;
@@ -1205,6 +2156,13 @@ export default function NetworkGraph() {
       context.arc(x, y, radius + 9, 0, Math.PI * 2);
       context.fill();
     }
+    if (node.kind === 'contact' && activeIntroductionNodeIds.has(node.id)) {
+      context.strokeStyle = '#8C7A65';
+      context.lineWidth = 2.4;
+      context.beginPath();
+      context.arc(x, y, radius + 9, 0, Math.PI * 2);
+      context.stroke();
+    }
 
     context.fillStyle = node.kind === 'me' ? node.color : node.color;
     context.beginPath();
@@ -1282,7 +2240,7 @@ export default function NetworkGraph() {
       </div>
 
       {graphError && (
-        <div className="border border-red-300 bg-red-50 p-4 font-mono text-xs leading-relaxed text-red-800">
+        <div role="alert" className="border border-red-300 bg-red-50 p-4 font-mono text-xs leading-relaxed text-red-800">
           {graphError}
         </div>
       )}
@@ -1317,19 +2275,36 @@ export default function NetworkGraph() {
       <div className="bg-white border border-ink/15 rounded-card p-5 space-y-4">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
           <div className="relative w-full max-w-xl">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle" size={16} />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-subtle" size={16} aria-hidden="true" />
             <Input
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
               placeholder="Search firms, names, tags, cities..."
               className="pl-10 bg-paper/40"
+              aria-label="Search network contacts"
             />
           </div>
           <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setIntroductionMode((current) => !current)}
+              aria-pressed={introductionMode}
+              aria-controls="introduction-path-finder"
+              className={`inline-flex min-h-11 items-center gap-2 border px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors motion-reduce:transition-none ${
+                introductionMode
+                  ? 'border-[#8C7A65] bg-[#F7F0E5] text-ink'
+                  : 'border-ink/20 bg-white hover:bg-paper'
+              }`}
+            >
+              <Waypoints size={14} aria-hidden="true" />
+              Introduction Paths
+            </button>
             <div className="group relative">
               <button
+                type="button"
                 onClick={() => setDetailMode((current) => !current)}
-                className={`tour-graph-detail-toggle font-mono text-[10px] uppercase tracking-widest border px-3 py-2 transition-colors ${
+                aria-pressed={detailMode}
+                className={`tour-graph-detail-toggle min-h-11 border px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors motion-reduce:transition-none ${
                   detailMode ? 'border-ink bg-ink text-white' : 'border-ink/20 bg-white hover:bg-paper'
                 }`}
               >
@@ -1359,7 +2334,7 @@ export default function NetworkGraph() {
             {focusIndustry && (
               <button
                 onClick={() => setFocusIndustry(null)}
-                className="font-mono text-[10px] uppercase tracking-widest border border-ink/20 px-3 py-2 bg-white hover:bg-paper transition-colors"
+                className="min-h-11 border border-ink/20 bg-white px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors hover:bg-paper motion-reduce:transition-none"
               >
                 Clear Focus
               </button>
@@ -1371,8 +2346,10 @@ export default function NetworkGraph() {
           {analysis.clusterStats.map((cluster) => (
             <button
               key={cluster.key}
+              type="button"
               onClick={() => setFocusIndustry((current) => current === cluster.key ? null : cluster.key)}
-              className={`inline-flex items-center gap-2 border px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors ${
+              aria-pressed={focusIndustry === cluster.key}
+              className={`inline-flex min-h-11 items-center gap-2 border px-3 py-2 font-mono text-[10px] uppercase tracking-widest transition-colors motion-reduce:transition-none ${
                 focusIndustry === cluster.key ? 'border-ink bg-accent text-ink' : 'border-ink/20 bg-white hover:bg-paper'
               }`}
             >
@@ -1383,11 +2360,232 @@ export default function NetworkGraph() {
         </div>
       </div>
 
+      {introductionMode && (
+        <section
+          id="introduction-path-finder"
+          aria-labelledby="introduction-path-title"
+          className="overflow-hidden rounded-card border border-[#8C7A65]/40 bg-[#F8F5EF]"
+        >
+          <div className="border-b border-[#8C7A65]/25 bg-[#EEE7DC] p-5 md:p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-2xl">
+                <div className="mb-2 flex flex-wrap items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-[#6E604F]">
+                  <Waypoints size={14} aria-hidden="true" />
+                  Evidence-only introduction intelligence
+                  <span className="border border-[#617672]/30 bg-[#F0F3EC] px-2 py-1 text-[#405856]">
+                    Deterministic
+                  </span>
+                </div>
+                <h2 id="introduction-path-title" className="font-serif text-3xl font-black italic">
+                  Find the warmest truthful route.
+                </h2>
+                <p className="mt-2 max-w-xl text-sm leading-relaxed text-subtle">
+                  Paths use recorded relationships and explicit connection edges only. Shared company,
+                  school, industry, and other inferred graph neighbors never become introduction claims.
+                </p>
+              </div>
+              <div className="flex max-w-sm items-start gap-2 border border-[#8C7A65]/25 bg-white/70 p-3 text-xs leading-relaxed text-subtle">
+                <ShieldAlert size={16} className="mt-0.5 shrink-0 text-[#76562F]" aria-hidden="true" />
+                <span>
+                  Missing willingness, workload, fatigue, or direction stays visibly unknown and is
+                  scored conservatively until you record it.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <IntroductionEdgeEditor uid={user!.uid} contacts={contacts} />
+
+          <div className="grid gap-6 p-5 md:p-6 lg:grid-cols-[minmax(260px,0.72fr)_minmax(0,1.6fr)]">
+            <div>
+              <label
+                htmlFor="introduction-target-search"
+                className="mb-2 block font-mono text-[10px] uppercase tracking-widest text-subtle"
+              >
+                Search for a target
+              </label>
+              <div className="relative">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-subtle"
+                  size={16}
+                  aria-hidden="true"
+                />
+                <Input
+                  ref={introductionSearchRef}
+                  id="introduction-target-search"
+                  type="search"
+                  value={introductionSearch}
+                  onChange={(event) => {
+                    setIntroductionSearch(event.target.value);
+                    if (
+                      introductionTarget &&
+                      lower(event.target.value) !== lower(introductionTarget.name)
+                    ) {
+                      setIntroductionTargetId(null);
+                      setSelectedIntroductionPathId(null);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Escape') {
+                      setIntroductionSearch('');
+                      setIntroductionTargetId(null);
+                      setSelectedIntroductionPathId(null);
+                    }
+                  }}
+                  placeholder="Name, company, role, or city"
+                  className="min-h-11 bg-white pl-10"
+                  aria-describedby="introduction-search-help"
+                />
+              </div>
+              <p id="introduction-search-help" className="mt-2 text-xs leading-relaxed text-subtle">
+                Choose an existing contact. A contact being nearby on the graph is not, by itself,
+                evidence of an introduction route.
+              </p>
+
+              {(!introductionTarget ||
+                lower(introductionSearch) !== lower(introductionTarget.name)) && (
+                <div className="mt-3" aria-label="Matching introduction targets">
+                  {introductionCandidates.length > 0 ? (
+                    <ul className="max-h-72 space-y-2 overflow-y-auto" role="list">
+                      {introductionCandidates.map((contact) => (
+                        <li key={contact.id}>
+                          <button
+                            type="button"
+                            onClick={() => selectIntroductionTarget(contact)}
+                            className="min-h-11 w-full border border-ink/10 bg-white p-3 text-left transition-colors hover:border-[#8C7A65]/60 hover:bg-[#F7F0E5] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#617672] motion-reduce:transition-none"
+                          >
+                            <span className="block font-semibold">{contact.name}</span>
+                            <span className="mt-1 block font-mono text-[9px] uppercase tracking-widest text-subtle">
+                              {[contact.role, contact.company].filter(Boolean).join(' · ') || 'Contact record'}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="border border-ink/10 bg-white p-3 text-sm text-subtle">
+                      No contacts match that search.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="mt-4 border border-ink/10 bg-white/70 p-3 text-xs leading-relaxed text-subtle">
+                <div className="mb-1 flex items-center gap-2 font-mono text-[9px] uppercase tracking-widest text-ink">
+                  <CheckCircle2 size={13} aria-hidden="true" />
+                  Ranking boundary
+                </div>
+                {introductionEvidence.edges.filter((edge) => edge.fromId !== 'me').length} explicit
+                contact-to-contact edge{introductionEvidence.edges.filter((edge) => edge.fromId !== 'me').length === 1 ? '' : 's'} currently
+                have enough evidence to rank. {introductionEvidence.gaps.length} edge or
+                relationship gap{introductionEvidence.gaps.length === 1 ? '' : 's'} remain unranked.
+              </div>
+            </div>
+
+            <div aria-live="polite" aria-atomic="false">
+              {!introductionTarget ? (
+                <div className="flex min-h-64 items-center justify-center border border-dashed border-[#8C7A65]/40 bg-white/60 p-8 text-center">
+                  <div className="max-w-md">
+                    <Waypoints size={28} className="mx-auto mb-3 text-[#8C7A65]" aria-hidden="true" />
+                    <h3 className="font-serif text-2xl font-bold italic">Select the person you want to reach.</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-subtle">
+                      Cirqle will rank only paths it can trace through evidence-backed relationship records.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-4 flex flex-col gap-3 border border-ink/10 bg-white p-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="font-mono text-[9px] uppercase tracking-widest text-subtle">Target</div>
+                      <h3 className="mt-1 font-serif text-3xl font-black italic">
+                        {introductionTarget.name}
+                      </h3>
+                      <p className="mt-1 font-mono text-[9px] uppercase tracking-widest text-subtle">
+                        {[introductionTarget.role, introductionTarget.company].filter(Boolean).join(' · ') || 'Contact record'}
+                      </p>
+                    </div>
+                    <div className="max-w-xs text-xs leading-relaxed text-subtle sm:text-right">
+                      {introductionDirectRelationship ? (
+                        <>
+                          You also have a direct, dated relationship record. It is not mislabeled as a
+                          warm introduction; the routes below require an intermediary.
+                        </>
+                      ) : (
+                        <>
+                          No dated direct relationship evidence is available. That gap is kept separate
+                          from any intermediary route.
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {introductionRanking.paths.length > 0 ? (
+                    <div className="space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                          <h3 className="font-serif text-2xl font-bold">Warmest recorded paths</h3>
+                          <p className="mt-1 text-xs text-subtle">
+                            Ranked by the weakest edge, then the path average and hop count.
+                          </p>
+                        </div>
+                        <span className="font-mono text-[9px] uppercase tracking-widest text-subtle">
+                          {introductionRanking.paths.length} route{introductionRanking.paths.length === 1 ? '' : 's'}
+                        </span>
+                      </div>
+                      {introductionRanking.paths.map((path) => (
+                        <IntroductionPathCard
+                          key={path.id}
+                          path={path}
+                          evidenceByEdgeId={introductionEvidence.evidenceByEdgeId}
+                          selected={activeIntroductionPath?.id === path.id}
+                          onSelect={() => setSelectedIntroductionPathId(path.id)}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="border border-[#9A7447]/35 bg-[#F7F0E5] p-5">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle size={18} className="mt-0.5 shrink-0 text-[#76562F]" aria-hidden="true" />
+                        <div>
+                          <h3 className="font-serif text-xl font-bold">No defensible warm path yet.</h3>
+                          <p className="mt-1 text-sm leading-relaxed text-subtle">
+                            Cirqle found no route through a recorded intermediary with enough dated
+                            evidence to rank. It will not turn visual proximity or a shared employer into
+                            a relationship claim.
+                          </p>
+                        </div>
+                      </div>
+
+                      {(introductionTargetGaps.length > 0 || introductionExcludedDetails.length > 0) && (
+                        <div className="mt-4 space-y-2">
+                          {introductionTargetGaps.map((gap) => (
+                            <div key={gap.id} className="border border-[#9A7447]/25 bg-white/70 p-3 text-xs leading-relaxed">
+                              <span className="font-semibold">{gap.label}:</span> {gap.detail}
+                            </div>
+                          ))}
+                          {introductionExcludedDetails.map((excluded) => (
+                            <div key={excluded.id} className="border border-[#7D5B52]/25 bg-white/70 p-3 text-xs leading-relaxed">
+                              <span className="font-semibold">{excluded.label}:</span>{' '}
+                              {excluded.reasons.join('; ')}.
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      )}
+
       <div className="grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_360px]">
         <section className="self-start bg-white border border-ink/15 rounded-card overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-ink/15 bg-[#F8F5EF] p-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="font-serif text-2xl italic font-bold">Live Network Surface</h2>
+              <h2 id="live-network-title" className="font-serif text-2xl italic font-bold">Live Network Surface</h2>
               <p className="font-mono text-[10px] uppercase tracking-widest text-subtle mt-1">
                 Clean graph surface with optional relationship signal detail
               </p>
@@ -1395,10 +2593,23 @@ export default function NetworkGraph() {
             <div className="flex flex-wrap gap-2 font-mono text-[10px] uppercase tracking-widest text-subtle">
               <span>{analysis.nodes.length} nodes</span>
               <span>{analysis.links.length} links</span>
+              {activeIntroductionPath && (
+                <span className="text-[#76562F]">Copper rings mark the focused path</span>
+              )}
             </div>
           </div>
 
-          <div ref={containerRef} className="tour-graph-node relative h-[400px] md:h-[460px] bg-paper overflow-hidden">
+          <p id="network-graph-description" className="sr-only">
+            Interactive visual network graph. Use the keyboard contact directory after the graph
+            to select a person without using the canvas.
+          </p>
+          <div
+            ref={containerRef}
+            role="group"
+            aria-labelledby="live-network-title"
+            aria-describedby="network-graph-description"
+            className="tour-graph-node relative h-[400px] overflow-hidden bg-paper md:h-[460px]"
+          >
             <div className="absolute inset-0 bg-[#F5F0E8]" />
             <div className="absolute inset-0 opacity-[0.07]" style={{ backgroundImage: 'linear-gradient(rgba(26,26,26,0.24) 1px, transparent 1px), linear-gradient(90deg, rgba(26,26,26,0.24) 1px, transparent 1px)', backgroundSize: '80px 80px' }} />
             <div className="absolute inset-0 opacity-[0.05]" style={{ backgroundImage: 'radial-gradient(rgba(26,26,26,0.3) 0.7px, transparent 0.7px)', backgroundSize: '18px 18px' }} />
@@ -1446,23 +2657,28 @@ export default function NetworkGraph() {
                   const targetId = typeof link.target === 'string' ? link.target : link.target.id;
                   const hoverId = hoverIdRef.current;
                   const hp = hoverProgressRef.current;
+                  const introductionPathLink = isActiveIntroductionLink(link);
 
                   let base = link.kind === 'backbone' ? 0.24 : link.kind === 'membership' ? 0.13 : 0.18;
                   const faded = isLinkFaded(link);
-                  if (faded) base = 0.07;
+                  if (introductionPathLink) base = 0.82;
+                  else if (faded) base = 0.07;
                   if (hoverId) {
                     const touches = sourceId === hoverId || targetId === hoverId;
                     base = touches ? base * (1 - hp) + 0.42 * hp : base * (1 - 0.85 * hp);
                   }
 
                   let width = link.weight;
-                  if (faded) width = 0.5;
+                  if (introductionPathLink) width = Math.max(3.2, link.weight + 1.4);
+                  else if (faded) width = 0.5;
                   else if (hoverId && (sourceId === hoverId || targetId === hoverId)) {
                     width = link.weight + 1.4 * hp;
                   }
 
                   context.save();
-                  context.strokeStyle = `rgba(26,26,26,${base.toFixed(3)})`;
+                  context.strokeStyle = introductionPathLink
+                    ? `rgba(140,122,101,${base.toFixed(3)})`
+                    : `rgba(26,26,26,${base.toFixed(3)})`;
                   context.lineWidth = width;
                   if (link.kind === 'explicit') context.setLineDash([5, 4]);
                   context.beginPath();
@@ -1508,7 +2724,7 @@ export default function NetworkGraph() {
                 Positioned each frame from the node's live screen coords. */}
             {hoverNode && (
               <div ref={tooltipRef} className="pointer-events-none absolute left-0 top-0 z-20 will-change-transform">
-                <div className="animate-fade-in bg-white border border-ink/15 rounded-card shadow-float px-3 py-2 max-w-[230px]">
+                <div className="animate-fade-in max-w-[230px] rounded-card border border-ink/15 bg-white px-3 py-2 shadow-float motion-reduce:animate-none">
                   <div className="flex items-center gap-2">
                     <span className="font-serif text-sm font-bold leading-tight">{hoverNode.name}</span>
                     {hoverNode.tier && <TierBadge tier={hoverNode.tier} className="!px-1.5 !py-0.5 !text-[8px]" />}
@@ -1517,13 +2733,48 @@ export default function NetworkGraph() {
                     <p className="mt-1 font-mono text-[9px] uppercase tracking-widest text-muted">{hoverNode.subtitle}</p>
                   )}
                   {hoverNode.kind === 'contact' && (
-                    <p className="mt-1.5 font-mono text-[9px] uppercase tracking-widest text-brand">Click to open</p>
+                    <p className="mt-1.5 font-mono text-[9px] uppercase tracking-widest text-brand">Click to inspect</p>
                   )}
                 </div>
               </div>
             )}
 
           </div>
+          {contacts.length > 0 && (
+            <details className="border-t border-ink/15 bg-[#F8F5EF] p-4">
+              <summary className="min-h-11 cursor-pointer py-3 font-mono text-[10px] uppercase tracking-widest text-subtle focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#617672]">
+                Keyboard &amp; screen-reader contact directory
+              </summary>
+              <p className="mb-3 text-xs leading-relaxed text-subtle">
+                The canvas is a visual overview. These controls expose the same contact nodes to
+                keyboard and screen-reader users.
+              </p>
+              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3" role="list">
+                {contacts
+                  .slice()
+                  .sort((left, right) => left.name.localeCompare(right.name))
+                  .map((contact) => {
+                    const insight = analysis.insights[contact.id];
+                    return (
+                      <li key={contact.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedNodeId(contact.id)}
+                          aria-pressed={selectedNodeId === contact.id}
+                          className="min-h-11 w-full border border-ink/10 bg-white p-3 text-left transition-colors hover:bg-paper focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#617672] motion-reduce:transition-none"
+                        >
+                          <span className="block font-semibold">{contact.name}</span>
+                          <span className="mt-1 block text-xs text-subtle">
+                            {[contact.role, contact.company].filter(Boolean).join(' · ') || 'Contact'}
+                            {insight ? ` · Relationship ${Math.round(insight.score)}/100` : ''}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+              </ul>
+            </details>
+          )}
         </section>
 
         <aside className="space-y-4">
@@ -1536,8 +2787,9 @@ export default function NetworkGraph() {
                   <p className="font-mono text-[10px] uppercase tracking-widest text-subtle mt-2">{selectedNode.subtitle}</p>
                 </div>
                 <span
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold text-white"
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-ink/20 text-sm font-bold text-ink"
                   style={{ backgroundColor: selectedNode.color }}
+                  aria-hidden="true"
                 >
                   {selectedNode.initials}
                 </span>
@@ -1551,7 +2803,14 @@ export default function NetworkGraph() {
                     {Math.round(selectedInsight.score)}/100
                   </span>
                 </div>
-                <div className="h-2 bg-white border border-ink/10">
+                <div
+                  className="h-2 border border-ink/10 bg-white"
+                  role="progressbar"
+                  aria-label={`${selectedNode.name} relationship strength`}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(selectedInsight.score)}
+                >
                   <div
                     className="h-full"
                     style={{
@@ -1587,6 +2846,13 @@ export default function NetworkGraph() {
                 <Button type="button" variant="outline" onClick={() => navigate(`/app/directory/${selectedNode.id}`)}>
                   Draft Outreach
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => selectedNode.contact && openIntroductionModeFor(selectedNode.contact)}
+                >
+                  Find Warm Path
+                </Button>
               </div>
 
               <div>
@@ -1596,8 +2862,9 @@ export default function NetworkGraph() {
                     selectedNeighbors.map((neighbor) => (
                       <button
                         key={neighbor.id}
+                        type="button"
                         onClick={() => setSelectedNodeId(neighbor.id)}
-                        className="w-full border border-ink/10 bg-paper/40 p-3 text-left hover:bg-paper transition-colors"
+                        className="min-h-11 w-full border border-ink/10 bg-paper/40 p-3 text-left transition-colors hover:bg-paper focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#617672] motion-reduce:transition-none"
                       >
                         <div className="font-semibold">{neighbor.name}</div>
                         <div className="font-mono text-[10px] uppercase tracking-widest text-subtle mt-1">{neighbor.subtitle}</div>
@@ -1650,8 +2917,9 @@ export default function NetworkGraph() {
                 analysis.gapItems.slice(0, 3).map((item) => (
                   <button
                     key={item.id}
+                    type="button"
                     onClick={() => item.industryKey && setFocusIndustry(item.industryKey)}
-                    className="w-full border border-ink/10 bg-paper/40 p-3 text-left hover:bg-paper transition-colors"
+                    className="min-h-11 w-full border border-ink/10 bg-paper/40 p-3 text-left transition-colors hover:bg-paper focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#617672] motion-reduce:transition-none"
                   >
                     <div className="font-semibold mb-1">{item.title}</div>
                     <p className="text-sm leading-relaxed text-subtle mb-2">{item.detail}</p>

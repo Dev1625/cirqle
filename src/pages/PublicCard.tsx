@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useSearchParams } from 'react-router';
 import { ArrowUpRight, Check, Link2, Loader2, UserRoundX } from 'lucide-react';
 import {
   loadPublicCard,
@@ -15,31 +15,47 @@ import { Input } from '../components/ui/Input';
 import { Avatar } from '../components/ui/Avatar';
 
 /**
- * /c/:cardId — what a physical NFC card opens when tapped.
+ * /c/:cardId — what an NFC tap, QR scan, or shared link opens.
  *
- * Fully public: no login, no account, no gate. The only thing asked of a
- * first-time viewer is a name, once, so the reverse capture has something to
- * file. Everything else about the visit is optional.
+ * Fully public: no login, no account, no gate. A viewer confirms the name that
+ * will be shared immediately before each reverse capture. The name is kept
+ * only in this tab for a short period; everything else remains optional.
  *
  * This page deliberately does not use AppLayout — a stranger who tapped a
  * chip should land on a card, not on a product's chrome.
  */
 
 type Phase = 'loading' | 'missing' | 'ready';
+type IdentityIntent = 'edit' | 'submit' | null;
 
 export default function PublicCard() {
   const { cardId = '' } = useParams();
+  const [searchParams] = useSearchParams();
   const [phase, setPhase] = useState<Phase>('loading');
   const [card, setCard] = useState<PublicCardType | null>(null);
 
   const [visitorName, setVisitorName] = useState<string>(() => getStoredVisitorName() || '');
-  const [askName, setAskName] = useState(false);
+  const [identityIntent, setIdentityIntent] = useState<IdentityIntent>(null);
   const [nameDraft, setNameDraft] = useState('');
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [website, setWebsite] = useState('');
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [visitorEmail, setVisitorEmail] = useState('');
+  const [visitorCompany, setVisitorCompany] = useState('');
+  const [visitorNote, setVisitorNote] = useState('');
+  const [consentToFollowUp, setConsentToFollowUp] = useState(false);
+  const captureChannel =
+    searchParams.get('via') === 'qr'
+      ? 'qr'
+      : searchParams.get('via') === 'nfc'
+        ? 'nfc'
+        : searchParams.get('via') === 'link'
+          ? 'link'
+          : 'direct';
 
   useEffect(() => {
     let cancelled = false;
@@ -52,8 +68,6 @@ export default function PublicCard() {
         }
         setCard(result);
         setPhase('ready');
-        // First visit for this viewer, ever — ask once, name only.
-        if (!getStoredVisitorName()) setAskName(true);
       })
       .catch(() => {
         if (!cancelled) setPhase('missing');
@@ -64,24 +78,21 @@ export default function PublicCard() {
   }, [cardId]);
 
   useEffect(() => {
-    if (askName) {
+    if (identityIntent) {
       // Focus after the entrance animation has committed, not during it.
       const id = window.setTimeout(() => nameInputRef.current?.focus(), 60);
       return () => window.clearTimeout(id);
     }
-  }, [askName]);
+  }, [identityIntent]);
 
   const accent = useMemo(() => accentHex(card?.accent), [card?.accent]);
 
-  const confirmName = () => {
-    const cleaned = nameDraft.trim();
-    if (!cleaned) return;
-    storeVisitorName(cleaned);
-    setVisitorName(cleaned);
-    setAskName(false);
+  const openIdentity = (intent: Exclude<IdentityIntent, null>) => {
+    setNameDraft(visitorName);
+    setIdentityIntent(intent);
   };
 
-  const handleSave = async () => {
+  const saveWithConfirmedIdentity = async (confirmedName: string) => {
     if (!card) return;
     // Downloading the vCard is the viewer's half and must never be blocked on
     // the network write that is the owner's half.
@@ -92,14 +103,34 @@ export default function PublicCard() {
     try {
       await submitCapture({
         cardId: card.cardId,
-        visitorName: visitorName || 'Someone',
+        visitorName: confirmedName,
+        visitorEmail: consentToFollowUp ? visitorEmail : null,
+        visitorCompany: consentToFollowUp ? visitorCompany : null,
+        note: consentToFollowUp ? visitorNote : null,
+        consentToFollowUp,
+        captureChannel,
+        website,
       });
       setSaved(true);
-    } catch {
-      setSaveError('Contact saved to your phone, but we could not notify ' + (card.name || 'them') + '.');
+    } catch (error) {
+      const detail =
+        error instanceof Error && error.message
+          ? error.message
+          : 'We could not notify them.';
+      setSaveError(`Contact saved to your phone. ${detail}`);
     } finally {
       setSaving(false);
     }
+  };
+
+  const confirmIdentity = () => {
+    const cleaned = nameDraft.trim().replace(/\s+/g, ' ');
+    if (!cleaned || cleaned.length > 120) return;
+    storeVisitorName(cleaned);
+    setVisitorName(cleaned);
+    const shouldSubmit = identityIntent === 'submit';
+    setIdentityIntent(null);
+    if (shouldSubmit) void saveWithConfirmedIdentity(cleaned);
   };
 
   if (phase === 'loading') {
@@ -209,6 +240,124 @@ export default function PublicCard() {
           )}
 
           <div className="mt-7 border-t border-ink/15 pt-6">
+            <label
+              aria-hidden="true"
+              className="absolute -left-[10000px] top-auto h-px w-px overflow-hidden"
+            >
+              Website
+              <input
+                name="website"
+                value={website}
+                onChange={(event) => setWebsite(event.target.value)}
+                tabIndex={-1}
+                autoComplete="off"
+              />
+            </label>
+            {!saved && (
+              <div className="mb-4 space-y-4">
+                <div
+                  className="flex items-start justify-between gap-4 rounded-card border border-ink/15 bg-paper/50 p-4"
+                  aria-label="Identity shared when saving"
+                >
+                  <div>
+                    <p className="font-mono text-[9px] font-bold uppercase tracking-widest text-muted">
+                      Identity shared when saving
+                    </p>
+                    <p className="mt-1 font-mono text-xs font-bold text-ink">
+                      {visitorName || 'No name set for this tab'}
+                    </p>
+                    <p className="mt-1 font-mono text-[10px] leading-relaxed text-muted">
+                      {visitorName
+                        ? 'Check this name on a shared device. You will confirm it again before anything is sent.'
+                        : 'Add and confirm your name before anything is sent.'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openIdentity('edit')}
+                    className="min-h-11 shrink-0 px-2 font-mono text-[10px] font-bold uppercase tracking-widest text-brand underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                  >
+                    {visitorName ? 'Change' : 'Add name'}
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen((current) => !current)}
+                  aria-expanded={detailsOpen}
+                  className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted underline-offset-4 transition-colors hover:text-ink hover:underline"
+                >
+                  {detailsOpen ? 'Hide follow-up details' : 'Share follow-up details (optional)'}
+                </button>
+
+                {detailsOpen && (
+                  <div className="mt-3 space-y-3 rounded-card border border-ink/15 bg-paper/50 p-4">
+                    <div>
+                      <label
+                        htmlFor="visitor-email"
+                        className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted"
+                      >
+                        Your email
+                      </label>
+                      <Input
+                        id="visitor-email"
+                        type="email"
+                        value={visitorEmail}
+                        maxLength={200}
+                        onChange={(event) => setVisitorEmail(event.target.value)}
+                        placeholder="alex@example.com"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="visitor-company"
+                        className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted"
+                      >
+                        Company
+                      </label>
+                      <Input
+                        id="visitor-company"
+                        value={visitorCompany}
+                        maxLength={200}
+                        onChange={(event) => setVisitorCompany(event.target.value)}
+                        placeholder="Optional"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="visitor-note"
+                        className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted"
+                      >
+                        What should they remember?
+                      </label>
+                      <textarea
+                        id="visitor-note"
+                        className="h-20 w-full rounded-card border border-ink/15 bg-white p-3 font-mono text-xs leading-relaxed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+                        value={visitorNote}
+                        maxLength={500}
+                        onChange={(event) => setVisitorNote(event.target.value)}
+                        placeholder="Where you met or what to follow up on"
+                      />
+                    </div>
+                    <label className="flex cursor-pointer items-start gap-2.5 font-mono text-[11px] leading-relaxed text-subtle">
+                      <input
+                        type="checkbox"
+                        checked={consentToFollowUp}
+                        onChange={(event) => setConsentToFollowUp(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-[var(--brand)]"
+                      />
+                      <span>
+                        Share these optional details with {card.name?.split(' ')[0] || 'this person'} and allow a follow-up.
+                      </span>
+                    </label>
+                    {!consentToFollowUp && (visitorEmail || visitorCompany || visitorNote) && (
+                      <p role="status" className="font-mono text-[10px] leading-relaxed text-muted">
+                        Optional details stay on this page until you consent. Your name is still shared when you save.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             {saved ? (
               <div className="animate-fade-in flex items-center gap-2.5 font-mono text-xs text-subtle">
                 <Check size={14} style={{ color: accent }} />
@@ -224,7 +373,7 @@ export default function PublicCard() {
                 className="w-full transition-[filter,transform] hover:brightness-110"
                 style={{ backgroundColor: accent }}
                 disabled={saving}
-                onClick={handleSave}
+                onClick={() => openIdentity('submit')}
               >
                 {saving ? 'Saving…' : 'Save contact'}
               </Button>
@@ -235,8 +384,8 @@ export default function PublicCard() {
             )}
 
             {!saved && (
-              <p className="mt-3 text-center font-mono text-[10px] uppercase tracking-widest text-muted">
-                {visitorName ? `Saving as ${visitorName}` : 'Downloads a contact card'}
+              <p className="mt-2 text-center font-mono text-[10px] leading-relaxed text-muted">
+                You will confirm the displayed name before Cirqle downloads their vCard and privately records this tap. No account is created for you.
               </p>
             )}
           </div>
@@ -250,18 +399,40 @@ export default function PublicCard() {
         Powered by Cirqle
       </Link>
 
-      {/* First visit, once ever, name only. Nothing else is required and
-          nothing is created on the viewer's behalf. */}
-      {askName && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm animate-fade-in">
-          <div className="animate-fade-scale-in w-full max-w-sm rounded-card border border-ink/15 bg-white shadow-float">
+      {identityIntent && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm animate-fade-in"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !saving) {
+              setIdentityIntent(null);
+            }
+          }}
+        >
+          <div
+            className="animate-fade-scale-in w-full max-w-sm rounded-card border border-ink/15 bg-white shadow-float"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="visitor-identity-title"
+            aria-describedby="visitor-identity-description"
+          >
             <div className="p-6">
               <span className="font-mono text-[10px] font-bold uppercase tracking-widest text-muted">
-                Before you look
+                {identityIntent === 'submit'
+                  ? 'Confirm before sharing'
+                  : 'Identity for this tab'}
               </span>
-              <h2 className="mt-2 font-serif text-2xl font-bold italic">Who should we say tapped?</h2>
-              <p className="mt-2 font-mono text-xs leading-relaxed text-subtle">
-                Just a name. {card.name?.split(' ')[0] || 'They'} gets it back so you don't have to spell it out later.
+              <h2
+                id="visitor-identity-title"
+                className="mt-2 font-serif text-2xl font-bold italic"
+              >
+                Is this the right name?
+              </h2>
+              <p
+                id="visitor-identity-description"
+                className="mt-2 font-mono text-xs leading-relaxed text-subtle"
+              >
+                Cirqle will share this name with {card.name?.split(' ')[0] || 'this person'} only after you confirm. It is remembered only in this tab for up to two hours.
               </p>
               <div className="mt-5">
                 <label htmlFor="visitor-name" className="mb-1.5 block font-mono text-[10px] uppercase tracking-widest text-muted">
@@ -271,9 +442,11 @@ export default function PublicCard() {
                   id="visitor-name"
                   ref={nameInputRef}
                   value={nameDraft}
+                  maxLength={120}
+                  autoComplete="name"
                   onChange={(e) => setNameDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') confirmName();
+                    if (e.key === 'Enter') confirmIdentity();
                   }}
                   placeholder="Alex Rivera"
                 />
@@ -281,13 +454,18 @@ export default function PublicCard() {
             </div>
             <div className="flex items-center justify-between gap-3 p-6 pt-0">
               <button
-                onClick={() => setAskName(false)}
+                type="button"
+                onClick={() => setIdentityIntent(null)}
                 className="font-mono text-[10px] uppercase tracking-widest text-muted underline-offset-4 transition-colors hover:text-ink hover:underline"
               >
-                Skip
+                Cancel
               </button>
-              <Button variant="brand" onClick={confirmName} disabled={!nameDraft.trim()}>
-                Continue
+              <Button
+                variant="brand"
+                onClick={confirmIdentity}
+                disabled={!nameDraft.trim() || nameDraft.trim().length > 120}
+              >
+                {identityIntent === 'submit' ? 'Confirm and save' : 'Use this name'}
               </Button>
             </div>
           </div>

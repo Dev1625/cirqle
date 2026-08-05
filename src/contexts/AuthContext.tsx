@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { User, onAuthStateChanged } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { auth, db } from '../config/firebase';
+import { User, onIdTokenChanged } from 'firebase/auth';
+import { auth } from '../config/firebase';
+import { purgeDashboardBriefCaches } from '../lib/dashboardBriefCache';
 
 interface AuthContextType {
   user: User | null;
@@ -15,28 +15,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-         try {
-           const docRef = doc(db, 'users', user.uid);
-           const docSnap = await getDoc(docRef);
-           if (!docSnap.exists()) {
-             await setDoc(docRef, {
-               userId: user.uid,
-               createdAt: serverTimestamp(),
-               updatedAt: serverTimestamp(),
-               name: user.displayName || 'Anonymous User',
-               role: null,
-               company: null,
-               bio: null,
-               resumeText: null,
-               targetIndustries: []
-             });
-           }
-         } catch (e) {
-           console.error("Failed to bootstrap user document:", e);
-         }
-      }
+    const unsubscribe = onIdTokenChanged(auth, (user) => {
+      purgeDashboardBriefCaches(user?.uid || null);
       setUser(user);
       setLoading(false);
     });

@@ -1,5 +1,6 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { Button } from '../components/ui/Button';
+import { Dialog } from '../components/ui/Dialog';
 
 type ConfirmOptions = {
   title: string;
@@ -19,44 +20,43 @@ const ConfirmContext = createContext<ConfirmContextType>({ confirm: async () => 
 
 export const ConfirmProvider = ({ children }: { children: React.ReactNode }) => {
   const [pending, setPending] = useState<PendingConfirm | null>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   const confirm = useCallback((options: ConfirmOptions) => {
     return new Promise<boolean>((resolve) => {
-      setPending({ ...options, resolve });
+      setPending((current) => {
+        current?.resolve(false);
+        return { ...options, resolve };
+      });
     });
   }, []);
 
-  const close = (value: boolean) => {
-    pending?.resolve(value);
-    setPending(null);
-  };
-
-  useEffect(() => {
-    if (!pending) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') close(false);
-      if (e.key === 'Enter') close(true);
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending]);
+  const close = useCallback((value: boolean) => {
+    setPending((current) => {
+      current?.resolve(value);
+      return null;
+    });
+  }, []);
 
   return (
     <ConfirmContext.Provider value={{ confirm }}>
       {children}
-      {pending && (
-        <div
-          className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-ink/40 backdrop-blur-sm animate-fade-in"
-          onClick={(e) => { if (e.target === e.currentTarget) close(false); }}
-        >
-          <div className="animate-fade-scale-in bg-white rounded-card border border-ink/15 w-full max-w-md shadow-float">
+      <Dialog
+        open={Boolean(pending)}
+        onClose={() => close(false)}
+        title={pending?.title || 'Confirm action'}
+        description={pending?.message}
+        initialFocusRef={cancelRef}
+        className="max-w-md bg-white"
+      >
+        {pending && (
+          <>
             <div className="p-6">
               <h2 className="font-serif text-2xl italic font-bold mb-3">{pending.title}</h2>
               <p className="font-mono text-sm leading-relaxed text-subtle">{pending.message}</p>
             </div>
             <div className="flex justify-end gap-3 p-6 pt-0">
-              <Button variant="outline" onClick={() => close(false)}>
+              <Button ref={cancelRef} variant="outline" onClick={() => close(false)}>
                 {pending.cancelLabel || 'Cancel'}
               </Button>
               <Button
@@ -66,9 +66,9 @@ export const ConfirmProvider = ({ children }: { children: React.ReactNode }) => 
                 {pending.confirmLabel || 'Confirm'}
               </Button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        )}
+      </Dialog>
     </ConfirmContext.Provider>
   );
 };

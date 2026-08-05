@@ -1,5 +1,5 @@
-import React from 'react';
-import { Sparkles, RefreshCw, AlertTriangle } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Sparkles, RefreshCw, AlertTriangle, X } from 'lucide-react';
 import { Button } from './Button';
 import { EmptyState } from './EmptyState';
 
@@ -35,6 +35,10 @@ export function AISurface({
   emptyLine,
   emptyAction,
   loadingLine = 'Reading the file…',
+  loadingStages,
+  onCancel,
+  usageLabel,
+  tone = 'default',
   children,
 }: {
   state: 'loading' | 'error' | 'empty' | 'ready';
@@ -44,29 +48,102 @@ export function AISurface({
   emptyLine: string;
   emptyAction?: React.ReactNode;
   loadingLine?: string;
+  loadingStages?: string[];
+  onCancel?: () => void;
+  usageLabel?: string;
+  tone?: 'default' | 'inverted';
   children?: React.ReactNode;
 }) {
+  const [stage, setStage] = useState(0);
+  const stages =
+    loadingStages && loadingStages.length > 0
+      ? loadingStages
+      : [loadingLine];
+
+  useEffect(() => {
+    if (state !== 'loading' || stages.length < 2) {
+      setStage(0);
+      return;
+    }
+    const interval = window.setInterval(
+      () => setStage((current) => Math.min(current + 1, stages.length - 1)),
+      2_200,
+    );
+    return () => window.clearInterval(interval);
+  }, [state, stages.length]);
+
   if (state === 'loading') {
     return (
-      <div className="flex items-center gap-2.5 px-1 py-6 font-mono text-xs text-muted">
-        <RefreshCw size={13} className="animate-spin" aria-hidden="true" />
-        {loadingLine}
+      <div
+        className={`flex items-center gap-2.5 px-1 py-6 font-mono text-xs ${
+          tone === 'inverted' ? 'text-paper/75' : 'text-muted'
+        }`}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        aria-busy="true"
+      >
+        <RefreshCw size={13} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+        <span>{stages[stage]}</span>
+        {usageLabel && (
+          <span className="ml-auto text-[10px] uppercase tracking-widest">
+            {usageLabel}
+          </span>
+        )}
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className={`ml-auto inline-flex min-h-11 min-w-11 items-center justify-center gap-1 px-2 text-[10px] font-bold uppercase tracking-widest transition-colors focus-visible:outline-none focus-visible:ring-2 ${
+              tone === 'inverted'
+                ? 'text-paper/75 hover:text-paper focus-visible:ring-paper'
+                : 'text-muted hover:text-ink focus-visible:ring-brand'
+            }`}
+          >
+            <X size={11} aria-hidden="true" />
+            Cancel
+          </button>
+        )}
       </div>
     );
   }
 
   if (state === 'error') {
     return (
-      <div className="flex flex-col items-start gap-3 rounded-card border border-ink/15 bg-paper/60 px-4 py-4">
-        <p className="flex items-start gap-2 font-mono text-xs leading-relaxed text-subtle">
-          <AlertTriangle size={13} className="mt-0.5 shrink-0 text-red-600" aria-hidden="true" />
-          {error || "The model didn't come back. It happens."}
+      <div
+        className={`flex flex-col items-start gap-3 rounded-card px-4 py-4 ${
+          tone === 'inverted'
+            ? 'border border-paper/25 bg-paper/10'
+            : 'border border-ink/15 bg-paper/60'
+        }`}
+        role="alert"
+      >
+        <p className={`flex items-start gap-2 font-mono text-xs leading-relaxed ${
+          tone === 'inverted' ? 'text-paper/85' : 'text-subtle'
+        }`}>
+          <AlertTriangle
+            size={13}
+            className={`mt-0.5 shrink-0 ${
+              tone === 'inverted' ? 'text-amber-300' : 'text-red-600'
+            }`}
+            aria-hidden="true"
+          />
+          {error ||
+            "AI couldn't finish this request. Your work is still here; check your connection and try again."}
         </p>
-        {onRetry && (
+        {onRetry && tone === 'inverted' ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="inline-flex min-h-11 items-center border border-paper/30 px-3 py-2 font-mono text-[10px] font-bold uppercase tracking-widest text-paper transition-colors hover:bg-paper hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-paper"
+          >
+            Try AI again
+          </button>
+        ) : onRetry ? (
           <Button variant="outline" size="sm" onClick={onRetry}>
-            Try again
+            Try AI again
           </Button>
-        )}
+        ) : null}
       </div>
     );
   }

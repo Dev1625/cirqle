@@ -72,6 +72,16 @@ body {
   color: var(--color-ink);
 }
 
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 3px;
+}
+
+::selection {
+  background: var(--color-accent);
+  color: var(--color-ink);
+}
+
 body::before {
   content: "";
   position: fixed;
@@ -120,11 +130,36 @@ body::before {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+  html:focus-within {
     scroll-behavior: auto !important;
+  }
+
+  .animate-fade-in,
+  .animate-fade-scale-in,
+  .animate-fade-slide-up,
+  .animate-toast-in,
+  .animate-spin,
+  .marquee-track {
+    animation: none !important;
+  }
+
+  .animate-fade-scale-in,
+  .animate-fade-slide-up,
+  .animate-toast-in,
+  .marquee-track {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+
+  .transition-all,
+  .transition-transform {
+    transition-property: color, background-color, border-color, opacity !important;
+  }
+}
+
+@media (forced-colors: active) {
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid Highlight !important;
   }
 }
 

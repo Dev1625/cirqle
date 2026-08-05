@@ -1,12 +1,13 @@
 /**
  * Web Speech API wrapper for voice memos.
  *
- * The browser's own recogniser is the right default here: zero cost, zero
- * external credential, no audio leaving the device to a third party, and it
- * works well in Chromium. Firefox has no support and Safari's is uneven —
- * which is exactly why isSpeechSupported() exists and why every caller is
- * expected to offer manual text entry regardless. An unsupported browser must
- * never be a dead end.
+ * The browser's own recogniser is the right low-friction default here: it
+ * requires no Cirqle transcription credential and works well in Chromium.
+ * Depending on the browser and operating system, speech may be sent to that
+ * platform's recognition service. Callers must disclose that before requesting
+ * microphone permission and must always offer manual text entry. Firefox has
+ * no support and Safari's is uneven, so an unsupported browser must never be a
+ * dead end.
  *
  * A paid transcription service could slot in behind the same mock/live env
  * gate as the other integrations; it was not added because the free path

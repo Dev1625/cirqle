@@ -128,11 +128,11 @@ account — no cookie, no identifier, nothing that follows the viewer off the
 page. Skippable.
 
 **Reverse capture — the asymmetry that beats paper.** Saving the contact
-downloads a vCard *and* writes a capture back to the owner's account. The vCard
-download never waits on that network write, so the viewer's half can't be
-broken by the owner's half failing. On the owner's next app load,
-`useCaptureDrain` files pending captures into real contacts, pre-filled with
-timestamp and — when Event Mode is on — the event name.
+downloads a vCard *and* submits a capture to the protected public endpoint.
+The vCard download never waits on that network write, so the viewer's half
+cannot be broken by the owner's half failing. A trusted Cloud Function files
+the capture into a real contact with timestamp and — when Event Mode is on —
+the event name. Browser rules deny this filing path directly.
 
 **Three creation routes**, in order of decreasing friction: AI draft from
 bio/resume (suggested by default, because the other two start from a blank

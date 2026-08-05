@@ -52,18 +52,27 @@ export async function seedSampleData(user: any) {
       name: person.name,
       company: person.company,
       role: person.role,
+      phone: '',
       industry: person.industry,
-      relationshipTier: person.tier,
+      relationshipTier:
+        person.tier === 'Strong' || person.tier === 'Warm'
+          ? person.tier
+          : 'Cold',
       summary: person.summary,
+      whyTheyMatter: '',
       tags: person.tags || [],
-      location: person.location || null,
-      email: person.email || null,
-      linkedinUrl: null,
-      subIndustry: null,
+      location: person.location || '',
+      email: person.email || '',
+      normalizedEmail: person.email?.toLocaleLowerCase() || '',
+      linkedinUrl: '',
+      subIndustry: '',
       lastContactedAt: null,
-      seniority: person.seniority || null,
-      school: person.school || null,
-      connectionSource: person.connectionSource || null,
+      seniority: person.seniority || '',
+      school: person.school || '',
+      connectionSource: person.connectionSource || '',
+      lifecycleStatus: 'active',
+      aiAllowed: true,
+      profileRevision: 0,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
@@ -249,11 +258,23 @@ export async function seedSampleData(user: any) {
   for (const note of notes) {
     const contactId = contactRefs[note.name];
     if (!contactId) continue;
-    await addDoc(noteRef, {
+    const documentRef = doc(noteRef);
+    const observedAt = new Date();
+    await setDoc(documentRef, {
+      noteSchemaVersion: 2,
       userId: user.uid,
       contactId,
+      recordType: 'note',
+      source: 'quick-note',
+      privacySourceType: 'note',
+      sourceId: documentRef.id,
       content: note.content,
-      createdAt: serverTimestamp()
+      sensitive: false,
+      aiAllowed: true,
+      observedAt,
+      factIds: [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
     });
   }
 

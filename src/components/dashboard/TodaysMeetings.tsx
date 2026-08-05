@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router';
 import { CalendarClock, ChevronRight, Mic, UserPlus } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { AILabel, AISurface } from '../ui/AISurface';
+import { AIProvenance } from '../ui/AIProvenance';
 import { EmptyState } from '../ui/EmptyState';
 import { PreviewBadge } from '../ui/PreviewBadge';
 import { LastSynced } from '../ui/LastSynced';
@@ -14,6 +15,8 @@ import {
 } from '../../lib/integrations/calendar';
 import { composeFallbackBrief, generateBrief, loadBriefContext } from '../../lib/briefing';
 import { isMock } from '../../lib/integrations/config';
+import type { GroundingDisplay } from '../../lib/grounding';
+import { AICancelledError } from '../../lib/ai';
 
 /**
  * "Today's meetings" — the natural home for the pre-meeting brief, because
@@ -162,8 +165,11 @@ function MeetingRow({
 }) {
   const [open, setOpen] = useState(index === 0);
   const [brief, setBrief] = useState<string | null>(null);
+  const [briefGrounding, setBriefGrounding] = useState<GroundingDisplay | null>(null);
+  const [briefIsFallback, setBriefIsFallback] = useState(false);
   const [briefState, setBriefState] = useState<'idle' | 'loading' | 'error' | 'ready'>('idle');
   const [briefError, setBriefError] = useState<string | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
 
   const contact = useMemo(
     () => contacts.find((c) => c.id === event.contactId) || null,
@@ -172,29 +178,64 @@ function MeetingRow({
 
   const runBrief = useCallback(async () => {
     if (!contact) return;
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
     setBriefState('loading');
     setBriefError(null);
+    setBriefGrounding(null);
+    setBriefIsFallback(false);
     try {
       const context = await loadBriefContext(uid, contact.id, contact);
-      const text = await generateBrief(context, event.title);
-      setBrief(text);
+      if (controller.signal.aborted) throw new AICancelledError();
+      const generated = await generateBrief(context, event.title, {
+        signal: controller.signal,
+      });
+      setBrief(generated.text);
+      setBriefGrounding(generated.grounding);
+      setBriefIsFallback(false);
       setBriefState('ready');
     } catch (err: any) {
-      setBriefError(err?.message || 'Could not write the brief.');
+      if (requestRef.current !== controller) return;
+      setBriefError(
+        err instanceof AICancelledError
+          ? 'Briefing canceled. Your saved records are unchanged.'
+          : err?.message || 'Could not write the brief.',
+      );
       setBriefState('error');
+    } finally {
+      if (requestRef.current === controller) requestRef.current = null;
     }
   }, [uid, contact, event.title]);
 
   const useFallback = async () => {
     if (!contact) return;
+    requestRef.current?.abort();
+    requestRef.current = null;
     const context = await loadBriefContext(uid, contact.id, contact);
     setBrief(composeFallbackBrief(context));
+    setBriefGrounding(null);
+    setBriefIsFallback(true);
     setBriefState('ready');
   };
 
   useEffect(() => {
-    if (open && briefState === 'idle' && contact) runBrief();
+    if (!open) {
+      requestRef.current?.abort();
+      requestRef.current = null;
+      if (briefState === 'loading') setBriefState(brief ? 'ready' : 'idle');
+      return;
+    }
+    if (briefState === 'idle' && contact) runBrief();
   }, [open, briefState, contact, runBrief]);
+
+  useEffect(
+    () => () => {
+      requestRef.current?.abort();
+      requestRef.current = null;
+    },
+    [],
+  );
 
   return (
     <div
@@ -239,7 +280,13 @@ function MeetingRow({
                 state={briefState === 'idle' ? 'loading' : briefState}
                 error={briefError}
                 onRetry={runBrief}
-                loadingLine="Reading the file on them…"
+                onCancel={() => requestRef.current?.abort()}
+                loadingStages={[
+                  'Reading eligible relationship records…',
+                  'Preparing a thirty-second brief…',
+                  'Checking citations and commitments…',
+                ]}
+                usageLabel="Reasoning AI"
                 emptyLine="Nothing on record for them yet."
               >
                 <div className="space-y-1.5">
@@ -252,6 +299,25 @@ function MeetingRow({
                         {line.replace(/^[-•]\s*/, '— ')}
                       </p>
                     ))}
+                  {briefGrounding && (
+                    <AIProvenance
+                      className="mt-3"
+                      sourceIds={briefGrounding.usedSourceIds}
+                      sourceLabels={briefGrounding.sourceLabels}
+                      unsupportedAssumptions={briefGrounding.unsupportedAssumptions}
+                      privacyExclusions={briefGrounding.privacyExclusions}
+                      generatedAt={briefGrounding.generatedAt}
+                      sourceObservedAt={briefGrounding.sourceObservedAt}
+                      consideredSourceCount={briefGrounding.consideredSourceCount}
+                      dataFreshThrough={briefGrounding.dataFreshThrough}
+                      generation={briefGrounding.generation}
+                    />
+                  )}
+                  {briefIsFallback && (
+                    <p className="mt-3 border-t border-ink/10 pt-3 font-mono text-[10px] uppercase tracking-widest text-muted">
+                      Composed locally from saved facts · no model used
+                    </p>
+                  )}
                 </div>
               </AISurface>
 

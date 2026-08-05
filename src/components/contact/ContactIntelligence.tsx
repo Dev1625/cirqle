@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { Check, Handshake, Heart, Mail, Mic, X } from 'lucide-react';
-import { db } from '../../config/firebase';
+import { ChevronDown, Handshake, Heart, Mail, Mic } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { HealthPanel } from '../ui/HealthPill';
 import { EmptyState } from '../ui/EmptyState';
@@ -11,9 +9,15 @@ import { AILabel } from '../ui/AISurface';
 import { useToast } from '../../contexts/ToastContext';
 import { VoiceMemo } from '../voice/VoiceMemo';
 import { computeHealth, setPinned } from '../../lib/health';
-import { listCommitments, setCommitmentStatus, type Commitment } from '../../lib/commitments';
+import { listCommitments, type Commitment } from '../../lib/commitments';
 import { listTrackedThreads, type TrackedThread } from '../../lib/integrations/gmail';
 import { isMock } from '../../lib/integrations/config';
+import { PersistedCommitmentFeedbackControls } from '../commitments/CommitmentFeedbackControls';
+import {
+  isContactAIEligible,
+  managedContactFromRecord,
+} from '../../lib/contactManagementCore';
+import { saveContactProfile } from '../../lib/contactManagement';
 
 /**
  * Everything this pass adds to a contact record, in one block so the edit to
@@ -36,11 +40,19 @@ export function ContactIntelligence({
   notes: any[];
   outreaches: any[];
 }) {
+  const aiAllowed = isContactAIEligible(
+    managedContactFromRecord(contactId, contact || {}),
+  );
   return (
     <div className="space-y-4">
       <WhyTheyMatter uid={uid} contactId={contactId} contact={contact} />
       <HealthBlock uid={uid} contactId={contactId} contact={contact} notes={notes} outreaches={outreaches} />
-      <ContactCommitments uid={uid} contactId={contactId} contactName={contact?.name || 'this contact'} />
+      <ContactCommitments
+        uid={uid}
+        contactId={contactId}
+        contactName={contact?.name || 'this contact'}
+        aiAllowed={aiAllowed}
+      />
       <TrackedThreads uid={uid} contactId={contactId} />
     </div>
   );
@@ -67,9 +79,15 @@ function WhyTheyMatter({ uid, contactId, contact }: { uid: string; contactId: st
   const save = async () => {
     setSaving(true);
     try {
-      await updateDoc(doc(db, `users/${uid}/contacts/${contactId}`), {
-        whyTheyMatter: value.trim() || null,
-        updatedAt: serverTimestamp(),
+      const managed = managedContactFromRecord(contactId, contact || {});
+      await saveContactProfile({
+        uid,
+        contactId,
+        profile: {
+          ...managed,
+          whyTheyMatter: value.trim(),
+        },
+        expectedProfileRevision: managed.profileRevision,
       });
       setEditing(false);
       toast('Saved.', 'success');
@@ -180,10 +198,12 @@ function ContactCommitments({
   uid,
   contactId,
   contactName,
+  aiAllowed,
 }: {
   uid: string;
   contactId: string;
   contactName: string;
+  aiAllowed: boolean;
 }) {
   const [items, setItems] = useState<Commitment[] | null>(null);
   const [memoOpen, setMemoOpen] = useState(false);
@@ -195,15 +215,6 @@ function ContactCommitments({
   }, [uid, contactId]);
 
   useEffect(load, [load]);
-
-  const resolve = async (commitment: Commitment, status: 'done' | 'dismissed') => {
-    setItems((current) => (current || []).filter((c) => c.id !== commitment.id));
-    try {
-      await setCommitmentStatus(uid, commitment.id, status);
-    } catch {
-      load();
-    }
-  };
 
   return (
     <div className="rounded-card border border-ink/15 bg-white p-4">
@@ -236,7 +247,7 @@ function ContactCommitments({
       ) : items.length > 0 ? (
         <ul className="mt-3 space-y-2">
           {items.map((commitment) => (
-            <li key={commitment.id} className="flex items-start justify-between gap-3">
+            <li key={commitment.id} className="rounded-card border border-ink/10 p-3">
               <div className="min-w-0">
                 <p className="font-mono text-xs leading-relaxed">{commitment.text}</p>
                 <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
@@ -244,24 +255,31 @@ function ContactCommitments({
                   {commitment.dueHint ? ` · ${commitment.dueHint}` : ''}
                 </span>
               </div>
-              <div className="flex shrink-0 gap-1.5">
-                <button
-                  onClick={() => resolve(commitment, 'dismissed')}
-                  title="Not a real commitment"
-                  className="flex h-7 w-7 items-center justify-center rounded-card border border-ink/15 text-muted transition-colors hover:text-ink"
-                >
-                  <X size={12} />
-                  <span className="sr-only">Dismiss</span>
-                </button>
-                <button
-                  onClick={() => resolve(commitment, 'done')}
-                  title="Done"
-                  className="flex h-7 w-7 items-center justify-center rounded-card bg-ink text-paper transition-colors hover:bg-zinc-800"
-                >
-                  <Check size={12} />
-                  <span className="sr-only">Mark done</span>
-                </button>
-              </div>
+              <details className="group mt-2 border-t border-ink/10 pt-2">
+                <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between font-mono text-[10px] font-bold uppercase tracking-widest text-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
+                  Review outcome
+                  <ChevronDown
+                    size={13}
+                    aria-hidden="true"
+                    className="transition-transform group-open:rotate-180 motion-reduce:transition-none"
+                  />
+                </summary>
+                <PersistedCommitmentFeedbackControls
+                  className="mt-2"
+                  uid={uid}
+                  commitmentId={commitment.id}
+                  state={commitment.feedback}
+                  onStateChange={(feedback) =>
+                    setItems((current) =>
+                      (current || []).map((item) =>
+                        item.id === commitment.id
+                          ? { ...item, feedback }
+                          : item,
+                      ),
+                    )
+                  }
+                />
+              </details>
             </li>
           ))}
         </ul>
@@ -276,6 +294,7 @@ function ContactCommitments({
           uid={uid}
           contactId={contactId}
           contactName={contactName}
+          aiAllowed={aiAllowed}
           onClose={() => setMemoOpen(false)}
           onSaved={load}
         />

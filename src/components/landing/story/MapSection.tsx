@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useTransform } from 'motion/react';
 import { ArrowRight } from 'lucide-react';
 import { StorySection, StoryHeading, StoryReveal, StoryAnchor, useScrub } from './StorySection';

@@ -1,143 +1,183 @@
-# 🚀 Cirqle CRM Complete Deployment Guide
+# Cirqle production deployment guide
 
-To deploy **Cirqle** as a fully functional, live production website where users can sign up, log in, and securely access AI features, we deploy the system in two separate, optimized layers:
+This guide describes the current three-part deployment. It replaces the
+legacy browser-to-LiteLLM architecture.
 
-1. **Frontend App (React / Vite)**: Built as a static Single Page Application (SPA), hosted on a global CDN (**Vercel** or **Netlify**) for free, high-speed delivery.
-2. **AI API Proxy Gateway (LiteLLM + Redis)**: Containerized backend service hosted on a container platform (**Render**, **Railway**, or **DigitalOcean VPS**) that handles your secure master keys, Redis caching, and user budget/rate limits.
+## 1. Vercel web app and server APIs
 
+Import the repository into Vercel as a Vite project:
+
+- Build command: `npm run build`
+- Output directory: `dist`
+- Node runtime: 24
+
+Required server-only environment variables:
+
+- `LITELLM_MASTER_KEY`
+- `LITELLM_KEY_DERIVATION_SECRET` (stable across master-key rotation and
+  different from `LITELLM_MASTER_KEY`)
+- `LITELLM_GATEWAY_URL` (set explicitly for each preview/production
+  environment)
+- Firebase Admin credentials using either
+  `FIREBASE_SERVICE_ACCOUNT_JSON` or the split
+  `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`,
+  `FIREBASE_PRIVATE_KEY`
+- `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` (or matching
+  Vercel KV variables) for distributed provisioning/capture throttling;
+  preview and production fail closed when this limiter is absent or unavailable
+- `CIRQLE_AI_NEW_KEYS_PER_DAY` to cap brand-new managed AI-key issuance across
+  the whole deployment in a rolling 24-hour window. It defaults to `25`;
+  existing users reusing their deterministic keys do not consume this limit.
+- `CRON_SECRET`, a unique random value of at least 32 characters. Vercel sends
+  it only to the daily `/api/cron/maintenance` job.
+- For live Google Calendar/Gmail only: `INTEGRATIONS_LIVE_ENABLED=true`,
+  exact `INTEGRATIONS_APP_ORIGIN`, and server-only `GOOGLE_CLIENT_ID` /
+  `GOOGLE_CLIENT_SECRET`, plus `GOOGLE_TOKEN_ENCRYPTION_KEY`, a stable
+  base64-encoded 32-byte key used for AES-256-GCM credential envelopes. Set
+  `GOOGLE_OAUTH_TEST_MODE=true` only while the Google consent screen is in
+  Testing.
+
+Optional browser build variables:
+
+- `VITE_FIREBASE_APP_CHECK_SITE_KEY`
+- `VITE_ENABLE_DEMO_DATA=true` only for an explicitly disposable demo
+  deployment
+- the preview Gmail/Calendar variables documented in `.env.example`
+
+Live Google browser configuration is exactly:
+
+```text
+VITE_INTEGRATIONS_MODE=live
+VITE_INTEGRATIONS_API_BASE=/api/integrations
 ```
-┌─────────────────────────────────┐
-│     Client's Web Browser        │
-│  (Static assets loaded from)    │
-└────────┬────────────────┬───────┘
-         │                │
-         │ (UI Actions)   │ (API Requests / Virtual Key)
-         ▼                ▼
-┌─────────────────┐  ┌────────────────────────────────────┐
-│ Vercel Hosting  │  │ Render / Railway Gateway Service   │
-│ (Frontend Site) │  │ (LiteLLM Proxy + Redis Backend)    │
-└─────────────────┘  └─────────────────┬──────────────────┘
-                                       │
-                                       ▼
-                             ┌───────────────────┐
-                             │ Google & OpenAI   │
-                             │   Direct APIs     │
-                             └───────────────────┘
+
+No Google credential belongs in a `VITE_*` variable. The server creates an
+opaque, ten-minute, single-use OAuth state bound to the verified Firebase UID,
+provider, canonical callback, and PKCE S256 verifier. The callback verifies
+the actual Google account selected by the user, records that verified address,
+and stores access/refresh tokens only inside authenticated encryption
+envelopes. See
+`GOOGLE_INTEGRATIONS_SECURITY.md` for the release checklist.
+
+Do not set `VITE_PASSWORD_BREACH_CHECK_DISABLED` in production. It exists only
+for deliberately offline local development. The password-range proxy needs no
+HIBP key or server secret.
+
+Optional server switch:
+
+- `FIREBASE_APP_CHECK_ENFORCED=true` only after preview and production
+  monitoring show valid tokens for authenticated CRM use and anonymous card
+  visitors
+
+Never put provider keys, the LiteLLM master key, the virtual-key derivation
+secret, Firebase Admin credentials, or any virtual key in `VITE_*`.
+
+There is no default LiteLLM production URL, deprecated `VITE_GATEWAY_URL`
+fallback, or master-key fallback for key derivation. A missing or invalid
+setting makes provisioning, AI calls, usage, and AI account cleanup return a
+sanitized unavailable response. This prevents a preview from silently sending
+private data or spend to production. Provisioning consumes separately hashed
+UID and trusted Vercel-IP rate-limit buckets.
+
+Every successful authenticated provisioning attempt also performs a blind,
+idempotent Admin SDK update that deletes known legacy raw AI-key fields from
+`users/{uid}`. It never reads, returns, or logs their historical values.
+
+The global issuance circuit breaker is intentionally separate from per-user
+and per-IP throttling. A spike in account creation can pause only new managed
+keys while signed-in users with an existing key continue to work. A distributed
+limiter outage fails closed in preview and production.
+
+Deploy the feature branch to a Vercel preview first. Verify authentication,
+AI, public cards, account lifecycle, headers, CSP reports, and App Check
+metrics before promoting.
+
+The production deployment registers one daily bounded maintenance job. It
+processes queued contact purge/merge-recovery requests and resumes source
+retention policies from a private cursor. Runs are leased, retry-safe, limited
+to small batches, and return counts only. Vercel preview deployments do not
+execute production cron schedules.
+
+## 2. Firebase
+
+Firebase project: `cirqle-9dd06`; Firestore database: `(default)`.
+
+Configure:
+
+1. Email/password and Google Authentication as intended.
+2. Password policy, email-enumeration protection, email templates, and the
+   `/auth/action` handler from `ACCOUNT_LIFECYCLE_RELEASE.md`. Signup and that
+   action handler also enforce the k-anonymous breach-screening contract in
+   `PASSWORD_SECURITY.md`.
+3. A reCAPTCHA Enterprise web App Check registration matching
+   `VITE_FIREBASE_APP_CHECK_SITE_KEY`.
+4. App Check monitoring before enforcement.
+5. A TTL policy on `captureGuards.expiresAt`.
+6. Cloud Functions from `functions/` for capture processing and optional
+   integrations.
+
+Rules are source-controlled. Do not paste-edit them in the console:
+
+```sh
+npm run test:rules
+npm run test:security-config
+npm run verify:firestore-rules:deployed
 ```
 
----
+Production release is deliberately guarded and only works from clean,
+reviewed `main`:
 
-## 📂 Component 1: Deploying the Frontend (Vercel - Free Tier)
-
-Vercel is the industry standard for Vite/React applications. It is free, automatically rebuilds when you push to GitHub, and provides instant SSL.
-
-### Step 1: Push Your Code to GitHub
-Ensure all your files (including `src/lib/gemini.ts` and the `litellm-proxy` folder) are committed to a GitHub repository:
-```bash
-git init
-git add .
-git commit -m "feat: complete proxy setup and frontend client alignment"
-git remote add origin https://github.com/YOUR_USERNAME/cirqle-crm.git
-git branch -M main
-git push -u origin main
+```sh
+npm run release:firestore-rules -- --confirm-production=cirqle-9dd06
 ```
 
-### Step 2: Import into Vercel
-1. Log in to [Vercel](https://vercel.com) using your GitHub account.
-2. Click **Add New** ➔ **Project**.
-3. Import your `cirqle-crm` repository.
-4. Vercel will automatically detect **Vite** as the framework and configure the build command (`npm run build`) and output directory (`dist`).
+See `SECURITY_RELEASE.md` for OIDC drift monitoring and the exact release
+procedure.
 
-### Step 3: Configure Frontend Environment Variables
-Before clicking "Deploy", expand the **Environment Variables** section and add:
-* **`VITE_GATEWAY_URL`**: `https://your-litellm-proxy-url.com` (You will get this URL from deploying Component 2 below).
+## 3. Railway LiteLLM
 
-### Step 4: Click Deploy 🚀
-Vercel will build your static files and give you a public URL (e.g., `https://cirqle-crm.vercel.app`).
+Point the Railway service root at `litellm-proxy/`. The Docker image starts
+LiteLLM with `/app/config.yaml`.
 
----
+Required Railway variables:
 
-## ⚙️ Component 2: Deploying the API Proxy Backend
+- `LITELLM_MASTER_KEY`
+- `LITELLM_SALT_KEY`
+- `DATABASE_URL`
+- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
+- `GEMINI_API_KEY`
+- `DEEPSEEK_API_KEY`
 
-Since the API Proxy requires Docker and a background Redis database, we deploy it to a platform supporting containers.
+`config.yaml` is both the alias router and the private-data logging policy.
+It disables response caching, verbose/raw message logging, prompt storage in
+spend logs, and LiteLLM telemetry while retaining cost attribution.
 
-### Option A: Railway (Highly Recommended - Easiest Setup)
-Railway provides one-click hosting for multi-container Docker Compose architectures.
+After every Railway deployment:
 
-1. Create a free account at [Railway.app](https://railway.app).
-2. Click **New Project** ➔ **Deploy from GitHub repo**.
-3. Select your repository.
-4. Railway will analyze your project structure. Point it to the `litellm-proxy` directory, or upload a custom Docker Compose.
-5. Railway will automatically spin up two services matching our `docker-compose.yml`: `litellm-proxy` and `redis`.
-6. Add your production environment variables in Railway's UI settings:
-   - `LITELLM_MASTER_KEY`: Your secure master token starting with `sk-`
-   - `LITELLM_SALT_KEY`: A long random security salt string
-   - `OPENAI_API_KEY`: Your actual OpenAI key
-   - `GEMINI_API_KEY`: Your actual Google Gemini key
-7. Railway will generate a public domain for your proxy (e.g., `https://cirqle-proxy-production.up.railway.app`). **Copy this URL and save it in Vercel's `VITE_GATEWAY_URL` variable!**
+1. Check `/health/liveliness`.
+2. Inspect `/model/info` with the master key.
+3. Make one tiny completion with each of the three active aliases.
+4. Confirm the per-user key allowlist, `$5` cap, `30d` reset, and spend.
+5. Inspect logs to ensure prompts, responses, keys, and provider bodies are
+   absent.
 
----
+See `litellm-proxy/README.md` for the model flow and safe alias/model changes.
 
-### Option B: Render (Free Tier Container & Redis)
-Render provides free Web Services for Dockerized apps.
+## Release-candidate gate
 
-#### 1. Deploy the Redis Cache
-1. In the [Render Dashboard](https://dashboard.render.com), click **New** ➔ **Redis**.
-2. Name it `cirqle-redis` and click **Create**.
-3. Once active, copy the **Internal Redis URL** (e.g., `redis://red-xxxxxxxxxx:6379`).
+From a clean install:
 
-#### 2. Deploy the LiteLLM Proxy
-1. Click **New** ➔ **Web Service**.
-2. Connect your GitHub repository.
-3. In the Settings:
-   - **Root Directory**: `litellm-proxy`
-   - **Runtime**: `Docker`
-4. Expand **Environment Variables** and add:
-   - `LITELLM_MASTER_KEY`: Your secure admin key starting with `sk-`
-   - `LITELLM_SALT_KEY`: A random security salt string
-   - `OPENAI_API_KEY`: Your actual OpenAI key
-   - `GEMINI_API_KEY`: Your actual Google Gemini key
-   - `REDIS_HOST`: The host part of your Render Redis internal URL (e.g., `red-xxxxxxxxxx`)
-   - `REDIS_PORT`: `6379`
-   - `DATABASE_URL`: `sqlite:////data/litellm.db`
-5. Under **Disk** / **Volume**:
-   - Create a persistent disk mount.
-   - **Mount Path**: `/data`
-   - **Size**: 1 GB (perfect for SQLite keys and transaction logs).
-6. Click **Deploy**. Render will build the LiteLLM container and provide a secure public URL (e.g., `https://cirqle-proxy.onrender.com`).
+```sh
+npm ci
+npm run lint
+npm test
+npm run build
+```
 
----
+On the Vercel preview, verify that the password-range request contains only a
+five-character prefix and that a simulated provider outage preserves local
+password rules.
 
-### Option C: DigitalOcean Droplet (For Full Ownership & Scaling)
-If you want to run the exact `docker-compose.yml` file without third-party platform limitations.
-
-1. Spin up a basic Ubuntu Droplet ($4/month - $6/month).
-2. SSH into your droplet and install Docker & Docker Compose:
-   ```bash
-   sudo apt update
-   sudo apt install -y docker.io docker-compose
-   ```
-3. Create your configuration directory and clone the `litellm-proxy` folder:
-   ```bash
-   mkdir -p /app/litellm-proxy
-   ```
-4. Copy `config.yaml`, `docker-compose.yml`, and your active `.env` file into `/app/litellm-proxy`.
-5. Run Docker Compose:
-   ```bash
-   cd /app/litellm-proxy
-   docker compose up -d --build
-   ```
-6. The proxy will be instantly accessible globally at your droplet's public IP address `http://YOUR_DROPLET_IP:4000`.
-
----
-
-## 🔄 User Signup & Virtual Key Workflow
-
-Once the CRM frontend (Vercel) and Proxy (Render/Railway) are both live:
-1. **User Sign Up**: Users visit your Vercel website and sign up using the Firebase Authentication UI.
-2. **Assigning an API Key**:
-   - *Option A (Admin/Manual)*: You generate a capped virtual key for the user using the administrative `/key/generate` endpoint, and assign it to them.
-   - *Option B (Automated - Recommended)*: You can add a short script or a Firebase Cloud Function that automatically triggers when a user signs up. The backend script calls the proxy's `/key/generate` endpoint using the `LITELLM_MASTER_KEY` to create a virtual key capped at $5.00 spend.
-3. **Storage & Access**: The generated virtual key is saved in the user's Firestore document (e.g., `users/{userId}/apiKey`).
-4. **Frontend Execution**: When the frontend client boots up, it reads the user's custom `apiKey` from Firestore and saves it in `localStorage.setItem('CIRQLE_USER_PROXY_KEY', apiKey)`.
-5. **Seamless Routing**: Every time they use an AI feature, `src/lib/gemini.ts` instantiates the `@google/genai` client using their unique virtual key, routing all calls through your secure Render/Railway proxy.
+Then execute the deployed checklist in `IMPLEMENTATION_VERIFICATION.md`,
+including a disposable signup → verified email → provisioning → tiny `fast`
+call → export → deletion cycle. Never log the disposable password or any key.

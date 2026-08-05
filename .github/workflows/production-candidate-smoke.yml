@@ -1,0 +1,101 @@
+name: Production candidate smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_url:
+        description: Exact Vercel candidate URL to test
+        required: true
+        type: string
+      target_environment:
+        description: Firebase/Vercel isolation policy for this candidate
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-candidate-smoke-${{ inputs.target_environment }}
+  cancel-in-progress: false
+
+jobs:
+  preview-smoke:
+    name: Isolated preview user, AI aliases, usage, and cleanup
+    if: inputs.target_environment == 'preview'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Configure this GitHub environment with preview-only credentials and
+    # required reviewers. It must never contain production Firebase secrets.
+    environment: preview-candidate
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run confirmed disposable-account smoke
+        env:
+          CIRQLE_SMOKE_BASE_URL: ${{ inputs.candidate_url }}
+          CIRQLE_SMOKE_CONFIRM: create-and-delete-disposable-cirqle-user
+          CIRQLE_SMOKE_TARGET_ENVIRONMENT: preview
+          CIRQLE_SMOKE_ALLOW_PRODUCTION: "false"
+          VERCEL_ENV: preview
+          FIREBASE_PROJECT_ID: ${{ secrets.CIRQLE_SMOKE_FIREBASE_PROJECT_ID }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.CIRQLE_SMOKE_FIREBASE_SERVICE_ACCOUNT_JSON }}
+          FIREBASE_WEB_API_KEY: ${{ secrets.CIRQLE_SMOKE_FIREBASE_WEB_API_KEY }}
+          LITELLM_GATEWAY_URL: ${{ secrets.CIRQLE_SMOKE_LITELLM_GATEWAY_URL }}
+          LITELLM_MASTER_KEY: ${{ secrets.CIRQLE_SMOKE_LITELLM_MASTER_KEY }}
+          LITELLM_KEY_DERIVATION_SECRET: ${{ secrets.CIRQLE_SMOKE_LITELLM_KEY_DERIVATION_SECRET }}
+        run: npm run smoke:production-candidate | tee production-candidate-smoke.json
+      - name: Upload redacted smoke report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: preview-candidate-smoke-${{ github.run_id }}
+          path: production-candidate-smoke.json
+          if-no-files-found: error
+          retention-days: 30
+
+  production-smoke:
+    name: Production user, AI aliases, usage, and cleanup
+    if: inputs.target_environment == 'production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Configure this as a separately protected GitHub environment with
+    # production-only credentials and required reviewers.
+    environment: production-candidate
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run confirmed disposable-account smoke
+        env:
+          CIRQLE_SMOKE_BASE_URL: ${{ inputs.candidate_url }}
+          CIRQLE_SMOKE_CONFIRM: create-and-delete-disposable-cirqle-user
+          CIRQLE_SMOKE_TARGET_ENVIRONMENT: production
+          CIRQLE_SMOKE_ALLOW_PRODUCTION: "true"
+          VERCEL_ENV: production
+          FIREBASE_PROJECT_ID: ${{ secrets.CIRQLE_SMOKE_FIREBASE_PROJECT_ID }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.CIRQLE_SMOKE_FIREBASE_SERVICE_ACCOUNT_JSON }}
+          FIREBASE_WEB_API_KEY: ${{ secrets.CIRQLE_SMOKE_FIREBASE_WEB_API_KEY }}
+          LITELLM_GATEWAY_URL: ${{ secrets.CIRQLE_SMOKE_LITELLM_GATEWAY_URL }}
+          LITELLM_MASTER_KEY: ${{ secrets.CIRQLE_SMOKE_LITELLM_MASTER_KEY }}
+          LITELLM_KEY_DERIVATION_SECRET: ${{ secrets.CIRQLE_SMOKE_LITELLM_KEY_DERIVATION_SECRET }}
+        run: npm run smoke:production-candidate | tee production-candidate-smoke.json
+      - name: Upload redacted smoke report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: production-candidate-smoke-${{ github.run_id }}
+          path: production-candidate-smoke.json
+          if-no-files-found: error
+          retention-days: 30

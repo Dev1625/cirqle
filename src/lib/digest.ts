@@ -1,8 +1,14 @@
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../config/firebase';
-import { generateText } from './ai';
 import { computeHealth, isDormant, type HealthResult } from './health';
 import { emailMode } from './integrations/config';
+import {
+  generateGroundedText,
+  groundingDisplay,
+  type GroundedSource,
+  type GroundingDisplay,
+} from './grounding';
+import { isContactAIEligible } from './contactManagementCore';
 
 /**
  * Dormant-contact digest — "worth reviving this week".
@@ -21,6 +27,7 @@ export interface DigestItem {
   health: HealthResult;
   /** Why this one, in the user's language rather than the scorer's. */
   reason: string;
+  whyTheyMatter: string | null;
 }
 
 export interface Digest {
@@ -66,6 +73,7 @@ export async function buildDigest(uid: string, limit = 5): Promise<Digest> {
   const dormant: { item: DigestItem; weight: number }[] = [];
 
   for (const contact of contacts) {
+    if (!isContactAIEligible(contact)) continue;
     const notes = notesByContact[contact.id] || [];
     const outreaches = outreachByContact[contact.id] || [];
     const health = computeHealth({ contact, notes, outreaches });
@@ -89,6 +97,7 @@ export async function buildDigest(uid: string, limit = 5): Promise<Digest> {
         role: contact.role || null,
         health,
         reason: buildReason(tier, health, everReplied, contact.whyTheyMatter),
+        whyTheyMatter: contact.whyTheyMatter || null,
       },
     });
   }
@@ -135,6 +144,7 @@ function buildReason(
 
 /** One-tap AI-drafted opener for a specific dormant contact. */
 export async function draftRevivalNote(params: {
+  contactId: string;
   contactName: string;
   company: string | null;
   role: string | null;
@@ -143,32 +153,84 @@ export async function draftRevivalNote(params: {
   lastTouchDays: number;
   neverContacted?: boolean;
   senderName: string;
-}): Promise<string> {
-  // Same sentinel trap as buildReason: never send "999 days" to the model,
-  // or it will dutifully write a note apologising for a three-year silence.
-  const timingLine = params.neverContacted
-    ? '- They are in the sender\'s network but have never actually been contacted. This is a first approach, not a re-engagement.'
-    : `- It has been about ${params.lastTouchDays} days since last contact.`;
+  signal?: AbortSignal;
+}): Promise<{ text: string; grounding: GroundingDisplay }> {
+  const sources = revivalDraftSources(params);
+  const grounded = await generateGroundedText({
+    task: `Write a short ${
+      params.neverContacted ? 'first-approach' : 're-engagement'
+    } message of three or four sentences and at most 80 words.`,
+    sources,
+    rules: [
+      params.neverContacted
+        ? 'This is a first approach. Do not reference a past conversation, shared history, or a gap.'
+        : 'Acknowledge the recorded gap once, lightly, without grovelling.',
+      'Give a concrete reason for reaching out only when the saved contact record supplies one.',
+      'When no reason is recorded, ask a genuine, modest question instead of inventing a pretext.',
+      'Never mention an attachment, recent news, a company event, a mutual contact, or a personal milestone unless a source explicitly contains it.',
+      'Do not use "hope this finds you well", "just circling back", or "touching base".',
+      'Return only the message body, with no subject or signature block.',
+    ],
+    options: {
+      tier: 'reasoning',
+      maxTokens: 450,
+      feature: 'dormant-revival-draft',
+      signal: params.signal,
+    },
+  });
+  const requiredSourceIds = [
+    `contact-${params.contactId}`,
+    `network-health-${params.contactId}`,
+  ];
+  if (requiredSourceIds.some((id) => !grounded.usedSourceIds.includes(id))) {
+    throw new Error('The revival draft did not cite the contact and network-health records.');
+  }
+  return {
+    text: grounded.result.trim(),
+    grounding: groundingDisplay(grounded, sources),
+  };
+}
 
-  const prompt = `Write a short ${params.neverContacted ? 'opening' : 're-engagement'} message to ${params.contactName}${
-    params.role ? `, ${params.role}` : ''
-  }${params.company ? ` at ${params.company}` : ''}.
-
-Context:
-${timingLine}
-- Why they matter to the sender: ${params.whyTheyMatter || '(not recorded)'}
-- Sender's name: ${params.senderName}
-
-Rules:
-- 3-4 sentences, maximum 80 words.
-- ${params.neverContacted ? 'Do not reference any past conversation or gap — there has not been one.' : 'Acknowledge the gap once, lightly, without apologising twice or grovelling.'}
-- Give one concrete reason for reaching out now. If you have nothing specific, ask a genuine question rather than inventing a pretext.
-- No "hope this finds you well", no "just circling back", no "touching base".
-- Sound like a person who has been busy, not like a CRM.
-
-Return only the message body. No subject line, no signature block.`;
-
-  return generateText(prompt, { tier: 'reasoning' });
+export function revivalDraftSources(params: {
+  contactId: string;
+  contactName: string;
+  company: string | null;
+  role: string | null;
+  reason: string;
+  whyTheyMatter?: string | null;
+  lastTouchDays: number;
+  neverContacted?: boolean;
+  senderName: string;
+}): GroundedSource[] {
+  return [
+    {
+      id: `contact-${params.contactId}`,
+      kind: 'contact',
+      label: `Contact · ${params.contactName}`,
+      text: JSON.stringify({
+        name: params.contactName,
+        company: params.company,
+        role: params.role,
+        whyTheyMatter: params.whyTheyMatter || null,
+      }),
+    },
+    {
+      id: `network-health-${params.contactId}`,
+      kind: 'system',
+      label: 'Deterministic network health',
+      text: JSON.stringify({
+        neverContacted: Boolean(params.neverContacted),
+        lastTouchDays: params.neverContacted ? null : params.lastTouchDays,
+        rankingReason: params.reason,
+      }),
+    },
+    {
+      id: 'sender-profile',
+      kind: 'profile',
+      label: 'Sender profile',
+      text: JSON.stringify({ name: params.senderName }),
+    },
+  ];
 }
 
 /**

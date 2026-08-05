@@ -1,4 +1,4 @@
-FROM ghcr.io/berriai/litellm:main-latest
+FROM ghcr.io/berriai/litellm:v1.92.1@sha256:668d52ba01e47718a6f818ee55a1dfbb83125a8b9dc6b7b206901826c93cf41b
 
 # Copy our custom configuration file into the image
 COPY config.yaml /app/config.yaml

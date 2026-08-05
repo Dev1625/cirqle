@@ -11,8 +11,8 @@ import React from 'react';
  * with the oxblood brand accent reserved for decision points.
  */
 export function PreviewBadge({
-  label = 'Preview',
-  title = 'Running on sample data — not connected to a live account yet.',
+  label = 'Preview · sample data',
+  title = 'This uses sample data and is not connected to a live account yet.',
   className = '',
 }: {
   label?: string;
@@ -22,6 +22,7 @@ export function PreviewBadge({
   return (
     <span
       title={title}
+      aria-label={`${label}. ${title}`}
       className={`inline-flex shrink-0 items-center rounded-card bg-accent px-1.5 py-0.5 font-mono text-[9px] font-bold uppercase tracking-widest text-subtle ${className}`}
     >
       {label}

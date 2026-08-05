@@ -5,6 +5,8 @@ import { useEffect } from 'react';
  *
  *   /    focus the Ask-AI search bar
  *   c    compose / draft outreach
+ *   Ctrl/Cmd + K open the command menu
+ *   ?    open help and shortcut reference
  *   Esc  close whatever is open
  *
  * Two rules that make the difference between a shortcut layer people use and
@@ -25,6 +27,8 @@ import { useEffect } from 'react';
 
 export const COMPOSE_EVENT = 'cirqle:compose';
 export const ESCAPE_EVENT = 'cirqle:escape';
+export const COMMAND_PALETTE_EVENT = 'cirqle:command-palette';
+export const HELP_EVENT = 'cirqle:help';
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -32,9 +36,26 @@ function isTypingTarget(target: EventTarget | null): boolean {
   return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
 }
 
-export function useKeyboardShortcuts(options: { onCompose?: () => void } = {}) {
+export function useKeyboardShortcuts(
+  options: {
+    onCompose?: () => void;
+    onCommandPalette?: () => void;
+    onHelp?: () => void;
+  } = {},
+) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        !event.altKey &&
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLocaleLowerCase() === 'k'
+      ) {
+        event.preventDefault();
+        if (options.onCommandPalette) options.onCommandPalette();
+        else window.dispatchEvent(new CustomEvent(COMMAND_PALETTE_EVENT));
+        return;
+      }
+
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
       if (event.key === 'Escape') {
@@ -45,6 +66,13 @@ export function useKeyboardShortcuts(options: { onCompose?: () => void } = {}) {
       }
 
       if (isTypingTarget(event.target)) return;
+
+      if (event.key === '?') {
+        event.preventDefault();
+        if (options.onHelp) options.onHelp();
+        else window.dispatchEvent(new CustomEvent(HELP_EVENT));
+        return;
+      }
 
       if (event.key === '/') {
         const search = document.querySelector<HTMLInputElement>('[data-shortcut="global-search"]');
@@ -65,7 +93,7 @@ export function useKeyboardShortcuts(options: { onCompose?: () => void } = {}) {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [options.onCompose]);
+  }, [options.onCommandPalette, options.onCompose, options.onHelp]);
 }
 
 /** Convenience for pages that want to react to the global `c` shortcut. */

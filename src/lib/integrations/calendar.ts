@@ -1,4 +1,5 @@
 import { integrationsApiBase, isMock } from './config';
+import { authenticatedFetch } from '../authenticatedFetch';
 
 /**
  * Google Calendar, read-only.
@@ -83,10 +84,12 @@ const MOCK_CONFERENCE = {
 
 export function buildMockEvents(
   seedKey: string,
-  contacts: { id: string; name?: string | null; email?: string | null }[]
+  contacts: { id: string; name?: string | null; email?: string | null }[],
+  at: Date = new Date(),
 ): CalendarEvent[] {
-  const random = seededRandom(seedKey + new Date().toDateString());
-  const now = new Date();
+  const now = new Date(at);
+  const dayKey = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+  const random = seededRandom(seedKey + dayKey);
   const events: CalendarEvent[] = [];
 
   const named = contacts.filter((c) => (c.name || '').trim().length > 0);
@@ -105,14 +108,20 @@ export function buildMockEvents(
 
     const contact = named[index];
     const name = contact.name as string;
-    const dayOffset = i === 0 ? 0 : Math.floor(random() * 2);
-    // First meeting is always still ahead of now today, so the Dashboard
-    // "today's meetings" card is never empty on a fresh demo.
-    const hour = i === 0
-      ? Math.min(now.getHours() + 1 + Math.floor(random() * 2), 20)
-      : 9 + Math.floor(random() * 8);
-
-    const start = atTime(now, dayOffset, hour, random() > 0.5 ? 30 : 0);
+    let start: Date;
+    if (i === 0) {
+      // Date arithmetic, rather than capping an hour on the same day, keeps
+      // this meeting ahead of the user after 20:00 and naturally rolls across
+      // midnight.
+      const leadMinutes = random() > 0.5 ? 90 : 60;
+      start = new Date(now.getTime() + leadMinutes * 60 * 1000);
+    } else {
+      const dayOffset = Math.floor(random() * 2);
+      start = atTime(now, dayOffset, 9 + Math.floor(random() * 8), random() > 0.5 ? 30 : 0);
+      // A "today at 09:00" draw is already past for afternoon/evening users.
+      // Roll it to tomorrow so every contact fixture remains upcoming.
+      if (start <= now) start.setDate(start.getDate() + 1);
+    }
     const end = new Date(start.getTime() + 30 * 60 * 1000);
 
     events.push({
@@ -178,9 +187,8 @@ export async function fetchUpcomingEvents(params: {
 
   // Live: the Cloud Function holds the refresh token and calls Google. The
   // browser never sees a Google credential.
-  const response = await fetch(`${integrationsApiBase()}/calendar/upcoming`, {
+  const response = await authenticatedFetch(`${integrationsApiBase()}/calendar/upcoming`, {
     method: 'GET',
-    credentials: 'include',
   });
   if (!response.ok) {
     throw new Error(`Calendar sync failed (${response.status})`);

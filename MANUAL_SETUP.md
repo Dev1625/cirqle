@@ -52,47 +52,69 @@ docker compose up -d --build
 If your proxy runs on Railway rather than locally, set `DEEPSEEK_API_KEY` as a
 Railway service variable instead — same variable name, same effect.
 
-**Before it will work**, confirm two model ids in `litellm-proxy/config.yaml`.
-The aliases (`deepseek-v4-flash`, `deepseek-v4-pro`) are correct; the `model:`
-values underneath them are a best guess I could not verify. Check DeepSeek's
-current model list and edit those two lines. Nothing else changes.
+The three provider routes in `litellm-proxy/config.yaml` are the release
+contract: Gemini 3.5 Flash-Lite for `fast`, DeepSeek V4 Flash for `reasoning`,
+and DeepSeek V4 Pro for `draft`. Smoke-test all three aliases after every
+Railway deployment; process health alone does not prove model-route health.
 
 ### Which model each feature uses
 
-The app never names a model. It asks for one of three **tiers**, mapped in
-`src/lib/aiConfig.ts`:
+Product code asks for a semantic **tier** and sends a required feature ID.
+`api/_lib/ai-feature-policy.js` is authoritative: it derives the allowed
+alias, default/hard token cap, maximum temperature, and usage label. The
+browser mapping in `src/lib/aiConfig.ts` is a consistency assertion, not an
+authorization boundary.
 
 | Tier | Default model | Used by |
 |---|---|---|
-| `fast` | `gemini-2.5-flash-lite` | CSV import, Add AI Tags, magic paste-to-contact, voice-memo summary |
+| `fast` | `gemini-3.5-flash-lite` | CSV import, Add AI Tags, magic paste-to-contact, voice-memo summary, quick outreach draft |
 | `reasoning` | `deepseek-v4-flash` | Ask-AI search, Dashboard priorities, pre-meeting brief, process reply, commitment extraction, dormant-digest note |
-| `draft` | `deepseek-v4-pro` | Draft Outreach, AI card intro |
+| `draft` | `deepseek-v4-pro` | Premium outreach improvement, AI card intro |
 
-**To change a model**, edit one line in `src/lib/aiConfig.ts` — or override per
-deploy with `VITE_AI_MODEL_FAST` / `_REASONING` / `_DRAFT`. To change what an
-alias actually runs on, edit `litellm-proxy/config.yaml` and restart the proxy;
-no app rebuild needed.
+**To change a model**, update the tier alias in
+`api/_lib/ai-feature-policy.js`, mirror it in `src/lib/aiConfig.ts`, and add
+the matching alias/provider route in `litellm-proxy/config.yaml`. Redeploy
+Vercel and Railway, then make one real completion through every active alias.
+There are intentionally no `VITE_AI_MODEL_*` overrides.
 
-**If you rename an alias, three files must agree** or you get a 401/403 that
-looks like an auth bug:
-1. `src/lib/aiConfig.ts`
-2. `model_name:` in `litellm-proxy/config.yaml`
-3. the `models: [...]` allowlist in `api/register-user.js` — virtual keys are
-   scoped per model
+**If you rename an alias, three files must agree** or policy/configuration
+tests fail:
+
+1. `api/_lib/ai-feature-policy.js`
+2. `src/lib/aiConfig.ts`
+3. `model_name:` in `litellm-proxy/config.yaml`
+
+Managed virtual-key allowlists derive directly from the server feature policy.
+Existing deployed keys are reconciled during sign-in; confirm their allowlist
+after a release that renames an alias.
 
 ### Key hygiene — what lives where
 
 | Secret | Lives in | Never in |
 |---|---|---|
-| `DEEPSEEK_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | `litellm-proxy/.env` or Railway vars | git, Vercel, the browser |
+| `DEEPSEEK_API_KEY`, `GEMINI_API_KEY` | `litellm-proxy/.env` or Railway vars | git, Vercel, the browser |
 | `LITELLM_MASTER_KEY` | Vercel env var (used by `api/register-user.js`) **and** the proxy | git, the browser |
-| Per-user virtual key | minted server-side, held in Firestore + `localStorage` | — |
+| `LITELLM_KEY_DERIVATION_SECRET` | Vercel server env, stable and distinct from the master key | Railway provider config, git, the browser |
+| `GOOGLE_TOKEN_ENCRYPTION_KEY` | Vercel server env, stable base64-encoded 32-byte key | Railway, git, the browser |
+| Per-user virtual key | deterministically derived and used only by verified Vercel server functions | Firestore, browser storage, API responses, logs |
 
 **Nothing prefixed `VITE_` is secret.** Vite inlines those into the browser
 bundle at build time, so a real key there is published to every visitor
-permanently. The old client had a `VITE_GEMINI_API_KEY` fallback; it has been
-removed and must not come back. The only `VITE_` AI variables now are the
-gateway URL and model alias names, neither of which is sensitive.
+permanently. The old client-side provider-key and model-override paths have
+been removed and must not come back.
+
+Set `LITELLM_GATEWAY_URL` explicitly in every Vercel environment. The server
+does not use a hard-coded production URL or `VITE_GATEWAY_URL` fallback, and
+it does not reuse `LITELLM_MASTER_KEY` as the derivation secret. Missing
+settings fail closed so previews cannot silently call production. Vercel
+preview and production also require Upstash/Vercel KV: provisioning checks
+separately hashed UID and trusted edge-IP buckets and rejects requests when
+distributed throttling is unavailable.
+
+Set `CIRQLE_AI_NEW_KEYS_PER_DAY` in Vercel to the maximum number of brand-new
+managed AI keys Cirqle may issue across the deployment in a rolling day
+(`25` by default). Reusing an existing deterministic key does not consume the
+limit. This is the last-resort spend circuit breaker if automated signups spike.
 
 ---
 
@@ -156,11 +178,13 @@ This needs the Blaze (pay-as-you-go) plan — Cloud Functions are not available
 on Spark. For a personal card the volume rounds to nothing, but the plan
 change is a real prerequisite, not a formality.
 
-**You do not have to deploy it.** The client-side drain in
-`src/hooks/useCaptureDrain.ts` still works and still ships; the only
-difference is that a captured contact appears on your next app load rather
-than instantly. Both paths claim each capture in a transaction, so running
-both at once cannot produce a duplicate contact.
+This function is required for reverse capture. Capture filing is deliberately
+server-only: browser rules cannot create capture evidence or contacts through
+this path. That keeps owner checks, deduplication, consent provenance, and the
+atomic capture claim inside the trusted backend. If the function is not
+deployed, the public visitor can still download the vCard, but the captured
+lead will remain pending. Once deployed, failed deliveries are retried by the
+server and the idempotent transaction safely ignores an already-filed capture.
 
 ### Running a second emulator (two worktrees at once)
 
@@ -257,21 +281,33 @@ scarier and the eventual verification slower.
      Add your production origin as a second URI when you deploy.
    - Copy the **client ID** and the **client secret**.
 
-7. **Put them where they go.** The split matters:
+7. **Put them where they go.** The split is a security boundary.
 
-   In `.env.local` (client-side, and safe — a client id is public by design):
+   In the Vercel server environment:
+   ```
+   INTEGRATIONS_LIVE_ENABLED=true
+   INTEGRATIONS_APP_ORIGIN="https://your-canonical-domain.example"
+   GOOGLE_CLIENT_ID="xxxxx.apps.googleusercontent.com"
+   GOOGLE_CLIENT_SECRET="xxxxx"
+   GOOGLE_TOKEN_ENCRYPTION_KEY="<base64-encoded 32-byte key>"
+   GOOGLE_OAUTH_TEST_MODE=true
+   ```
+
+   In the Vercel browser-build environment:
    ```
    VITE_INTEGRATIONS_MODE=live
-   VITE_GOOGLE_CLIENT_ID="xxxxx.apps.googleusercontent.com"
+   VITE_INTEGRATIONS_API_BASE="/api/integrations"
    ```
 
-   In your **Cloud Function's** environment, never in `.env.local` and never
-   in Firestore:
-   ```
-   GOOGLE_CLIENT_SECRET="xxxxx"
-   ```
+   Never put the client secret, client id, token-encryption key, refresh
+   tokens, or OAuth state in a `VITE_*` variable. The browser asks the
+   authenticated start endpoint for a Google URL; it does not construct OAuth
+   state. Keep `GOOGLE_TOKEN_ENCRYPTION_KEY` stable: changing or losing it
+   requires every existing user to reconnect Google.
 
-8. **Restart `npm run dev`.** Vite only reads env vars at startup.
+8. **Redeploy or restart the local Vercel runtime.** Vite only reads browser
+   variables at build startup and Vercel functions read server variables at
+   runtime.
 
 9. Settings → **Connections** → Calendar → **Connect**. You'll get Google's
    consent screen with an "unverified app" warning — expected in Testing
@@ -312,7 +348,10 @@ real decision with a real price tag, not a config tweak.
 
 No separate login is involved: the app uses **incremental authorisation**
 (`include_granted_scopes=true`), so Gmail is added on top of the Google
-Sign-In you already did. Connecting Gmail does not revoke Calendar.
+grant you already approved. Connecting Gmail does not revoke Calendar. Google
+revocation applies to that combined user/app grant, however, so Cirqle exposes
+one honest **Disconnect Google** action that disconnects Calendar and Gmail
+together.
 
 ---
 
@@ -333,11 +372,10 @@ Worth doing when you have real users. Not worth doing to test a feature.
 
 ---
 
-## 5. The Cloud Function you need to write
+## 5. Live integration server boundary
 
-**Not implemented in this pass.** The client code calls it and degrades
-cleanly when it's absent, but the function itself is yours to write. It is the
-only thing standing between the current preview mode and live mode.
+The integration handlers are implemented as same-origin Vercel functions.
+Firebase no longer exports a second OAuth callback.
 
 **Why it has to exist at all:** a Google refresh token is a standing key to
 your inbox that survives password changes. It must never be in a
@@ -349,19 +387,53 @@ Endpoints the client expects at `VITE_INTEGRATIONS_API_BASE`
 
 | Method | Path | Does |
 |---|---|---|
-| `GET` | `/oauth/callback` | Exchanges `?code` for tokens, stores the refresh token server-side keyed by uid, redirects back to Settings |
+| `POST` | `/oauth/start` | Verifies a non-revoked Firebase token and creates opaque state + PKCE |
+| `GET` | `/oauth/callback` | Atomically consumes state, exchanges `?code`, stores provider credentials server-side, redirects to the canonical origin |
+| `POST` | `/disconnect` | Revokes the shared Google grant and disconnects Calendar and Gmail together |
 | `GET` | `/calendar/upcoming` | Returns `{ events: [...], syncedAt }` |
-| `POST` | `/gmail/send` | Sends a message, returns `{ threadId }` |
+| `POST` | `/gmail/send` | Requires an exact saved outreach, reserves its idempotency key, sends once, and atomically records bounded provider ids plus server-owned proof |
 | `POST` | `/gmail/poll` | Takes `{ historyId, threadIds }`, returns `{ statuses, historyId }` |
 
 Shapes are defined in `src/lib/integrations/calendar.ts` and
 `src/lib/integrations/gmail.ts` — those files are the contract.
 
-Store refresh tokens in Secret Manager, or in a Firestore collection whose
-rules deny all client access (`allow read, write: if false`) so only the
-Admin SDK can reach them. `users/{uid}/integrations/{provider}` is
-client-readable by design and holds **status metadata only** — never put a
-token there.
+Encrypted token envelopes live in
+`oauthTokens/{uid}/providers/{provider}`. AES-256-GCM authenticates both the
+ciphertext and its UID/provider context. Firestore rules deny browser access
+recursively. `users/{uid}/integrations/{provider}` is client-readable by
+design and holds **status metadata only**, including the verified email of the
+Google account the user actually selected.
+
+Successful sends are registered under the server-only OAuth tree. A retry with
+the same outreach idempotency key returns the already completed send instead
+of calling Gmail again. A conflicting payload is rejected, and an ambiguous
+pending result tells the user to check Gmail instead of risking a duplicate.
+Before Google is contacted, the server verifies that the authenticated user's
+saved draft, contact email, subject, and body match the request and places a
+server-owned reservation on the outreach. After Google returns, one Firestore
+transaction writes the provider-verified outreach state, live thread, sent-
+thread allowlist entry, and idempotency receipt. The browser cannot award
+itself provider verification. Status polling is limited to thread IDs that
+Cirqle itself successfully sent.
+
+OAuth state lives under `_oauthStates/{sha256(state)}`, is valid for ten
+minutes, and is deleted transactionally before code exchange. Enable a
+Firestore TTL policy on its `expiresAt` field so abandoned consent attempts
+are eventually removed. See `GOOGLE_INTEGRATIONS_SECURITY.md`.
+
+The complete Firestore TTL inventory is:
+
+| Collection group | Field |
+|---|---|
+| `_oauthStates` | `expiresAt` |
+| `captureGuards` | `expiresAt` |
+| `_accountSecurity` | `expiresAt` |
+| `_accountDeletionReceipts` | `expiresAt` |
+
+Enable each policy in the Firebase/Google Cloud console for the exact
+collection-group and field name. `_accountSecurity.expiresAt` is present only
+on deleted-account tombstones; active accounts do not expire. TTL deletion can
+lag, so application checks remain the security boundary.
 
 **Polling, not push.** Both integrations poll. Gmail `watch()` and Calendar
 watch channels need a public HTTPS webhook, a Pub/Sub topic, and renewal every

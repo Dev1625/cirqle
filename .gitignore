@@ -11,3 +11,5 @@ graph-page-check.png
 firebase.local.json
 tmp-shots/
 tmp-*.mjs
+gha-creds-*.json
+.vercel/

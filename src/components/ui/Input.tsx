@@ -15,7 +15,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
           // placeholder reads as an already-filled value — on the card page's
           // name prompt, "Alex Rivera" looked typed in. DESIGN.md assigns
           // placeholders to --color-muted; this follows it.
-          "flex h-9 w-full rounded-card border border-ink/15 bg-transparent px-3 py-1 text-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted focus-visible:outline-none focus-visible:border-brand/40 focus-visible:ring-2 focus-visible:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-50",
+          "flex h-11 w-full rounded-card border border-ink/20 bg-transparent px-3 py-2 text-base transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted focus-visible:outline-none focus-visible:border-brand focus-visible:ring-2 focus-visible:ring-brand/30 aria-invalid:border-red-600 aria-invalid:ring-1 aria-invalid:ring-red-600/30 disabled:cursor-not-allowed disabled:opacity-50 sm:text-sm",
           className
         )}
         ref={ref}

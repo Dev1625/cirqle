@@ -1,5 +1,5 @@
 import React from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { motion, useReducedMotion, type Variants } from 'motion/react';
 import { ArrowRight, Sparkles, Mail, CalendarDays, Compass } from 'lucide-react';
 import { Reveal, RevealGroup } from '../components/landing/motion';

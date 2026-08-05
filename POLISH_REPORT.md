@@ -11,7 +11,10 @@ Walked the whole app screen-by-screen as a seeded test user, wrote up findings i
 Two backend constraints shaped how this pass was tested:
 
 1. **Email/password sign-in is disabled on the live Firebase project** (`cirqle-9dd06`) — only Google sign-in works there. I couldn't create the `polish-test@cirqle.dev` account against the real backend without either a Google OAuth login (not available here) or changing Firebase Auth project settings (explicitly out of scope for this pass — "auth changes" are excluded).
-2. **No reachable Gemini/LiteLLM gateway** in this sandbox — `VITE_GATEWAY_URL` defaults to `http://localhost:4000`, nothing is running there, and the production gateway needs credentials I don't have.
+2. **No reachable Gemini/LiteLLM gateway during that historical pass.** The
+   legacy browser gateway path described in the original report has since been
+   removed. The current app has no localhost gateway default: every model call
+   uses the same-origin, Firebase-authenticated `/api/ai/chat` server route.
 
 **What I did about it:** added an opt-in local Firebase Auth + Firestore emulator path, gated entirely behind `VITE_USE_FIREBASE_EMULATOR=true` in `.env.development.local` (gitignored, dev-server-only — confirmed the production `vite build` output contains zero emulator references). This let me actually create the test account, seed real data, click through every flow, and take real screenshots via headless Edge + Puppeteer instead of guessing from source. It touches no product code path a real user would hit — `src/config/firebase.ts` only calls `connectAuthEmulator`/`connectFirestoreEmulator` when that env var is explicitly `"true"`, which it never is by default or in any deployed build.
 

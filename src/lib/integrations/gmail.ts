@@ -1,7 +1,6 @@
 import {
   doc,
   setDoc,
-  getDoc,
   getDocs,
   collection,
   query,
@@ -10,20 +9,22 @@ import {
 } from 'firebase/firestore';
 import { db } from '../../config/firebase';
 import { integrationsApiBase, isMock } from './config';
+import { authenticatedFetch } from '../authenticatedFetch';
 
 /**
  * Gmail, scoped to sending and to reading back only the threads Cirqle
  * itself created.
  *
  * Scope choice — gmail.send + gmail.metadata rather than gmail.readonly:
- *   - Privacy: "Cirqle only ever looks at threads it started" is a claim the
- *     scope actually enforces, not a promise in a policy document.
+ *   - Privacy: Gmail's metadata scope is mailbox-wide, so the server keeps an
+ *     Admin-only registry of thread IDs returned by successful Cirqle sends.
+ *     Poll requests are rejected unless every ID is present in that registry.
  *   - Verification: restricted scopes like gmail.readonly require a security
  *     assessment. gmail.metadata is sensitive but not restricted, which is a
  *     materially cheaper and faster path when the owner pursues verification.
  *
  * Token handling is a hard requirement, not a style preference: the refresh
- * token is held by the Cloud Function and never written anywhere the client
+ * token is held by the server API and never written anywhere the client
  * can read. Everything below either runs against mock data or calls the
  * function; nothing here ever sees a Google credential.
  *
@@ -104,16 +105,17 @@ export async function listTrackedThreads(uid: string, contactId?: string): Promi
 }
 
 export interface SendResult {
-  threadId: string;
+  threadId: string | null;
   mode: 'mock' | 'live';
+  verified: boolean;
 }
 
 /**
- * Sends outreach and immediately begins tracking the resulting thread.
+ * Sends through a connected provider and begins tracking only after the
+ * provider returns a real message/thread id.
  *
- * In mock mode this fabricates a Gmail-shaped thread id and records it for
- * real, so Draft Outreach visibly starts tracking the moment you hit send —
- * the payoff moment works identically in both modes.
+ * Preview mode deliberately does not fabricate a successful send or thread.
+ * The caller may open a mailto draft and record an unverified handoff.
  */
 export async function sendOutreach(params: {
   uid: string;
@@ -124,57 +126,35 @@ export async function sendOutreach(params: {
   body: string;
   outreachId?: string | null;
 }): Promise<SendResult> {
-  let threadId: string;
-  let mode: 'mock' | 'live';
-
   if (isMock()) {
-    // Gmail thread ids are 16 hex chars; matching the shape keeps the mock
-    // honest against any code that later parses or displays them.
-    threadId = Array.from({ length: 16 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join('');
-    mode = 'mock';
-  } else {
-    const response = await fetch(`${integrationsApiBase()}/gmail/send`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ to: params.to, subject: params.subject, body: params.body }),
-    });
-    if (!response.ok) throw new Error(`Gmail send failed (${response.status})`);
-    const payload = await response.json();
-    threadId = payload.threadId;
-    mode = 'live';
+    return { threadId: null, mode: 'mock', verified: false };
+  }
+  if (!params.outreachId) {
+    throw new Error('A saved outreach attempt is required before Gmail send.');
   }
 
-  await trackThread({
-    uid: params.uid,
-    threadId,
-    contactId: params.contactId,
-    contactName: params.contactName,
-    subject: params.subject,
-    outreachId: params.outreachId,
+  const response = await authenticatedFetch(`${integrationsApiBase()}/gmail/send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      to: params.to,
+      subject: params.subject,
+      body: params.body,
+      idempotencyKey: params.outreachId,
+    }),
   });
+  if (!response.ok) throw new Error(`Gmail send failed (${response.status})`);
+  const payload = await response.json();
+  const threadId = payload.threadId;
+  if (
+    typeof threadId !== 'string' ||
+    !threadId ||
+    payload.recorded !== true
+  ) {
+    throw new Error('Gmail send did not return an atomically recorded receipt.');
+  }
 
-  return { threadId, mode };
-}
-
-/**
- * Per-user incremental sync cursor.
- *
- * Gmail's historyId lets a poll ask "what changed since last time" instead of
- * re-reading every tracked thread. Stored per user; the Cloud Function is the
- * only thing that advances it in live mode.
- */
-export async function readSyncCursor(uid: string): Promise<string | null> {
-  const snap = await getDoc(doc(db, `users/${uid}/integrations/gmail`));
-  return snap.exists() ? (snap.data() as any).historyId || null : null;
-}
-
-export async function writeSyncCursor(uid: string, historyId: string): Promise<void> {
-  await setDoc(
-    doc(db, `users/${uid}/integrations/gmail`),
-    { historyId, lastSyncedAt: serverTimestamp() },
-    { merge: true }
-  );
+  return { threadId, mode: 'live', verified: true };
 }
 
 /**
@@ -214,29 +194,12 @@ export async function pollThreads(uid: string): Promise<TrackedThread[]> {
     return updated;
   }
 
-  const cursor = await readSyncCursor(uid);
-  const response = await fetch(`${integrationsApiBase()}/gmail/poll`, {
+  const response = await authenticatedFetch(`${integrationsApiBase()}/gmail/poll`, {
     method: 'POST',
-    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ historyId: cursor, threadIds: threads.map((t) => t.threadId) }),
+    body: JSON.stringify({ threadIds: threads.map((t) => t.threadId) }),
   });
   if (!response.ok) throw new Error(`Gmail poll failed (${response.status})`);
-  const payload = await response.json();
-
-  if (payload.historyId) await writeSyncCursor(uid, payload.historyId);
-
-  const statusByThread: Record<string, TrackedThread['status']> = payload.statuses || {};
-  for (const thread of threads) {
-    const next = statusByThread[thread.threadId];
-    if (next && next !== thread.status) {
-      await setDoc(
-        doc(db, `users/${uid}/threads/${thread.threadId}`),
-        { status: next, lastCheckedAt: new Date() },
-        { merge: true }
-      );
-    }
-  }
-
+  await response.json();
   return listTrackedThreads(uid);
 }

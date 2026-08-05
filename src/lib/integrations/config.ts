@@ -24,14 +24,14 @@ function readEnv(key: string): string | undefined {
 }
 
 /**
- * Live mode requires BOTH an explicit opt-in and a client ID. Requiring the
- * flag as well as the credential is deliberate: a half-configured .env should
- * fall back to a working demo, never to a broken OAuth redirect loop.
+ * Live mode requires an explicit opt-in and an explicit same-origin API base.
+ * Google client credentials are server-only and must never be compiled into
+ * this bundle. A half-configured deployment remains in preview mode.
  */
 export function integrationMode(): IntegrationMode {
   const declared = readEnv('VITE_INTEGRATIONS_MODE');
-  const clientId = readEnv('VITE_GOOGLE_CLIENT_ID');
-  if (declared === 'live' && clientId) return 'live';
+  const apiBase = configuredIntegrationsApiBase();
+  if (declared === 'live' && apiBase) return 'live';
   return 'mock';
 }
 
@@ -39,17 +39,34 @@ export function isMock(): boolean {
   return integrationMode() === 'mock';
 }
 
-export function googleClientId(): string | undefined {
-  return readEnv('VITE_GOOGLE_CLIENT_ID');
+function configuredIntegrationsApiBase(): string | undefined {
+  const value = readEnv('VITE_INTEGRATIONS_API_BASE')?.trim();
+  if (
+    !value ||
+    !value.startsWith('/') ||
+    value.startsWith('//') ||
+    value.includes('..') ||
+    /[?#]/.test(value)
+  ) {
+    return undefined;
+  }
+  return value.replace(/\/+$/, '');
 }
 
 /**
- * Cloud Function base that mediates all token exchange and Google API calls.
+ * Same-origin Vercel API base that mediates token exchange and Google calls.
  * The browser never holds a refresh token, so it never calls Google directly
  * for anything beyond the initial consent redirect.
  */
 export function integrationsApiBase(): string {
-  return readEnv('VITE_INTEGRATIONS_API_BASE') || '/api/integrations';
+  const configured = configuredIntegrationsApiBase();
+  if (configured) return configured;
+  if (readEnv('VITE_INTEGRATIONS_MODE') === 'live') {
+    throw new Error(
+      'Live integrations require a same-origin VITE_INTEGRATIONS_API_BASE.',
+    );
+  }
+  return '/api/integrations';
 }
 
 /** Transactional email provider for the dormant digest (feature 9). */
@@ -70,10 +87,3 @@ export function emailMode(): IntegrationMode {
  * scope would be a worse privacy story and a slower, more expensive Google
  * verification path later. See MANUAL_SETUP.md for the full reasoning.
  */
-export const GOOGLE_SCOPES = {
-  calendar: ['https://www.googleapis.com/auth/calendar.events.readonly'],
-  gmail: [
-    'https://www.googleapis.com/auth/gmail.send',
-    'https://www.googleapis.com/auth/gmail.metadata',
-  ],
-} as const;

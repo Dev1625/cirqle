@@ -1,22 +1,22 @@
 # =========================================================================
 # THE ALIASES THE APP ASKS FOR
 #
-# src/lib/aiConfig.ts maps three semantic tiers to the alias names below:
-#   fast      -> gemini-2.5-flash-lite
+# api/_lib/ai-feature-policy.js owns each feature's tier, alias, and limits.
+# src/lib/aiConfig.ts mirrors the expected browser-side tier aliases:
+#   fast      -> gemini-3.5-flash-lite
 #   reasoning -> deepseek-v4-flash
 #   draft     -> deepseek-v4-pro
 #
-# The app never names an upstream model. To change what a tier actually runs
-# on, change the `model:` line here and restart the proxy — no app rebuild,
-# no redeploy of the frontend.
+# The app never names an upstream provider route. This file is the final
+# alias-to-provider routing hop loaded by LiteLLM.
 #
 # If you rename an alias, three files must agree: this one,
-# src/lib/aiConfig.ts, and the `models: [...]` allowlist in
-# api/register-user.js (virtual keys are scoped per model; an alias missing
-# from that list is rejected at request time).
+# src/lib/aiConfig.ts, and api/_lib/ai-feature-policy.js. Managed virtual-key
+# allowlists derive from the server policy, so a policy alias missing here is
+# rejected at request time.
 # =========================================================================
 model_list:
-  # ---- DeepSeek: the cost-driven default for anything writing prose -------
+  # ---- DeepSeek: reasoning and premium drafting ---------------------------
   #
   # Keep the public alias and upstream model honest: a request for
   # `deepseek-v4-flash` reaches DeepSeek V4 Flash, and a request for
@@ -32,48 +32,12 @@ model_list:
       api_key: "os.environ/DEEPSEEK_API_KEY"
 
   # ---- Google ------------------------------------------------------------
-  # Compatibility alias retained for older clients.
-  - model_name: gemini-flash
+  # The active `fast` tier: structured extraction, tagging, summaries, and
+  # quick outreach drafts.
+  - model_name: gemini-3.5-flash-lite
     litellm_params:
-      model: gemini/gemini-2.5-flash
+      model: gemini/gemini-3.5-flash-lite
       api_key: "os.environ/GEMINI_API_KEY"
-
-  # Retained so any cached client or older build still resolves. Nothing in
-  # the current app requests these preview aliases.
-  - model_name: gemini-3-flash-preview
-    litellm_params:
-      model: gemini/gemini-3-flash-preview
-      api_key: "os.environ/GEMINI_API_KEY"
-
-  # The active `fast` tier: bulk structured extraction, tagging and summaries.
-  - model_name: gemini-2.5-flash-lite
-    litellm_params:
-      model: gemini/gemini-2.5-flash-lite
-      api_key: "os.environ/GEMINI_API_KEY"
-
-  # Compatibility alias retained for older clients.
-  - model_name: gemini-3.1-pro-preview
-    litellm_params:
-      model: gemini/gemini-3.1-pro-preview
-      api_key: "os.environ/GEMINI_API_KEY"
-
-  # ---- OpenAI compatibility aliases (not used by the current web app) -----
-  - model_name: gpt-5-mini
-    litellm_params:
-      model: openai/gpt-5-mini
-      api_key: "os.environ/OPENAI_API_KEY"
-
-  - model_name: openai-mini
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: "os.environ/OPENAI_API_KEY"
-
-  - model_name: openai-mini-batch
-    litellm_params:
-      model: openai/gpt-4o-mini
-      api_key: "os.environ/OPENAI_API_KEY"
-    model_info:
-      mode: batch
 
 general_settings:
   # Master key to perform proxy administrative operations (generate keys, etc.)
@@ -90,17 +54,22 @@ general_settings:
   
   # Enable high-performance Redis cache for virtual keys validation (reduces DB roundtrips)
   enable_redis_auth_cache: true
+  # Keep cost/tier/request metadata for budgets, never private CRM prompts.
+  store_prompts_in_spend_logs: false
 
 litellm_settings:
-  # Enable response caching
-  cache: true
-  cache_params:
-    type: redis
-    host: "os.environ/REDIS_HOST"
-    port: "os.environ/REDIS_PORT"
-    password: "os.environ/REDIS_PASSWORD"
+  # Relationship context is private and changes over time. Do not persist
+  # prompts/responses in a shared response cache or verbose proxy logs.
+  cache: false
+  turn_off_message_logging: true
+  log_raw_request_response: false
+  set_verbose: false
+  telemetry: false
+  # Gemini 3.x deprecates legacy sampling parameters. LiteLLM must omit a
+  # provider-unsupported parameter instead of turning a healthy route into a
+  # request-level 400.
+  drop_params: true
 
 router_settings:
   # Automatically retry on rate limits or failures across models
   routing_strategy: simple-shuffle
-  set_verbose: true

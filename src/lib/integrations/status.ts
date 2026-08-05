@@ -1,6 +1,7 @@
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../../config/firebase';
-import { GOOGLE_SCOPES, googleClientId, integrationsApiBase, isMock } from './config';
+import { integrationsApiBase, isMock } from './config';
+import { authenticatedFetch } from '../authenticatedFetch';
 
 /**
  * Connection state for the external integrations, and the incremental-auth
@@ -128,47 +129,32 @@ export async function connectMock(uid: string, provider: Provider, email: string
 }
 
 export async function disconnect(uid: string, provider: Provider): Promise<void> {
-  await setDoc(
-    doc(db, `users/${uid}/integrations/${provider}`),
-    { connected: false, updatedAt: serverTimestamp() },
-    { merge: true }
+  if (!isMock()) {
+    const response = await authenticatedFetch(
+      `${integrationsApiBase()}/disconnect`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ provider }),
+      },
+    );
+    if (!response.ok) {
+      throw new Error(
+        `Could not disconnect Google (${response.status}).`,
+      );
+    }
+    return;
+  }
+
+  await Promise.all(
+    (['calendar', 'gmail'] as const).map((targetProvider) =>
+      setDoc(
+        doc(db, `users/${uid}/integrations/${targetProvider}`),
+        { connected: false, updatedAt: serverTimestamp() },
+        { merge: true },
+      ),
+    ),
   );
-}
-
-/**
- * Incremental authorisation — additional scopes granted on top of the Google
- * Sign-In the user already completed, not a second login.
- *
- * `include_granted_scopes=true` is what makes it incremental: Google merges
- * the new scope into the existing grant instead of replacing it, so
- * connecting Gmail does not silently revoke Calendar.
- *
- * The code lands on the Cloud Function, which does the token exchange and
- * stores the refresh token server-side. The browser never handles it.
- */
-export function buildConsentUrl(params: { uid: string; provider: Provider; loginHint?: string | null }): string {
-  const clientId = googleClientId();
-  if (!clientId) throw new Error('VITE_GOOGLE_CLIENT_ID is not set — see MANUAL_SETUP.md.');
-
-  const redirectUri = `${window.location.origin}${integrationsApiBase()}/oauth/callback`;
-  const scopes = GOOGLE_SCOPES[params.provider].join(' ');
-
-  const query = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    scope: scopes,
-    include_granted_scopes: 'true',
-    access_type: 'offline',
-    // 'consent' is required to be issued a refresh token on a re-grant;
-    // without it Google returns only an access token for an already-consented
-    // user and the server has nothing durable to store.
-    prompt: 'consent',
-    state: JSON.stringify({ uid: params.uid, provider: params.provider }),
-    ...(params.loginHint ? { login_hint: params.loginHint } : {}),
-  });
-
-  return `https://accounts.google.com/o/oauth2/v2/auth?${query.toString()}`;
 }
 
 export async function beginConnect(params: {
@@ -180,7 +166,37 @@ export async function beginConnect(params: {
     await connectMock(params.uid, params.provider, params.email || 'you@example.com');
     return 'mock';
   }
-  window.location.href = buildConsentUrl({ uid: params.uid, provider: params.provider, loginHint: params.email });
+
+  const response = await authenticatedFetch(
+    `${integrationsApiBase()}/oauth/start`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ provider: params.provider }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(
+      `Could not start Google authorization (${response.status}).`,
+    );
+  }
+  const payload = await response.json();
+  if (typeof payload?.authorizationUrl !== 'string') {
+    throw new Error('Google authorization returned an invalid destination.');
+  }
+  let destination: URL;
+  try {
+    destination = new URL(payload.authorizationUrl);
+  } catch {
+    throw new Error('Google authorization returned an invalid destination.');
+  }
+  if (
+    destination.origin !== 'https://accounts.google.com' ||
+    destination.pathname !== '/o/oauth2/v2/auth'
+  ) {
+    throw new Error('Google authorization returned an invalid destination.');
+  }
+  window.location.assign(destination.toString());
   return 'redirecting';
 }
 

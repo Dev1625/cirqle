@@ -58,11 +58,11 @@ export function ConnectionRow({
     setReadState('loading');
     readStatus(uid, provider)
       .then((s) => { setStatus(s); setReadState('ready'); })
-      .catch((err) => {
+      .catch(() => {
         // Previously a silent setStatus(null), which renders identically to
         // "not connected" — a failed read was indistinguishable from a
         // deliberate disconnected state, with no way to tell and no retry.
-        console.error(`[connections] could not read ${provider} status`, err);
+        console.warn(`[connections] ${provider} status temporarily unavailable`);
         setStatus(null);
         setReadState('error');
       });
@@ -91,7 +91,7 @@ export function ConnectionRow({
     setBusy(true);
     try {
       await disconnect(uid, provider);
-      toast(`${copy.title} disconnected.`, 'info');
+      toast('Google disconnected. Calendar and Gmail access are off.', 'info');
       load();
       onChanged?.();
     } finally {
@@ -103,7 +103,7 @@ export function ConnectionRow({
 
   return (
     <div className="flex flex-wrap items-start gap-4 rounded-card border border-ink/15 bg-white p-4">
-      <Icon size={16} className="mt-0.5 shrink-0 text-brand" />
+      <Icon size={16} className="mt-0.5 shrink-0 text-brand" aria-hidden="true" />
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -130,15 +130,15 @@ export function ConnectionRow({
 
         {stale && (
           <p className="mt-2.5 flex items-start gap-2 font-mono text-[11px] leading-relaxed text-subtle">
-            <TriangleAlert size={12} className="mt-0.5 shrink-0 text-brand" />
+            <TriangleAlert size={12} className="mt-0.5 shrink-0 text-brand" aria-hidden="true" />
             Google expires test-mode access after 7 days. Reconnect to keep it running — expected,
             not broken.
           </p>
         )}
 
         {readState === 'error' && (
-          <p className="mt-2.5 flex items-start gap-2 font-mono text-[11px] leading-relaxed text-subtle">
-            <TriangleAlert size={12} className="mt-0.5 shrink-0 text-red-600" />
+          <p role="alert" className="mt-2.5 flex items-start gap-2 font-mono text-[11px] leading-relaxed text-subtle">
+            <TriangleAlert size={12} className="mt-0.5 shrink-0 text-red-600" aria-hidden="true" />
             Couldn't check this connection. It may still be connected — this is about reading the
             status, not the connection itself.
           </p>
@@ -147,26 +147,26 @@ export function ConnectionRow({
 
       <div className="shrink-0">
         {readState === 'loading' ? (
-          <span className="font-mono text-[10px] uppercase tracking-widest text-muted">Checking…</span>
+          <span role="status" aria-live="polite" className="font-mono text-[10px] uppercase tracking-widest text-muted">Checking connection…</span>
         ) : readState === 'error' ? (
           <Button variant="outline" size="sm" onClick={load}>
-            <RotateCw size={11} className="mr-1.5" />
+            <RotateCw size={11} className="mr-1.5" aria-hidden="true" />
             Retry
           </Button>
         ) : status?.connected ? (
           <div className="flex gap-2">
             {stale && (
-              <Button variant="brand" size="sm" onClick={handleConnect} disabled={busy}>
-                <RotateCw size={11} className="mr-1.5" />
+              <Button variant="brand" size="sm" onClick={handleConnect} disabled={busy} aria-busy={busy}>
+                <RotateCw size={11} className="mr-1.5" aria-hidden="true" />
                 Reconnect
               </Button>
             )}
-            <Button variant="ghost" size="sm" onClick={handleDisconnect} disabled={busy}>
-              Disconnect
+            <Button variant="ghost" size="sm" onClick={handleDisconnect} disabled={busy} aria-busy={busy}>
+              Disconnect Google
             </Button>
           </div>
         ) : (
-          <Button variant="outline" size="sm" onClick={handleConnect} disabled={busy}>
+          <Button variant="outline" size="sm" onClick={handleConnect} disabled={busy} aria-busy={busy}>
             {busy ? 'Connecting…' : 'Connect'}
           </Button>
         )}
@@ -179,10 +179,15 @@ export function ConnectionsHeader() {
   return (
     <div className="flex flex-wrap items-center gap-3">
       <h2 className="flex items-center gap-2 font-serif text-2xl font-bold italic">
-        <Plug size={16} className="text-brand" />
+        <Plug size={16} className="text-brand" aria-hidden="true" />
         Connections
       </h2>
-      {isMock() && <PreviewBadge label="Preview mode" title="No Google OAuth client configured — running on sample data. See MANUAL_SETUP.md." />}
+      {isMock() && (
+        <PreviewBadge
+          label="Preview · sample Google data"
+          title="These controls use sample state. No live Google calendar is read and no Gmail message is sent."
+        />
+      )}
     </div>
   );
 }
