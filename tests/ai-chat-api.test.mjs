@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import test from 'node:test';
 
-import { createAIChatHandler } from '../api/ai/chat.js';
+import { createAIChatHandler } from '../server/api/ai/chat.js';
 
 function responseRecorder() {
   return {

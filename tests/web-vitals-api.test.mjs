@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createVitalsHandler,
   normalizeVitals,
-} from '../api/telemetry/vitals.js';
+} from '../server/api/telemetry/vitals.js';
 
 const valid = {
   route: '/app/directory/:contactId',

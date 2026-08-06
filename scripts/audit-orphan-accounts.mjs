@@ -10,11 +10,11 @@ import {
   deletePrivateUserData,
   deletePublicCards,
   getAccountAdminServices,
-} from '../api/_lib/account-admin.js';
+} from '../server/api/_lib/account-admin.js';
 import {
   deleteLiteLLMIdentity,
   runAccountDeletion,
-} from '../api/_lib/account-lifecycle.js';
+} from '../server/api/_lib/account-lifecycle.js';
 
 export function orphanSubject(uid) {
   return createHash('sha256').update(uid).digest('hex').slice(0, 16);

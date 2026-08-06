@@ -9,8 +9,8 @@ import {
   normalizeServerSourcePrivacyPolicy,
   runAdminSourceRetentionSweep,
   scanFirestoreRetentionCandidates,
-} from '../api/_lib/source-retention.js';
-import { createSourceRetentionSweepHandler } from '../api/account/retention-sweep.js';
+} from '../server/api/_lib/source-retention.js';
+import { createSourceRetentionSweepHandler } from '../server/api/account/retention-sweep.js';
 
 const NOW = new Date('2026-07-29T12:00:00.000Z');
 const OLD = new Date('2026-01-01T12:00:00.000Z');

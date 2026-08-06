@@ -3,10 +3,10 @@ import test from 'node:test';
 
 import {
   createPasswordRangeHandler,
-} from '../api/security/password-range.js';
+} from '../server/api/security/password-range.js';
 import {
   ProvisioningRateLimitError,
-} from '../api/_lib/rate-limit.js';
+} from '../server/api/_lib/rate-limit.js';
 
 const PREFIX = '5BAA6';
 const SUFFIX = '1E4C9B93F3F0682250B6CF8331B7EE68FD8';

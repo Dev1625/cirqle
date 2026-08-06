@@ -10,12 +10,12 @@ import {
   normalizeSubject,
   normalizeThreadIds,
 } from '../functions/integrations.js';
-import { deleteOAuthIdentity } from '../api/_lib/account-admin.js';
+import { deleteOAuthIdentity } from '../server/api/_lib/account-admin.js';
 import {
   openGoogleTokens,
   readGoogleTokenEncryptionKey,
   sealGoogleTokens,
-} from '../api/_lib/google-token-envelope.js';
+} from '../server/api/_lib/google-token-envelope.js';
 
 const ENV = Object.freeze({
   NODE_ENV: 'production',
@@ -1158,7 +1158,7 @@ test('source wiring has no legacy browser state or duplicate Firebase callback',
     readFile(new URL('../src/lib/integrations/status.ts', import.meta.url), 'utf8'),
     readFile(new URL('../functions/index.js', import.meta.url), 'utf8'),
     readFile(new URL('../functions/integrations.js', import.meta.url), 'utf8'),
-    readFile(new URL('../api/_lib/firebase-admin.js', import.meta.url), 'utf8'),
+    readFile(new URL('../server/api/_lib/firebase-admin.js', import.meta.url), 'utf8'),
     readFile(new URL('../firestore.rules', import.meta.url), 'utf8'),
   ]);
   assert.doesNotMatch(statusSource, /JSON\.stringify\(\{\s*uid/);

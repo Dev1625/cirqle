@@ -1,4 +1,4 @@
-import { createGoogleIntegrationHandlers } from '../../functions/integrations.js';
+import { createGoogleIntegrationHandlers } from '../../../functions/integrations.js';
 import { getAccountAdminServices } from './account-admin.js';
 import { verifyActiveBearerFirebaseToken } from './firebase-admin.js';
 

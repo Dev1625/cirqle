@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createCSPReportHandler,
   normalizeCSPReport,
-} from '../api/telemetry/csp.js';
+} from '../server/api/telemetry/csp.js';
 
 function responseRecorder() {
   return {

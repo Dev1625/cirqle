@@ -4,8 +4,8 @@ import test from 'node:test';
 import {
   createPublicCaptureHandler,
   normalizeCaptureInput,
-} from '../api/cards/capture.js';
-import { ProvisioningRateLimitError } from '../api/_lib/rate-limit.js';
+} from '../server/api/cards/capture.js';
+import { ProvisioningRateLimitError } from '../server/api/_lib/rate-limit.js';
 
 function response() {
   return {

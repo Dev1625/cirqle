@@ -4,10 +4,10 @@ import test from 'node:test';
 import {
   ContactProfileError,
   normalizeContactProfileRequest,
-} from '../api/_lib/contact-profile.js';
+} from '../server/api/_lib/contact-profile.js';
 import {
   createContactProfileHandler,
-} from '../api/contacts/profile.js';
+} from '../server/api/contacts/profile.js';
 
 const UID = 'profile-owner';
 const NOW = new Date('2026-07-29T18:00:00.000Z');

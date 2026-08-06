@@ -11,6 +11,15 @@ Import the repository into Vercel as a Vite project:
 - Output directory: `dist`
 - Node runtime: 24
 
+The public `/api/*` contract uses three fixed-depth dynamic entry points plus
+four exact-route timeout wrappers under `api/`. Dynamic routes are selected by
+URL depth and dispatched by `server/vercel-api-dispatcher.js`; the exact
+wrappers preserve the original timeout caps for account deletion, account
+export, contact merging, and scheduled maintenance. Keep all other handlers and
+private helpers under `server/api/`; placing another JavaScript file under
+`api/` creates another Vercel Function and can exceed plan limits. API misses
+are rewritten to the dispatcher's JSON 404 before the single-page-app fallback.
+
 Required server-only environment variables:
 
 - `LITELLM_MASTER_KEY`

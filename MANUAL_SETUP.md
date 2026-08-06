@@ -60,7 +60,7 @@ Railway deployment; process health alone does not prove model-route health.
 ### Which model each feature uses
 
 Product code asks for a semantic **tier** and sends a required feature ID.
-`api/_lib/ai-feature-policy.js` is authoritative: it derives the allowed
+`server/api/_lib/ai-feature-policy.js` is authoritative: it derives the allowed
 alias, default/hard token cap, maximum temperature, and usage label. The
 browser mapping in `src/lib/aiConfig.ts` is a consistency assertion, not an
 authorization boundary.
@@ -72,7 +72,7 @@ authorization boundary.
 | `draft` | `deepseek-v4-pro` | Premium outreach improvement, AI card intro |
 
 **To change a model**, update the tier alias in
-`api/_lib/ai-feature-policy.js`, mirror it in `src/lib/aiConfig.ts`, and add
+`server/api/_lib/ai-feature-policy.js`, mirror it in `src/lib/aiConfig.ts`, and add
 the matching alias/provider route in `litellm-proxy/config.yaml`. Redeploy
 Vercel and Railway, then make one real completion through every active alias.
 There are intentionally no `VITE_AI_MODEL_*` overrides.
@@ -80,7 +80,7 @@ There are intentionally no `VITE_AI_MODEL_*` overrides.
 **If you rename an alias, three files must agree** or policy/configuration
 tests fail:
 
-1. `api/_lib/ai-feature-policy.js`
+1. `server/api/_lib/ai-feature-policy.js`
 2. `src/lib/aiConfig.ts`
 3. `model_name:` in `litellm-proxy/config.yaml`
 
@@ -93,7 +93,7 @@ after a release that renames an alias.
 | Secret | Lives in | Never in |
 |---|---|---|
 | `DEEPSEEK_API_KEY`, `GEMINI_API_KEY` | `litellm-proxy/.env` or Railway vars | git, Vercel, the browser |
-| `LITELLM_MASTER_KEY` | Vercel env var (used by `api/register-user.js`) **and** the proxy | git, the browser |
+| `LITELLM_MASTER_KEY` | Vercel env var (used by `server/api/register-user.js`) **and** the proxy | git, the browser |
 | `LITELLM_KEY_DERIVATION_SECRET` | Vercel server env, stable and distinct from the master key | Railway provider config, git, the browser |
 | `GOOGLE_TOKEN_ENCRYPTION_KEY` | Vercel server env, stable base64-encoded 32-byte key | Railway, git, the browser |
 | Per-user virtual key | deterministically derived and used only by verified Vercel server functions | Firestore, browser storage, API responses, logs |

@@ -5,22 +5,22 @@ import {
   requireRecentAuthentication,
   revokeGoogleCredential,
   sanitizeAccountExport,
-} from '../api/_lib/account-admin.js';
+} from '../server/api/_lib/account-admin.js';
 import {
   ACCOUNT_DELETION_STEPS,
   deleteLiteLLMIdentity,
   runAccountDeletion,
-} from '../api/_lib/account-lifecycle.js';
-import { LiteLLMRequestError } from '../api/_lib/litellm.js';
-import { createAccountExportHandler } from '../api/account/export.js';
+} from '../server/api/_lib/account-lifecycle.js';
+import { LiteLLMRequestError } from '../server/api/_lib/litellm.js';
+import { createAccountExportHandler } from '../server/api/account/export.js';
 import {
   createDeleteAccountHandler,
   createDurableAccountDeletionServices,
-} from '../api/account/delete.js';
+} from '../server/api/account/delete.js';
 import {
   createRevokeSessionsHandler,
   deleteRegisteredBrowserSessions,
-} from '../api/account/revoke-sessions.js';
+} from '../server/api/account/revoke-sessions.js';
 
 const IDENTITY = Object.freeze({
   uid: 'owner-uid',
@@ -826,7 +826,7 @@ test('LiteLLM cleanup removes managed and legacy keys before both user identitie
       if (path === '/key/delete') {
         // Mark key reads absent after successful deletion.
         const key = options.body.keys[0];
-        const hash = (await import('../api/_lib/litellm.js')).hashLiteLLMKey(
+        const hash = (await import('../server/api/_lib/litellm.js')).hashLiteLLMKey(
           key,
         );
         if (hash === managedHash) {

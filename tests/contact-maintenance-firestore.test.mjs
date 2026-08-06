@@ -7,7 +7,7 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import {
   createFirestoreContactMaintenanceRepository,
   runOwnerContactMaintenance,
-} from '../api/_lib/contact-maintenance.js';
+} from '../server/api/_lib/contact-maintenance.js';
 
 const EMULATOR_AVAILABLE = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
 const PROJECT_ID = 'cirqle-contact-maintenance-test';

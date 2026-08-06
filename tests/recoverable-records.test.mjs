@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import {
   purgeExpiredRecoverableRecords,
-} from '../api/_lib/recoverable-records.js';
+} from '../server/api/_lib/recoverable-records.js';
 
 test('recoverable cleanup deletes only expired records still marked deleted', async () => {
   const deleted = [];

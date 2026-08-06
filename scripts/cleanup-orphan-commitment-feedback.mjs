@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 import { FieldPath } from 'firebase-admin/firestore';
 
-import { getAccountAdminServices } from '../api/_lib/account-admin.js';
+import { getAccountAdminServices } from '../server/api/_lib/account-admin.js';
 
 const DEFAULT_PAGE_SIZE = 200;
 const MAX_PAGE_SIZE = 400;

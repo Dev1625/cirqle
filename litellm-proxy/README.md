@@ -23,7 +23,7 @@ AI feature
   -> src/lib/aiConfig.ts supplies the browser's expected alias
   -> src/lib/aiClient.ts sends a Firebase ID token to /api/ai/chat
   -> Vercel verifies the user
-  -> api/_lib/ai-feature-policy.js derives the tier, alias, and limits
+  -> server/api/_lib/ai-feature-policy.js derives the tier, alias, and limits
   -> any client alias mismatch or excessive limit is rejected
   -> Vercel derives the server-only virtual key
   -> Vercel POSTs /v1/chat/completions to LiteLLM
@@ -53,7 +53,7 @@ requires credentials the product does not need.
 
 ## Server feature policy
 
-`api/_lib/ai-feature-policy.js` is the single server authority for model
+`server/api/_lib/ai-feature-policy.js` is the single server authority for model
 selection and generation ceilings. Managed virtual-key allowlists derive from
 the same registry. A browser cannot pair a cheap feature label with an
 expensive alias, omit attribution, or raise a feature's output/temperature
@@ -122,7 +122,7 @@ misleading.
 When a tier moves to a different model identity, introduce an honest alias and
 keep these three places synchronized:
 
-1. `api/_lib/ai-feature-policy.js` — authoritative server tier and feature
+1. `server/api/_lib/ai-feature-policy.js` — authoritative server tier and feature
    policy; managed virtual-key allowlists derive from it.
 2. `src/lib/aiConfig.ts` — browser-side expected tier aliases.
 3. `litellm-proxy/config.yaml` — alias-to-provider route.
@@ -181,7 +181,7 @@ After a Railway deployment:
 
 ## Virtual keys and budgets
 
-Vercel's `api/register-user.js` creates one virtual key when an account has no
+Vercel's `server/api/register-user.js` handler creates one virtual key when an account has no
 managed key and reconciles the same identity on every later sign-in. New keys
 include:
 

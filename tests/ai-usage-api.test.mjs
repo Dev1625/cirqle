@@ -4,7 +4,7 @@ import test from 'node:test';
 import {
   createAIUsageHandler,
   fetchSpendLogPages,
-} from '../api/ai/usage.js';
+} from '../server/api/ai/usage.js';
 
 function responseRecorder() {
   return {

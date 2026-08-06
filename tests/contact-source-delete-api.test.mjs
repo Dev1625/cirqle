@@ -5,8 +5,8 @@ import {
   ContactSourceDeleteError,
   isDeletableContactNoteSource,
   normalizeContactSourceDeleteRequest,
-} from '../api/_lib/contact-source-delete.js';
-import { createContactSourceDeleteHandler } from '../api/contacts/source-delete.js';
+} from '../server/api/_lib/contact-source-delete.js';
+import { createContactSourceDeleteHandler } from '../server/api/contacts/source-delete.js';
 
 function response() {
   return {

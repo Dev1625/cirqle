@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import {
   PRODUCTION_FIREBASE_PROJECT_ID,
   resolveFirebaseAdminProjectId,
-} from '../api/_lib/firebase-admin.js';
+} from '../server/api/_lib/firebase-admin.js';
 
 test('preview Admin configuration fails closed unless it names an isolated project', () => {
   for (const env of [

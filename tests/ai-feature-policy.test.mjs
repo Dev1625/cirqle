@@ -11,7 +11,7 @@ import {
   AI_MODEL_ALIASES_BY_TIER,
   PRODUCTION_MODEL_ALIASES,
   getAIFeaturePolicy,
-} from '../api/_lib/ai-feature-policy.js';
+} from '../server/api/_lib/ai-feature-policy.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SRC_ROOT = path.join(ROOT, 'src');

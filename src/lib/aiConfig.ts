@@ -3,12 +3,12 @@
  *
  * Features choose a semantic tier, never an upstream provider model. The
  * server independently derives the permitted alias from the required feature
- * ID in `api/_lib/ai-feature-policy.js`; a mismatch is rejected before any
+ * ID in `server/api/_lib/ai-feature-policy.js`; a mismatch is rejected before any
  * gateway request.
  *
  * If an alias changes, keep these three places synchronized:
  *   1. this file
- *   2. `api/_lib/ai-feature-policy.js`
+ *   2. `server/api/_lib/ai-feature-policy.js`
  *   3. `model_name` in `litellm-proxy/config.yaml`
  */
 

@@ -2,12 +2,12 @@ import { randomBytes } from 'node:crypto';
 
 import {
   PRODUCTION_FIREBASE_PROJECT_ID,
-} from '../api/_lib/firebase-admin.js';
+} from '../server/api/_lib/firebase-admin.js';
 import {
   BUDGET_DURATION,
   BUDGET_LIMIT_USD,
   PRODUCTION_MODEL_ALIASES,
-} from '../api/_lib/provisioning.js';
+} from '../server/api/_lib/provisioning.js';
 
 export const SMOKE_CONFIRMATION =
   'create-and-delete-disposable-cirqle-user';

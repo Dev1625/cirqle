@@ -3,33 +3,33 @@ import { test } from 'node:test';
 
 import {
   createRegisterUserHandler,
-} from '../api/register-user.js';
+} from '../server/api/register-user.js';
 import {
   AuthError,
   verifyBearerFirebaseToken,
-} from '../api/_lib/firebase-admin.js';
-import { getTrustedClientIp } from '../api/_lib/http.js';
+} from '../server/api/_lib/firebase-admin.js';
+import { getTrustedClientIp } from '../server/api/_lib/http.js';
 import {
   createLiteLLMClient,
   hashLiteLLMKey,
   LiteLLMRequestError,
-} from '../api/_lib/litellm.js';
+} from '../server/api/_lib/litellm.js';
 import {
   BUDGET_DURATION,
   BUDGET_LIMIT_USD,
   deriveManagedVirtualKey,
   PRODUCTION_MODEL_ALIASES,
   provisionLiteLLMIdentity,
-} from '../api/_lib/provisioning.js';
+} from '../server/api/_lib/provisioning.js';
 import {
   createProvisioningRateLimiter,
   DistributedRateLimitUnavailableError,
   ProvisioningRateLimitError,
-} from '../api/_lib/rate-limit.js';
+} from '../server/api/_lib/rate-limit.js';
 import {
   LEGACY_AI_KEY_FIELDS,
   scrubLegacyAIKeyFields,
-} from '../api/_lib/legacy-key-scrub.js';
+} from '../server/api/_lib/legacy-key-scrub.js';
 
 const ENV = Object.freeze({
   LITELLM_MASTER_KEY: 'sk-master-key-long-enough-for-tests',

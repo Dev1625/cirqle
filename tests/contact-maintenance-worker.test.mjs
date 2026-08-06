@@ -8,10 +8,10 @@ import {
   planContactMergeFactRestoration,
   runOwnerContactMaintenance,
   runScheduledContactMaintenance,
-} from '../api/_lib/contact-maintenance.js';
+} from '../server/api/_lib/contact-maintenance.js';
 import {
   createContactMaintenanceHandler,
-} from '../api/contacts/maintenance.js';
+} from '../server/api/contacts/maintenance.js';
 
 const NOW = new Date('2026-07-29T16:00:00.000Z');
 const UID = 'owner-uid';

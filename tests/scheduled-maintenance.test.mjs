@@ -5,10 +5,10 @@ import {
   hasActiveRetentionPolicy,
   isAuthorizedCronRequest,
   runScheduledMaintenanceCycle,
-} from '../api/_lib/scheduled-maintenance.js';
+} from '../server/api/_lib/scheduled-maintenance.js';
 import {
   createScheduledMaintenanceHandler,
-} from '../api/cron/maintenance.js';
+} from '../server/api/cron/maintenance.js';
 
 function responseRecorder() {
   return {

@@ -1,7 +1,7 @@
 # =========================================================================
 # THE ALIASES THE APP ASKS FOR
 #
-# api/_lib/ai-feature-policy.js owns each feature's tier, alias, and limits.
+# server/api/_lib/ai-feature-policy.js owns each feature's tier, alias, and limits.
 # src/lib/aiConfig.ts mirrors the expected browser-side tier aliases:
 #   fast      -> gemini-3.5-flash-lite
 #   reasoning -> deepseek-v4-flash
@@ -11,7 +11,7 @@
 # alias-to-provider routing hop loaded by LiteLLM.
 #
 # If you rename an alias, three files must agree: this one,
-# src/lib/aiConfig.ts, and api/_lib/ai-feature-policy.js. Managed virtual-key
+# src/lib/aiConfig.ts, and server/api/_lib/ai-feature-policy.js. Managed virtual-key
 # allowlists derive from the server policy, so a policy alias missing here is
 # rejected at request time.
 # =========================================================================

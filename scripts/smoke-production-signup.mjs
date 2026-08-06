@@ -6,21 +6,21 @@ import { getFirestore } from 'firebase-admin/firestore';
 import {
   deletePrivateUserData,
   deletePublicCards,
-} from '../api/_lib/account-admin.js';
+} from '../server/api/_lib/account-admin.js';
 import {
   deleteLiteLLMIdentity,
-} from '../api/_lib/account-lifecycle.js';
+} from '../server/api/_lib/account-lifecycle.js';
 import {
   getFirebaseAdminApp,
-} from '../api/_lib/firebase-admin.js';
+} from '../server/api/_lib/firebase-admin.js';
 import {
   createLiteLLMClient,
   hashLiteLLMKey,
-} from '../api/_lib/litellm.js';
+} from '../server/api/_lib/litellm.js';
 import {
   deriveManagedVirtualKey,
   PRODUCTION_MODEL_ALIASES,
-} from '../api/_lib/provisioning.js';
+} from '../server/api/_lib/provisioning.js';
 import {
   assertSmokeEnvironmentIsolation,
   assertProvisioningContract,

@@ -5,7 +5,7 @@ import {
   createProvisioningRateLimiter,
   DistributedRateLimitUnavailableError,
   ProvisioningRateLimitError,
-} from '../api/_lib/rate-limit.js';
+} from '../server/api/_lib/rate-limit.js';
 
 test('production fails closed when distributed rate limiting is not configured', async () => {
   const limiter = createProvisioningRateLimiter({

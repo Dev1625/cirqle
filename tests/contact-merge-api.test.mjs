@@ -3,10 +3,10 @@ import test from 'node:test';
 
 import {
   ContactMergeError,
-} from '../api/_lib/contact-merge.js';
+} from '../server/api/_lib/contact-merge.js';
 import {
   createContactMergeHandler,
-} from '../api/contacts/merge.js';
+} from '../server/api/contacts/merge.js';
 
 const UID = 'owner-uid';
 const AUTH_TIME = 1_785_340_800;

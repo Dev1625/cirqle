@@ -39,10 +39,19 @@ The active model contract is:
 | `reasoning` | `deepseek-v4-flash` | `deepseek/deepseek-v4-flash` |
 | `draft` | `deepseek-v4-pro` | `deepseek/deepseek-v4-pro` |
 
-`api/_lib/ai-feature-policy.js` is the authoritative server registry for
+`server/api/_lib/ai-feature-policy.js` is the authoritative server registry for
 feature-to-tier routing, output and temperature ceilings, and friendly spend
 labels. Browser-supplied model aliases are only consistency assertions: the
 server derives the actual alias from the known feature and rejects mismatches.
+
+Vercel exposes the unchanged `/api/*` URLs through three fixed-depth dynamic
+entry points plus four exact-route timeout wrappers under `api/`. The dynamic
+entry points dispatch through `server/vercel-api-dispatcher.js`; handlers and
+private helpers live under `server/api/`, outside Vercel's function-discovery
+directory. This keeps the seven-function deployment within the Hobby limit,
+preserves route-specific timeout caps, and avoids exposing accidental endpoints.
+Unsupported API depths are routed to the same dispatcher's JSON 404 before the
+single-page-app fallback.
 
 See `litellm-proxy/README.md` for routing, model changes, budgets, privacy, and
 administrator spend inspection.

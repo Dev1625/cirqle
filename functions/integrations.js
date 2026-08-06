@@ -7,11 +7,11 @@ import {
   openGoogleTokens,
   readGoogleTokenEncryptionKey,
   sealGoogleTokens,
-} from '../api/_lib/google-token-envelope.js';
+} from '../server/api/_lib/google-token-envelope.js';
 import {
   createProvisioningRateLimiter,
   ProvisioningRateLimitError,
-} from '../api/_lib/rate-limit.js';
+} from '../server/api/_lib/rate-limit.js';
 
 /**
  * Shared server implementation for the Vercel Google integration routes.

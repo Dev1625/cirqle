@@ -16,7 +16,7 @@ import {
   AI_FEATURE_POLICIES,
   AI_MODEL_ALIASES_BY_TIER,
   PRODUCTION_MODEL_ALIASES,
-} from '../api/_lib/ai-feature-policy.js';
+} from '../server/api/_lib/ai-feature-policy.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readJson = (relativePath) => JSON.parse(
@@ -54,16 +54,17 @@ const packageJson = readJson('package.json');
 const functionsPackageJson = readJson('functions/package.json');
 const liteLLMConfig = readText('litellm-proxy/config.yaml');
 const aiConfig = readText('src/lib/aiConfig.ts');
-const provisioning = readText('api/_lib/provisioning.js');
-const liteLLMServerConfig = readText('api/_lib/litellm-config.js');
+const provisioning = readText('server/api/_lib/provisioning.js');
+const liteLLMServerConfig = readText('server/api/_lib/litellm-config.js');
 const aiServerConfigConsumers = [
-  readText('api/register-user.js'),
-  readText('api/ai/chat.js'),
-  readText('api/ai/usage.js'),
-  readText('api/_lib/account-lifecycle.js'),
+  readText('server/api/register-user.js'),
+  readText('server/api/ai/chat.js'),
+  readText('server/api/ai/usage.js'),
+  readText('server/api/_lib/account-lifecycle.js'),
   readText('scripts/smoke-production-signup.mjs'),
 ].join('\n');
-const legacyKeyScrub = readText('api/_lib/legacy-key-scrub.js');
+const legacyKeyScrub = readText('server/api/_lib/legacy-key-scrub.js');
+const apiDispatcher = readText('server/vercel-api-dispatcher.js');
 
 check('production Firebase alias is pinned to cirqle-9dd06', () => {
   assert.equal(firebaseRc.projects?.production, 'cirqle-9dd06');
@@ -239,14 +240,41 @@ check('Permissions Policy preserves first-party voice input only', () => {
 });
 
 check('API routing precedes the SPA fallback', () => {
-  assert.deepEqual(vercel.rewrites?.[0], {
-    source: '/api/(.*)',
-    destination: '/api/$1',
-  });
+  assert.deepEqual(vercel.rewrites?.slice(0, 2), [
+    {
+      source: '/api',
+      destination: '/api/__not-found',
+    },
+    {
+      source: '/api/(.*)',
+      destination: '/api/__not-found',
+    },
+  ]);
   assert.deepEqual(vercel.rewrites?.at(-1), {
     source: '/(.*)',
     destination: '/index.html',
   });
+});
+
+check('Vercel deploys bounded API functions within the Hobby limit', () => {
+  const functionFiles = fs
+    .readdirSync(path.join(ROOT, 'api'), {
+      recursive: true,
+      withFileTypes: true,
+    })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.js'));
+  assert.equal(functionFiles.length, 7);
+  assert.ok(functionFiles.length <= 12);
+  assert.deepEqual(Object.keys(vercel.functions || {}).sort(), [
+    'api/account/delete.js',
+    'api/account/export.js',
+    'api/contacts/merge.js',
+    'api/cron/maintenance.js',
+  ]);
+  assert.match(apiDispatcher, /'account\/bootstrap':/);
+  assert.match(apiDispatcher, /'cron\/maintenance':/);
+  assert.match(apiDispatcher, /'integrations\/gmail\/send':/);
+  assert.match(apiDispatcher, /'telemetry\/vitals':/);
 });
 
 check('daily maintenance is bounded and protected by a server-only secret', () => {
@@ -256,12 +284,14 @@ check('daily maintenance is bounded and protected by a server-only secret', () =
       schedule: '17 4 * * *',
     },
   ]);
-  assert.equal(
-    vercel.functions?.['api/cron/maintenance.js']?.maxDuration,
-    60,
+  assert.equal(vercel.functions?.['api/cron/maintenance.js']?.maxDuration, 60);
+  assert.equal(vercel.functions?.['api/account/export.js']?.maxDuration, 300);
+  assert.equal(vercel.functions?.['api/account/delete.js']?.maxDuration, 300);
+  assert.equal(vercel.functions?.['api/contacts/merge.js']?.maxDuration, 60);
+  const cronSource = readText('server/api/cron/maintenance.js');
+  const schedulerSource = readText(
+    'server/api/_lib/scheduled-maintenance.js',
   );
-  const cronSource = readText('api/cron/maintenance.js');
-  const schedulerSource = readText('api/_lib/scheduled-maintenance.js');
   assert.match(cronSource, /CRON_SECRET/);
   assert.match(cronSource, /isAuthorizedCronRequest/);
   assert.match(schedulerSource, /timingSafeEqual/);
@@ -464,7 +494,7 @@ check('authenticated provisioning revokes legacy raw AI keys before scrubbing th
   );
   assert.match(legacyKeyScrub, /legacy_key_scrub_failed/);
   assert.match(
-    readText('api/register-user.js'),
+    readText('server/api/register-user.js'),
     /scrubLegacyKeys\(\{\s*uid:\s*identity\.uid,\s*email:\s*identity\.email,\s*env,\s*client,/,
   );
 });

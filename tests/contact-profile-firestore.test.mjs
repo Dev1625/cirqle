@@ -7,7 +7,7 @@ import { getFirestore, Timestamp } from 'firebase-admin/firestore';
 import {
   ContactProfileError,
   executeAdminContactProfileSave,
-} from '../api/_lib/contact-profile.js';
+} from '../server/api/_lib/contact-profile.js';
 
 const EMULATOR_AVAILABLE = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
 const PROJECT_ID = 'cirqle-contact-profile-test';

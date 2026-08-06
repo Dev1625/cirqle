@@ -61,7 +61,14 @@
     }
   ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" },
+    {
+      "source": "/api",
+      "destination": "/api/__not-found"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/__not-found"
+    },
     {
       "source": "/(.*)",
       "destination": "/index.html"
