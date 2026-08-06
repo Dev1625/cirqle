@@ -251,7 +251,7 @@ check('API routing precedes the SPA fallback', () => {
     },
   ]);
   assert.deepEqual(vercel.rewrites?.at(-1), {
-    source: '/(.*)',
+    source: '/((?!api/).*)',
     destination: '/index.html',
   });
 });

@@ -70,7 +70,7 @@
       "destination": "/api/_dispatch"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]
