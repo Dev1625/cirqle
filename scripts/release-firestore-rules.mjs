@@ -27,12 +27,18 @@ const PROTECTED_FILES = [
   'scripts/verify-deployed-firestore-rules.mjs',
 ];
 
+function executableFor(command) {
+  if (process.platform === 'win32' && command === 'npx') {
+    return 'npx.cmd';
+  }
+  return command;
+}
+
 function run(command, args, options = {}) {
   console.log(`\n> ${command} ${args.join(' ')}`);
-  const result = spawnSync(command, args, {
+  const result = spawnSync(executableFor(command), args, {
     cwd: ROOT,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
     ...options,
   });
   if (result.status !== 0) {
@@ -41,10 +47,9 @@ function run(command, args, options = {}) {
 }
 
 function output(command, args) {
-  const result = spawnSync(command, args, {
+  const result = spawnSync(executableFor(command), args, {
     cwd: ROOT,
     encoding: 'utf8',
-    shell: process.platform === 'win32',
   });
   if (result.status !== 0) {
     process.stderr.write(result.stderr || '');
