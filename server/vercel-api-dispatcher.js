@@ -24,10 +24,10 @@ import vitalsTelemetry from './api/telemetry/vitals.js';
 
 /**
  * Vercel treats every JavaScript file below `api/` as a separately deployed
- * Serverless Function. Three fixed-depth entry points dispatch here so every
- * public URL remains stable without exposing helpers as accidental endpoints.
- * Four exact-route wrappers bypass this dispatcher only to preserve their
- * route-specific duration limits without bundling every handler again.
+ * Serverless Function. One fixed entry point dispatches every rewritten API
+ * miss here so public URLs remain stable without exposing helpers as accidental
+ * endpoints. Four exact-route wrappers bypass this dispatcher only to preserve
+ * their route-specific duration limits without bundling every handler again.
  */
 const ROUTES = Object.freeze({
   'account/bootstrap': accountBootstrap,

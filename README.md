@@ -44,13 +44,14 @@ feature-to-tier routing, output and temperature ceilings, and friendly spend
 labels. Browser-supplied model aliases are only consistency assertions: the
 server derives the actual alias from the known feature and rejects mismatches.
 
-Vercel exposes the unchanged `/api/*` URLs through three fixed-depth dynamic
-entry points plus four exact-route timeout wrappers under `api/`. The dynamic
-entry points dispatch through `server/vercel-api-dispatcher.js`; handlers and
-private helpers live under `server/api/`, outside Vercel's function-discovery
-directory. This keeps the seven-function deployment within the Hobby limit,
-preserves route-specific timeout caps, and avoids exposing accidental endpoints.
-Unsupported API depths are routed to the same dispatcher's JSON 404 before the
+Vercel exposes the unchanged `/api/*` URLs through one fixed dispatcher plus
+four exact-route timeout wrappers under `api/`. Filesystem routes take priority,
+so those four wrappers preserve their original timeout caps; all other API paths
+rewrite to `api/_dispatch.js` and dispatch through
+`server/vercel-api-dispatcher.js`. Handlers and private helpers live under
+`server/api/`, outside Vercel's function-discovery directory. This keeps the
+five-function deployment within the Hobby limit and avoids exposing accidental
+endpoints. Unknown API paths return the dispatcher's JSON 404 before the
 single-page-app fallback.
 
 See `litellm-proxy/README.md` for routing, model changes, budgets, privacy, and

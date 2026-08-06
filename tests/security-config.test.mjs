@@ -243,11 +243,11 @@ check('API routing precedes the SPA fallback', () => {
   assert.deepEqual(vercel.rewrites?.slice(0, 2), [
     {
       source: '/api',
-      destination: '/api/__not-found',
+      destination: '/api/_dispatch',
     },
     {
       source: '/api/(.*)',
-      destination: '/api/__not-found',
+      destination: '/api/_dispatch',
     },
   ]);
   assert.deepEqual(vercel.rewrites?.at(-1), {
@@ -263,8 +263,12 @@ check('Vercel deploys bounded API functions within the Hobby limit', () => {
       withFileTypes: true,
     })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.js'));
-  assert.equal(functionFiles.length, 7);
+  assert.equal(functionFiles.length, 5);
   assert.ok(functionFiles.length <= 12);
+  assert.deepEqual(
+    functionFiles.map((entry) => entry.name).sort(),
+    ['_dispatch.js', 'delete.js', 'export.js', 'maintenance.js', 'merge.js'],
+  );
   assert.deepEqual(Object.keys(vercel.functions || {}).sort(), [
     'api/account/delete.js',
     'api/account/export.js',
