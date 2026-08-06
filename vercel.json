@@ -63,11 +63,11 @@
   "rewrites": [
     {
       "source": "/api",
-      "destination": "/api/_dispatch"
+      "destination": "/api/router"
     },
     {
       "source": "/api/(.*)",
-      "destination": "/api/_dispatch"
+      "destination": "/api/router"
     },
     {
       "source": "/((?!api/).*)",

@@ -11,11 +11,17 @@ Import the repository into Vercel as a Vite project:
 - Output directory: `dist`
 - Node runtime: 24
 
+The root `firebase-admin` dependency is intentionally pinned to `13.10.0`.
+Vercel's current Node function packager converts the `jwks-rsa` 4 / `jose` 6
+boundary into an unsupported CommonJS `require()`, causing every Admin-backed
+function to fail during startup. Treat an upgrade as a deployment change and
+verify a live authenticated and unauthenticated API request before promoting it.
+
 The public `/api/*` contract uses one fixed dispatcher plus four exact-route
 timeout wrappers under `api/`. Filesystem routing sends account deletion,
 account export, contact merging, and scheduled maintenance to their exact
 wrappers first, preserving the original timeout caps. Every other API path is
-rewritten to `api/_dispatch.js` and dispatched by
+rewritten to `api/router.js` and dispatched by
 `server/vercel-api-dispatcher.js`. Keep all other handlers and private helpers
 under `server/api/`; placing another JavaScript file under `api/` creates another
 Vercel Function and can exceed plan limits. Unknown APIs return the dispatcher's

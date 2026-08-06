@@ -243,11 +243,11 @@ check('API routing precedes the SPA fallback', () => {
   assert.deepEqual(vercel.rewrites?.slice(0, 2), [
     {
       source: '/api',
-      destination: '/api/_dispatch',
+      destination: '/api/router',
     },
     {
       source: '/api/(.*)',
-      destination: '/api/_dispatch',
+      destination: '/api/router',
     },
   ]);
   assert.deepEqual(vercel.rewrites?.at(-1), {
@@ -267,7 +267,7 @@ check('Vercel deploys bounded API functions within the Hobby limit', () => {
   assert.ok(functionFiles.length <= 12);
   assert.deepEqual(
     functionFiles.map((entry) => entry.name).sort(),
-    ['_dispatch.js', 'delete.js', 'export.js', 'maintenance.js', 'merge.js'],
+    ['delete.js', 'export.js', 'maintenance.js', 'merge.js', 'router.js'],
   );
   assert.deepEqual(Object.keys(vercel.functions || {}).sort(), [
     'api/account/delete.js',
@@ -279,6 +279,10 @@ check('Vercel deploys bounded API functions within the Hobby limit', () => {
   assert.match(apiDispatcher, /'cron\/maintenance':/);
   assert.match(apiDispatcher, /'integrations\/gmail\/send':/);
   assert.match(apiDispatcher, /'telemetry\/vitals':/);
+});
+
+check('Vercel pins the Firebase Admin runtime to a bundle-compatible release', () => {
+  assert.equal(packageJson.dependencies?.['firebase-admin'], '13.10.0');
 });
 
 check('daily maintenance is bounded and protected by a server-only secret', () => {

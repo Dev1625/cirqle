@@ -47,7 +47,7 @@ server derives the actual alias from the known feature and rejects mismatches.
 Vercel exposes the unchanged `/api/*` URLs through one fixed dispatcher plus
 four exact-route timeout wrappers under `api/`. Filesystem routes take priority,
 so those four wrappers preserve their original timeout caps; all other API paths
-rewrite to `api/_dispatch.js` and dispatch through
+rewrite to `api/router.js` and dispatch through
 `server/vercel-api-dispatcher.js`. Handlers and private helpers live under
 `server/api/`, outside Vercel's function-discovery directory. This keeps the
 five-function deployment within the Hobby limit and avoids exposing accidental
