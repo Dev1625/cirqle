@@ -18,6 +18,7 @@ import {
   BUDGET_DURATION,
   BUDGET_LIMIT_USD,
   deriveManagedVirtualKey,
+  MANAGED_USER_ROLE,
   PRODUCTION_MODEL_ALIASES,
   provisionLiteLLMIdentity,
 } from '../server/api/_lib/provisioning.js';
@@ -1031,4 +1032,85 @@ test('AuthError remains a stable public authentication boundary', () => {
   assert.equal(error.code, 'unauthorized');
   assert.equal(error.status, 401);
   assert.equal('stack' in JSON.parse(JSON.stringify(error)), false);
+});
+
+// LiteLLM's NewUserRequest/UpdateUserRequest restrict `user_role` to these
+// four values. Anything else — `customer` included — is rejected by pydantic
+// with a 422 before provisioning runs, which leaves every account without a
+// virtual key and takes down /api/ai/chat and /api/ai/usage together. The
+// fake clients below accept any payload, so assert the contract explicitly.
+const LITELLM_ACCEPTED_USER_ROLES = Object.freeze([
+  'proxy_admin',
+  'proxy_admin_viewer',
+  'internal_user',
+  'internal_user_viewer',
+]);
+
+test('sends a user_role LiteLLM actually accepts on create and update', async () => {
+  assert.ok(
+    LITELLM_ACCEPTED_USER_ROLES.includes(MANAGED_USER_ROLE),
+    `MANAGED_USER_ROLE must be one of ${LITELLM_ACCEPTED_USER_ROLES.join(', ')}`,
+  );
+
+  const apiKey = deriveManagedVirtualKey(
+    IDENTITY.uid,
+    ENV.LITELLM_KEY_DERIVATION_SECRET,
+  );
+  const observedRoles = [];
+  const baseClient = {
+    async listUserKeys() {
+      return { keys: [] };
+    },
+    async deleteKeys() {},
+    async getKey() {
+      return null;
+    },
+    async createKey(payload) {
+      return { key: payload.key };
+    },
+  };
+
+  // A brand-new account goes through /user/new.
+  await provisionLiteLLMIdentity({
+    client: {
+      ...baseClient,
+      async getUser() {
+        return null;
+      },
+      async createUser(payload) {
+        observedRoles.push(payload.user_role);
+      },
+      async updateUser(payload) {
+        observedRoles.push(payload.user_role);
+      },
+    },
+    identity: IDENTITY,
+    apiKey,
+  });
+
+  // An existing account goes through /user/update on every sign-in.
+  await provisionLiteLLMIdentity({
+    client: {
+      ...baseClient,
+      async getUser() {
+        return { user_id: IDENTITY.uid };
+      },
+      async createUser(payload) {
+        observedRoles.push(payload.user_role);
+      },
+      async updateUser(payload) {
+        observedRoles.push(payload.user_role);
+      },
+    },
+    identity: IDENTITY,
+    apiKey,
+  });
+
+  assert.ok(observedRoles.length >= 2, 'both provisioning paths must run');
+  for (const role of observedRoles) {
+    assert.ok(
+      LITELLM_ACCEPTED_USER_ROLES.includes(role),
+      `LiteLLM rejects user_role "${role}" with a 422`,
+    );
+  }
 });

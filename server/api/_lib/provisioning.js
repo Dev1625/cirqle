@@ -19,6 +19,16 @@ export const KEY_MAX_PARALLEL_REQUESTS = 4;
 export const MANAGED_KEY_VERSION = 2;
 const RACE_RECHECK_DELAYS_MS = Object.freeze([0, 30, 100]);
 
+/**
+ * LiteLLM's `/user/new` and `/user/update` accept only four `user_role`
+ * values: proxy_admin, proxy_admin_viewer, internal_user, and
+ * internal_user_viewer. `customer` exists in the LitellmUserRoles enum but is
+ * a separate end-user concept and is excluded from these request models, so
+ * sending it fails pydantic validation with a 422 before provisioning starts.
+ * A Cirqle account is a budgeted key holder: internal_user.
+ */
+export const MANAGED_USER_ROLE = 'internal_user';
+
 export function deriveManagedVirtualKey(uid, secret) {
   if (typeof uid !== 'string' || !uid) {
     throw new TypeError('A Firebase UID is required.');
@@ -68,7 +78,7 @@ function managedUserPayload(identity) {
     user_id: identity.uid,
     ...(identity.email ? { user_email: identity.email } : {}),
     user_alias: identity.email || `Cirqle user ${identity.uid.slice(0, 8)}`,
-    user_role: 'customer',
+    user_role: MANAGED_USER_ROLE,
     auto_create_key: false,
     ...managedPolicy(identity.uid),
   };
@@ -268,7 +278,7 @@ async function ensureManagedUser(client, identity) {
     user_id: identity.uid,
     ...(identity.email ? { user_email: identity.email } : {}),
     user_alias: identity.email || `Cirqle user ${identity.uid.slice(0, 8)}`,
-    user_role: 'customer',
+    user_role: MANAGED_USER_ROLE,
     ...managedPolicy(identity.uid),
   });
   return { created: false };
