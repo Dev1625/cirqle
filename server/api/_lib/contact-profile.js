@@ -21,7 +21,9 @@ const PROFILE_FIELDS = Object.freeze([
   'tags',
 ]);
 
-const PROFILE_FACT_FIELDS = Object.freeze({
+// Exported for contact-ingest.js, which creates contacts (this module only
+// updates them) and must stamp the same identity facts on the new record.
+export const PROFILE_FACT_FIELDS = Object.freeze({
   name: 'identity.name',
   email: 'identity.email',
   phone: 'identity.phone',
@@ -194,7 +196,14 @@ function profileFromRecord(value = {}) {
   };
 }
 
-function validateProfile(value) {
+/**
+ * Normalises and validates a profile, or throws ContactProfileError.
+ *
+ * Exported so contact-ingest.js can hold agent-supplied contacts to exactly the
+ * same field limits and formats as a profile edit from the app. A second
+ * normaliser would be a second thing to keep in sync.
+ */
+export function validateProfile(value) {
   const profile = profileFromRecord(value);
   if (!profile.name) {
     throw profileError(
@@ -349,7 +358,12 @@ function changedProfileFields(previous, next) {
   );
 }
 
-function deterministicFactId({
+/**
+ * Exported so contact-ingest.js stamps creation facts (revision 0) with ids
+ * from this same formula. Two implementations would drift, and a later edit
+ * would then write a duplicate fact instead of superseding the original.
+ */
+export function deterministicFactId({
   uid,
   contactId,
   revision,
