@@ -17,6 +17,7 @@ import NotFound from './pages/NotFound';
 const AppRoute = lazy(() => import('./layouts/AppRoute'));
 const AuthPage = lazy(() => import('./pages/AuthPage'));
 const AuthActionPage = lazy(() => import('./pages/AuthActionPage'));
+const OAuthConsent = lazy(() => import('./pages/OAuthConsent'));
 const PublicCard = lazy(() => import('./pages/PublicCard'));
 
 // In-app pages are route-split so a logged-out visitor (the landing page —
@@ -57,6 +58,10 @@ export default function App() {
                       a product's chrome. No auth gate of any kind. */}
                   <Route path="/c/:cardId" element={<PublicCard />} />
                   <Route path="/auth/action" element={<AuthActionPage />} />
+                  {/* Consent screen for Cirqle's OAuth server. Outside both
+                      layouts: an MCP client sent the browser here to make one
+                      decision, not to browse the product. */}
+                  <Route path="/oauth/consent" element={<OAuthConsent />} />
 
                   <Route path="/" element={<LandingLayout />}>
                     <Route index element={<LandingPage />} />

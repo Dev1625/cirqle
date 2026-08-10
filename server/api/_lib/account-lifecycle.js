@@ -212,6 +212,9 @@ export async function deleteLegacyLiteLLMCredentials({
 export const ACCOUNT_DELETION_STEPS = Object.freeze([
   'aiIdentity',
   'oauthIdentity',
+  // Refresh tokens held by connected MCP clients, torn down with the other
+  // credentials and before the account data itself.
+  'mcpTokens',
   'publicCards',
   'privateData',
   'firebaseAuth',
@@ -248,6 +251,14 @@ export async function runAccountDeletion({
 
     await services.deleteOAuthIdentity({ uid: identity.uid });
     completed.push('oauthIdentity');
+
+    // Refresh tokens held by connected MCP clients. Deleted alongside the AI
+    // identity, and before the account data itself: a token that outlived the
+    // account it belonged to would be a credential with no owner to revoke it.
+    if (services.revokeMcpTokens) {
+      await services.revokeMcpTokens({ uid: identity.uid });
+      completed.push('mcpTokens');
+    }
 
     await services.deletePublicCards({ uid: identity.uid });
     completed.push('publicCards');

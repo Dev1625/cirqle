@@ -2621,6 +2621,25 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Cirqle's own OAuth authorization server state, for MCP clients.
+    //
+    // Registered clients, pending authorization codes, and refresh-token
+    // records are all Admin-only. A browser that could read _oauthCodes would
+    // hold codes mid-flight for other sessions; one that could write
+    // _oauthClients could register a client with a redirect URI it controls and
+    // turn the authorize endpoint into an open redirector. Nothing here is ever
+    // needed by the app itself — the consent screen talks to the API, not to
+    // these documents.
+    match /_oauthClients/{clientId} {
+      allow read, write: if false;
+    }
+    match /_oauthCodes/{codeHash} {
+      allow read, write: if false;
+    }
+    match /_oauthTokens/{tokenHash} {
+      allow read, write: if false;
+    }
+
     // Durable session-revocation and deletion locks are server-owned. Client
     // rules read them to authorize requests, but no browser may create,
     // reactivate, weaken, or remove its own lock.

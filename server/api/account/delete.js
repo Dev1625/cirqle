@@ -19,11 +19,13 @@ import {
 } from '../_lib/account-lifecycle.js';
 import { getSafeRequestId } from '../_lib/http.js';
 import { LEGACY_AI_KEY_FIELDS } from '../_lib/legacy-key-scrub.js';
+import { revokeAllRefreshTokens } from '../_lib/oauth.js';
 
 const ACCOUNT_DELETION_JOB_SCHEMA_VERSION = 1;
 const ACCOUNT_DELETION_SERVICE_STEPS = Object.freeze([
   ['aiIdentity', 'deleteLiteLLMIdentity'],
   ['oauthIdentity', 'deleteOAuthIdentity'],
+  ['mcpTokens', 'revokeMcpTokens'],
   ['publicCards', 'deletePublicCards'],
   ['privateData', 'deletePrivateUserData'],
   ['firebaseAuth', 'deleteAuthUser'],
@@ -395,6 +397,8 @@ export function createDeleteAccountHandler({
                 fetchImpl,
                 env,
               }),
+            revokeMcpTokens: (input) =>
+              revokeAllRefreshTokens({ ...input, db }),
             deletePublicCards: (input) =>
               deletePublicCards({ ...input, db }),
             deletePrivateUserData: (input) =>

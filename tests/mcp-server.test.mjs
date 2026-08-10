@@ -251,3 +251,104 @@ test('the full tool menu is advertised', async () => {
     'upsert_contacts',
   ]);
 });
+
+// RFC 9728 5.1 / MCP spec: the 401 must point at the protected-resource
+// metadata. A bare realm leaves a connector with no way to find the
+// authorization server, which is exactly why claude.ai could not connect.
+test('the 401 tells a client where to discover the authorization server', async () => {
+  const res = await call(
+    { jsonrpc: '2.0', id: 30, method: 'tools/list' },
+    {
+      handler: {
+        verifyIdentity: async () => {
+          const error = new Error('nope');
+          error.code = 'unauthorized';
+          throw error;
+        },
+      },
+    },
+  );
+
+  assert.equal(res.statusCode, 401);
+  assert.match(
+    res.headers['www-authenticate'],
+    /resource_metadata="https:\/\/[^"]+\/\.well-known\/oauth-protected-resource"/,
+  );
+});
+
+test('a Cirqle OAuth access token authenticates without Firebase', async () => {
+  const { getOAuthConfig, signAccessToken } = await import(
+    '../server/api/_lib/oauth.js'
+  );
+  const env = {
+    MCP_OAUTH_SIGNING_SECRET: 'b'.repeat(48),
+    MCP_OAUTH_ISSUER: 'https://cirqle.test',
+  };
+  const token = signAccessToken({
+    config: getOAuthConfig(env),
+    uid: 'oauth-user',
+    clientId: 'client-1',
+    scope: 'cirqle.read cirqle.write',
+  });
+
+  const res = response();
+  await createMcpHandler({
+    env,
+    logger: { error() {}, warn() {}, info() {} },
+    // Firebase must not be consulted at all when a valid OAuth token is present.
+    verifyIdentity: async () => {
+      throw new Error('Firebase should not have been called');
+    },
+    adminServicesFactory: () => ({ db: {} }),
+    rateLimiter: ALLOW_ALL,
+  })(
+    request(
+      { jsonrpc: '2.0', id: 31, method: 'tools/list' },
+      { headers: { authorization: `Bearer ${token}` } },
+    ),
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.ok(res.payload.result.tools.length >= 6);
+});
+
+// Audience binding is the defence against a token minted elsewhere being
+// replayed here.
+test('an access token for another resource is refused', async () => {
+  const { getOAuthConfig, signAccessToken } = await import(
+    '../server/api/_lib/oauth.js'
+  );
+  const env = {
+    MCP_OAUTH_SIGNING_SECRET: 'c'.repeat(48),
+    MCP_OAUTH_ISSUER: 'https://cirqle.test',
+  };
+  const config = getOAuthConfig(env);
+  const foreign = signAccessToken({
+    config: { ...config, resource: 'https://elsewhere.test/api/mcp' },
+    uid: 'oauth-user',
+    clientId: 'client-1',
+    scope: 'cirqle.read',
+  });
+
+  const res = response();
+  await createMcpHandler({
+    env,
+    logger: { error() {}, warn() {}, info() {} },
+    verifyIdentity: async () => {
+      const error = new Error('nope');
+      error.code = 'unauthorized';
+      throw error;
+    },
+    adminServicesFactory: () => ({ db: {} }),
+    rateLimiter: ALLOW_ALL,
+  })(
+    request(
+      { jsonrpc: '2.0', id: 32, method: 'tools/list' },
+      { headers: { authorization: `Bearer ${foreign}` } },
+    ),
+    res,
+  );
+
+  assert.equal(res.statusCode, 401);
+});

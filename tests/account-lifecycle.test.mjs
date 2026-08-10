@@ -271,6 +271,7 @@ test('account deletion always runs Auth last and is safe to retry', async () => 
   const services = {
     deleteLiteLLMIdentity: service('aiIdentity'),
     deleteOAuthIdentity: service('oauthIdentity'),
+    revokeMcpTokens: service('mcpTokens'),
     deletePublicCards: service('publicCards'),
     deletePrivateUserData: service('privateData'),
     deleteAuthUser: service('firebaseAuth'),
@@ -289,9 +290,12 @@ test('account deletion always runs Auth last and is safe to retry', async () => 
 
   assert.deepEqual(first.completed, ACCOUNT_DELETION_STEPS);
   assert.deepEqual(second.completed, ACCOUNT_DELETION_STEPS);
-  assert.deepEqual(calls.slice(0, 5), ACCOUNT_DELETION_STEPS);
-  assert.deepEqual(calls.slice(5), ACCOUNT_DELETION_STEPS);
-  assert.equal(deleted.size, 5);
+  // Derived from the step list rather than hard-coded, so adding a teardown
+  // step does not silently weaken this into checking a prefix.
+  const stepCount = ACCOUNT_DELETION_STEPS.length;
+  assert.deepEqual(calls.slice(0, stepCount), ACCOUNT_DELETION_STEPS);
+  assert.deepEqual(calls.slice(stepCount), ACCOUNT_DELETION_STEPS);
+  assert.equal(deleted.size, stepCount);
 });
 
 test('a failed cleanup step preserves private data and Firebase Auth for retry', async () => {
@@ -333,6 +337,8 @@ test('an Auth deletion failure keeps the non-expiring lock and never finalizes i
       services: {
         async deleteLiteLLMIdentity() {},
         async deleteOAuthIdentity() {},
+      async revokeMcpTokens() {},
+        async revokeMcpTokens() {},
         async deletePublicCards() {},
         async deletePrivateUserData() {},
         async deleteAuthUser() {
@@ -364,6 +370,9 @@ test('durable account deletion resumes after the last recorded successful step',
           code: 'oauth_revoke_failed',
         });
       }
+    },
+    async revokeMcpTokens() {
+      calls.push('mcpTokens');
     },
     async deletePublicCards() {
       calls.push('publicCards');
@@ -420,6 +429,7 @@ test('durable account deletion resumes after the last recorded successful step',
     'aiIdentity',
     'oauthIdentity',
     'oauthIdentity',
+    'mcpTokens',
     'publicCards',
     'privateData',
     'firebaseAuth',
@@ -443,6 +453,7 @@ test('durable deletion records the irreversible Auth handoff before deleting Aut
   const services = {
     async deleteLiteLLMIdentity() {},
     async deleteOAuthIdentity() {},
+    async revokeMcpTokens() {},
     async deletePublicCards() {},
     async deletePrivateUserData() {},
     async deleteAuthUser() {
@@ -452,6 +463,7 @@ test('durable deletion records the irreversible Auth handoff before deleting Aut
       assert.deepEqual(job.completedSteps, [
         'aiIdentity',
         'oauthIdentity',
+        'mcpTokens',
         'publicCards',
         'privateData',
       ]);
@@ -486,6 +498,7 @@ test('durable deletion records the irreversible Auth handoff before deleting Aut
   assert.deepEqual(db.read().deletionJob.completedSteps, [
     'aiIdentity',
     'oauthIdentity',
+    'mcpTokens',
     'publicCards',
     'privateData',
   ]);
@@ -501,6 +514,7 @@ test('a final tombstone failure does not misreport a completed account deletion'
     services: {
       async deleteLiteLLMIdentity() {},
       async deleteOAuthIdentity() {},
+      async revokeMcpTokens() {},
       async deletePublicCards() {},
       async deletePrivateUserData() {},
       async deleteAuthUser() {},

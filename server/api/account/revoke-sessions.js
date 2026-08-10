@@ -9,6 +9,7 @@ import {
   revokeAccountSessionsAt,
 } from '../_lib/account-security.js';
 import { getSafeRequestId } from '../_lib/http.js';
+import { revokeAllRefreshTokens } from '../_lib/oauth.js';
 
 function setHeaders(res, requestId) {
   res.setHeader('Cache-Control', 'private, no-store, max-age=0');
@@ -54,6 +55,7 @@ export function createRevokeSessionsHandler({
   lockSessions,
   clearSessionRegistry,
   adminServicesFactory = getAccountAdminServices,
+  revokeMcpTokens = revokeAllRefreshTokens,
   logger = console,
 } = {}) {
   return async function revokeSessionsHandler(req, res) {
@@ -147,6 +149,11 @@ export function createRevokeSessionsHandler({
           db: services.db,
           uid: identity.uid,
         });
+        // Connected MCP clients hold their own refresh tokens, which Firebase
+        // revocation does not touch. Without this, "Sign out everywhere" would
+        // quietly mean "everywhere except the AI" — the opposite of what
+        // somebody reaching for this button expects.
+        await revokeMcpTokens({ db: services.db, uid: identity.uid });
         await services.auth.revokeRefreshTokens(identity.uid);
       }
       return res.status(200).json({ revoked: true });

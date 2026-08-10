@@ -13,6 +13,10 @@ import {
   listMcpTools,
 } from '../api/_lib/mcp-tools.js';
 import {
+  getOAuthConfig,
+  verifyAccessToken,
+} from '../api/_lib/oauth.js';
+import {
   ProvisioningRateLimitError,
   createProvisioningRateLimiter,
 } from '../api/_lib/rate-limit.js';
@@ -125,6 +129,63 @@ function clientName(req) {
   return name || 'unknown-agent';
 }
 
+/**
+ * Where clients discover the authorization server. Derived from the configured
+ * issuer, falling back to the canonical origin so a 401 can always point
+ * somewhere even when OAuth itself is unconfigured.
+ */
+function resourceMetadataUrl(env) {
+  const issuer = (
+    env?.MCP_OAUTH_ISSUER || 'https://cirqle-taupe.vercel.app'
+  )
+    .trim()
+    .replace(/\/+$/, '');
+  return `${issuer}/.well-known/oauth-protected-resource`;
+}
+
+function bearerToken(req) {
+  const header = req?.headers?.authorization || req?.headers?.Authorization;
+  const value = Array.isArray(header) ? header[0] : header;
+  const match = /^Bearer\s+(.+)$/i.exec(String(value || '').trim());
+  return match ? match[1].trim() : null;
+}
+
+/**
+ * Identify the caller.
+ *
+ * Two credentials are accepted, in this order:
+ *
+ *   1. A Cirqle OAuth access token. The spec path, and what claude.ai, Cowork
+ *      and ChatGPT use. Audience-bound to this server, so a token minted for
+ *      anything else is refused.
+ *   2. A Firebase ID token. Transitional, and the only thing that worked before
+ *      the authorization server existed. Kept so setups configured against it
+ *      keep working; remove once OAuth has been exercised in anger.
+ *
+ * The OAuth check runs first and is purely local, so the common case costs no
+ * network round trip.
+ */
+async function identifyCaller({ req, env, verifyIdentity, now }) {
+  const token = bearerToken(req);
+  if (token) {
+    try {
+      const config = getOAuthConfig(env);
+      const claims = verifyAccessToken({ config, token, now: now() });
+      return {
+        uid: claims.sub,
+        authTime: claims.iat,
+        scope: claims.scope || '',
+        via: 'oauth',
+      };
+    } catch {
+      // Not one of ours, or not valid. Fall through to Firebase rather than
+      // failing outright, so the transitional path still works.
+    }
+  }
+  const identity = await verifyIdentity(req, { env });
+  return { ...identity, scope: 'cirqle.read cirqle.write', via: 'firebase' };
+}
+
 export function createMcpHandler({
   env = process.env,
   logger = console,
@@ -155,16 +216,23 @@ export function createMcpHandler({
 
     let identity;
     try {
-      identity = await verifyIdentity(req, { env });
+      identity = await identifyCaller({ req, env, verifyIdentity, now });
     } catch (error) {
       if (
         error instanceof AccountAuthenticationError ||
         error instanceof AccountSecurityError ||
-        error?.code === 'unauthorized'
+        error?.code === 'unauthorized' ||
+        error?.code === 'invalid_token'
       ) {
-        // The WWW-Authenticate header is what an MCP client uses to discover it
-        // needs to authenticate; Phase 2 points it at the OAuth metadata.
-        res.setHeader('WWW-Authenticate', 'Bearer realm="cirqle"');
+        // RFC 9728 section 5.1: the 401 must point at the protected-resource
+        // metadata document. This is the entire discovery path — a client that
+        // gets a bare realm has no way to find the authorization server, which
+        // is why the connector UIs could not use this before.
+        const metadata = `${resourceMetadataUrl(env)}`;
+        res.setHeader(
+          'WWW-Authenticate',
+          `Bearer resource_metadata="${metadata}"`,
+        );
         return res
           .status(401)
           .json(rpcError(null, INVALID_REQUEST, 'Authentication required.'));
