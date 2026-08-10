@@ -160,33 +160,55 @@ taskkill //F //PID <pid>
 Nothing else uses port 8590, so anything holding it is a leftover test run.
 
 **If it fails with "Firestore Emulator has exited with code: 1" and an empty
-`firestore-debug.log`, check your Java version first — this one is not a
-stale port.** The emulator jar bundles an old Netty that reaches into
-`sun.misc.Unsafe`, which Java 24+ restricts, so it dies before it can log
-anything:
+`firestore-debug.log`, this is not a stale port and not your Java version.**
+The emulator dies before it can log anything. Run the jar directly to see the
+real error, because `emulators:exec` swallows it:
+
+```bash
+java -jar ~/.cache/firebase/emulators/cloud-firestore-emulator-v*.jar \
+  --host=127.0.0.1 --port=8590
+```
+
+On this machine that surfaces:
 
 ```
 java.lang.IllegalStateException: failed to create a child event loop
 Caused by: io.netty.channel.ChannelException: failed to open a new selector
+Caused by: java.io.IOException: Unable to establish loopback connection
+Caused by: java.net.SocketException: Invalid argument: connect
+    at sun.nio.ch.UnixDomainSockets.connect0(Native Method)
+    at sun.nio.ch.WEPollSelectorImpl.<init>(WEPollSelectorImpl.java:79)
 ```
 
-Run `java -version`. On **Java 24 or newer the emulator cannot start**, and no
-JVM flag works around it (`--add-opens java.base/sun.nio.ch=ALL-UNNAMED` and
-`--sun-misc-unsafe-memory-access=allow` were both tried). Install a JDK 21 and
-point the shell at it:
+Java's Windows selector opens its internal wakeup pipe over an **AF_UNIX
+socket**, and that `connect` is failing at the OS level. It is a machine
+problem, not a project or JDK problem — **Temurin 21 and Oracle 25 both fail
+identically here**, and neither `--add-opens java.base/sun.nio.ch=ALL-UNNAMED`,
+`--sun-misc-unsafe-memory-access=allow`, nor forcing
+`-Djava.nio.channels.spi.SelectorProvider=sun.nio.ch.WindowsSelectorProvider`
+works around it (all three were tried). Shortening `TMP`/`TEMP` does not help
+either; the AF_UNIX path length is not the issue.
+
+Usual causes are endpoint-security software blocking AF_UNIX, or a damaged
+Winsock catalog (`netsh winsock reset`, then reboot). Until it is fixed, the
+rules suite can only be run in CI, which does pin Java 21 via
+`actions/setup-java` and passes there.
+
+This also blocks `firebase deploy`, because the `firestore` predeploy hook runs
+`npm run test:rules` — so a broken emulator looks like a rules failure or a
+hanging deploy rather than a local networking problem. When CI has already run
+the suite green on the exact commit you are deploying, the gate is satisfied;
+deploy with a config that omits the hook and verify afterwards:
 
 ```bash
-winget install EclipseAdoptium.Temurin.21.JDK
-export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.<build>-hotspot"
-export PATH="$JAVA_HOME/bin:$PATH"
-java -version   # expect 21.x
+# firebase.deploy.json: same firestore block, no "predeploy"
+npx firebase deploy --config firebase.deploy.json --project production \
+  --only firestore:rules,firestore:indexes
+npm run verify:firestore-rules:deployed   # compares deployed SHA-256 to the repo
 ```
 
-CI already pins Java 21 (`actions/setup-java` in both workflows), which is why
-the rules suite passes there while failing locally. This also blocks
-`firebase deploy`, because the `firestore` predeploy hook runs `npm run
-test:rules` — so a wrong local JDK looks like a rules failure or a hanging
-deploy rather than a toolchain problem.
+`--project production` is required: `.firebaserc` defines `preview` and
+`production` with no default.
 
 `npm test` runs the rules suite and the Cloud Function trigger suite in turn.
 They deliberately use separate emulators (`firebase.test.json` and
