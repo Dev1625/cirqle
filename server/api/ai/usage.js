@@ -13,7 +13,10 @@ import {
   BUDGET_LIMIT_USD,
   deriveManagedVirtualKey,
 } from '../_lib/provisioning.js';
-import { getAIFeatureUsageDescriptor } from '../_lib/ai-feature-policy.js';
+import {
+  FEATURE_TAG_PREFIX,
+  getAIFeatureUsageDescriptor,
+} from '../_lib/ai-feature-policy.js';
 import { getExplicitLiteLLMConfig } from '../_lib/litellm-config.js';
 
 function setResponseHeaders(res, requestId) {
@@ -34,6 +37,50 @@ function number(value, fallback = 0) {
 
 function keyDetails(payload) {
   return payload?.info || payload?.key_info || payload?.key || payload || {};
+}
+
+/**
+ * LiteLLM serialises spend-log metadata with `safe_dumps`, so a row's
+ * `metadata` arrives as a JSON string rather than an object.
+ */
+function objectMetadata(value) {
+  if (value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `request_tags` is a list, serialised the same way. Read the feature back out
+ * of the tag `/api/ai/chat` writes.
+ */
+function featureFromTags(value) {
+  let tags = value;
+  if (typeof tags === 'string') {
+    try {
+      tags = JSON.parse(tags);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(tags)) return null;
+  for (const tag of tags) {
+    if (typeof tag === 'string' && tag.startsWith(FEATURE_TAG_PREFIX)) {
+      const feature = tag.slice(FEATURE_TAG_PREFIX.length).trim();
+      if (feature) return feature;
+    }
+  }
+  return null;
+}
+
+export function aggregateLogsForTest(rows) {
+  return aggregateLogs(rows);
 }
 
 function aggregateLogs(payload) {
@@ -64,10 +111,12 @@ function aggregateLogs(payload) {
       successfulRequests += 1;
     }
 
+    // `call_type` is deliberately not a fallback: it reports the gateway's
+    // own verb ("acompletion"), which reads as a feature name in the UI but
+    // attributes nothing. Unknown spend is honestly unattributed.
     const feature =
-      row.metadata?.cirqle_feature ||
-      row.request_tags?.cirqle_feature ||
-      row.call_type ||
+      featureFromTags(row.request_tags) ||
+      objectMetadata(row.metadata)?.cirqle_feature ||
       'unattributed';
     const safeFeature =
       typeof feature === 'string' && feature.length <= 64

@@ -7,6 +7,18 @@
  * client.
  */
 
+/**
+ * Spend-log attribution travels as LiteLLM request tags.
+ *
+ * LiteLLM narrows spend-log metadata to its own SpendLogsMetadata allowlist,
+ * so custom keys are dropped before the row is written. Tags are persisted
+ * verbatim as `request_tags`, which makes them the only durable channel for
+ * "which Cirqle feature spent this". `/api/ai/chat` writes them and
+ * `/api/ai/usage` reads them; keep the two in step.
+ */
+export const FEATURE_TAG_PREFIX = 'cirqle-feature:';
+export const TIER_TAG_PREFIX = 'cirqle-tier:';
+
 export const AI_MODEL_ALIASES_BY_TIER = Object.freeze({
   fast: 'gemini-3.5-flash-lite',
   reasoning: 'deepseek-v4-flash',

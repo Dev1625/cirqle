@@ -334,3 +334,56 @@ test('spend-log queries stay inside the gateway parameter contract', async () =>
   assert.equal(query.get('start_date'), '2026-07-10 07:57:44');
   assert.equal(query.get('end_date'), '2026-08-10 07:57:44');
 });
+
+// LiteLLM narrows spend-log metadata to its own SpendLogsMetadata allowlist
+// and serialises both metadata and request_tags with safe_dumps. Custom keys
+// are dropped, so feature attribution has to ride on tags and be parsed back
+// out of a JSON string. Getting this wrong showed every call as "Acompletion".
+test('attributes spend to the feature via request tags', async () => {
+  const result = await fetchSpendLogPages({
+    client: {
+      async request() {
+        return {
+          data: [
+            {
+              user_id: 'owner',
+              spend: 0.0006,
+              total_tokens: 716,
+              call_type: 'acompletion',
+              request_tags: JSON.stringify([
+                'cirqle-feature:directory-contact-parse',
+                'cirqle-tier:fast',
+              ]),
+              metadata: JSON.stringify({ user_api_key_user_id: 'owner' }),
+            },
+            // No tags at all: must not borrow the gateway's call_type.
+            {
+              user_id: 'owner',
+              spend: 0.5,
+              call_type: 'acompletion',
+            },
+          ],
+        };
+      },
+    },
+    identity: { uid: 'owner' },
+    start: new Date('2026-07-10T00:00:00Z'),
+    end: new Date('2026-08-10T00:00:00Z'),
+  });
+
+  assert.equal(result.rows.length, 2);
+
+  const { aggregateLogsForTest } = await import('../server/api/ai/usage.js');
+  const aggregated = aggregateLogsForTest(result.rows);
+  assert.equal(
+    aggregated.features['directory-contact-parse'].requests,
+    1,
+    'tagged spend must attribute to its feature',
+  );
+  assert.equal(aggregated.features.unattributed.requests, 1);
+  assert.equal(
+    aggregated.features.acompletion,
+    undefined,
+    'call_type must never masquerade as a feature',
+  );
+});

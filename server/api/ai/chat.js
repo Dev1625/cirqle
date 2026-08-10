@@ -9,7 +9,11 @@ import {
   deriveManagedVirtualKey,
   PRODUCTION_MODEL_ALIASES,
 } from '../_lib/provisioning.js';
-import { getAIFeaturePolicy } from '../_lib/ai-feature-policy.js';
+import {
+  FEATURE_TAG_PREFIX,
+  getAIFeaturePolicy,
+  TIER_TAG_PREFIX,
+} from '../_lib/ai-feature-policy.js';
 import { getExplicitLiteLLMConfig } from '../_lib/litellm-config.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -215,6 +219,16 @@ export function createAIChatHandler({
               cirqle_feature: request.feature,
               cirqle_tier: request.tier,
               cirqle_request_id: requestId,
+              // LiteLLM filters spend-log metadata down to its own
+              // SpendLogsMetadata allowlist, so the three keys above never
+              // reach the spend log and per-feature usage read back as the
+              // raw call type. `tags` is the supported passthrough: it is
+              // persisted verbatim as request_tags. Keep both — the keys
+              // above still travel with the live request.
+              tags: [
+                `${FEATURE_TAG_PREFIX}${request.feature}`,
+                `${TIER_TAG_PREFIX}${request.tier}`,
+              ],
             },
           }),
         },
