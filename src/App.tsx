@@ -10,6 +10,9 @@ import { ConfirmProvider } from './contexts/ConfirmContext';
 // is loaded only after a visitor enters /app.
 import LandingLayout from './layouts/LandingLayout';
 import LandingPage from './pages/LandingPage';
+// Small, and the fallback for every unmatched route on both surfaces, so it
+// stays eager rather than risking a lazy chunk fetch on an already-wrong URL.
+import NotFound from './pages/NotFound';
 
 const AppRoute = lazy(() => import('./layouts/AppRoute'));
 const AuthPage = lazy(() => import('./pages/AuthPage'));
@@ -70,7 +73,14 @@ export default function App() {
                     <Route path="calendar" element={<OutreachCalendar />} />
                     <Route path="templates" element={<Templates />} />
                     <Route path="settings" element={<Settings />} />
+                    {/* Keeps a mistyped in-app URL inside the shell, so the
+                        sidebar is still there to navigate out with. */}
+                    <Route path="*" element={<NotFound home="/app" />} />
                   </Route>
+
+                  {/* Anything else. Without a catch-all, React Router matches
+                      nothing and renders an empty document. */}
+                  <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
             </BrowserRouter>
