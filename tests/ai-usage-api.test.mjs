@@ -292,3 +292,45 @@ test('usage detail paginates and discloses a bounded truncation', async () => {
   assert.equal(result.pagesRead, 3);
   assert.equal(result.truncated, true);
 });
+
+// LiteLLM's /spend/logs/v2 declares page_size as Query(ge=1, le=100) and
+// documents start_date/end_date as "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD".
+// Sending page_size=500 and a full ISO-8601 timestamp failed FastAPI request
+// validation with a 422, which the handler surfaced as a 502 and took the
+// whole usage panel offline while /api/ai/chat kept working.
+test('spend-log queries stay inside the gateway parameter contract', async () => {
+  const queries = [];
+  await fetchSpendLogPages({
+    client: {
+      async request(path) {
+        queries.push(new URL(path, 'https://gateway.invalid').searchParams);
+        return { data: [] };
+      },
+    },
+    identity: { uid: 'owner' },
+    start: new Date('2026-07-10T07:57:44.317Z'),
+    end: new Date('2026-08-10T07:57:44.317Z'),
+    // Deliberately over the documented ceiling: the caller must be clamped,
+    // not forwarded verbatim into a request the gateway rejects.
+    pageSize: 500,
+  });
+
+  assert.equal(queries.length, 1);
+  const [query] = queries;
+
+  const pageSize = Number(query.get('page_size'));
+  assert.ok(
+    Number.isInteger(pageSize) && pageSize >= 1 && pageSize <= 100,
+    `page_size must satisfy LiteLLM's ge=1,le=100 — got ${pageSize}`,
+  );
+
+  for (const field of ['start_date', 'end_date']) {
+    assert.match(
+      query.get(field),
+      /^\d{4}-\d{2}-\d{2}(?: \d{2}:\d{2}:\d{2})?$/,
+      `${field} must be "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD"`,
+    );
+  }
+  assert.equal(query.get('start_date'), '2026-07-10 07:57:44');
+  assert.equal(query.get('end_date'), '2026-08-10 07:57:44');
+});

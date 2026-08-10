@@ -133,12 +133,26 @@ function spendRowBelongsToIdentity(row, identity, keyHash) {
   return keyHashes.some((value) => value === keyHash);
 }
 
+/**
+ * `/spend/logs/v2` declares start_date/end_date as strings and documents
+ * "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD". A full ISO-8601 timestamp is neither,
+ * so send the documented shape rather than whatever Date.toISOString produces.
+ */
+function spendLogDate(value) {
+  return value.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+// LiteLLM declares page_size as `Query(default=50, ge=1, le=100)`. Anything
+// above 100 fails request validation with a 422 before the handler runs, which
+// took the whole usage panel down rather than just truncating a page.
+export const MAX_SPEND_LOG_PAGE_SIZE = 100;
+
 export async function fetchSpendLogPages({
   client,
   identity,
   start,
   end,
-  pageSize = 500,
+  pageSize = MAX_SPEND_LOG_PAGE_SIZE,
   maxPages = 10,
   maxReadMs = 2_500,
   now = () => Date.now(),
@@ -154,12 +168,16 @@ export async function fetchSpendLogPages({
       truncated = true;
       break;
     }
+    const requestedPageSize = Math.min(
+      Math.max(1, Math.floor(pageSize)),
+      MAX_SPEND_LOG_PAGE_SIZE,
+    );
     const query = new URLSearchParams({
       user_id: identity.uid,
-      start_date: start.toISOString(),
-      end_date: end.toISOString(),
+      start_date: spendLogDate(start),
+      end_date: spendLogDate(end),
       page: String(page),
-      page_size: String(pageSize),
+      page_size: String(requestedPageSize),
     });
     const payload = await client.request(`/spend/logs/v2?${query}`);
     const untrustedPageRows = spendRows(payload);
@@ -171,7 +189,7 @@ export async function fetchSpendLogPages({
     const hasMore = spendPageHasMore(
       payload,
       page,
-      pageSize,
+      requestedPageSize,
       untrustedPageRows.length,
     );
     if (!hasMore) break;
