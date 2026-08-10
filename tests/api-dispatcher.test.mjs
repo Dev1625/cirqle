@@ -54,7 +54,8 @@ test('registers every server API handler exactly once', () => {
     routeModules().sort(),
   );
   assert.equal(new Set(API_ROUTE_PATHS).size, API_ROUTE_PATHS.length);
-  assert.equal(API_ROUTE_PATHS.length, 23);
+  // 23 application routes plus the four OAuth authorization-server endpoints.
+  assert.equal(API_ROUTE_PATHS.length, 27);
 });
 
 test('derives only exact same-origin API paths and ignores query values', () => {

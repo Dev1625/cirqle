@@ -17,6 +17,10 @@ import gmailPoll from './api/integrations/gmail/poll.js';
 import gmailSend from './api/integrations/gmail/send.js';
 import oauthCallback from './api/integrations/oauth/callback.js';
 import oauthStart from './api/integrations/oauth/start.js';
+import oauthApprove from './api/oauth/approve.js';
+import oauthAuthorize from './api/oauth/authorize.js';
+import oauthRegister from './api/oauth/register.js';
+import oauthToken from './api/oauth/token.js';
 import registerUser from './api/register-user.js';
 import passwordRange from './api/security/password-range.js';
 import cspTelemetry from './api/telemetry/csp.js';
@@ -49,6 +53,12 @@ const ROUTES = Object.freeze({
   'integrations/gmail/send': gmailSend,
   'integrations/oauth/callback': oauthCallback,
   'integrations/oauth/start': oauthStart,
+  // Cirqle's own OAuth authorization server, for MCP clients. Distinct from
+  // integrations/oauth/*, which is Cirqle acting as a client of Google.
+  'oauth/approve': oauthApprove,
+  'oauth/authorize': oauthAuthorize,
+  'oauth/register': oauthRegister,
+  'oauth/token': oauthToken,
   'register-user': registerUser,
   'security/password-range': passwordRange,
   'telemetry/csp': cspTelemetry,

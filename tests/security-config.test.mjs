@@ -257,6 +257,22 @@ check('API routing precedes the SPA fallback', () => {
     source: '/((?!api/).*)',
     destination: '/index.html',
   });
+
+  // OAuth discovery lives at the domain root, so without these two it would be
+  // swallowed by the SPA fallback and every MCP client would see an HTML page
+  // where it expected metadata — with no useful error to explain why.
+  const sources = (vercel.rewrites || []).map((rule) => rule.source);
+  for (const wellKnown of [
+    '/.well-known/oauth-protected-resource',
+    '/.well-known/oauth-authorization-server',
+  ]) {
+    const index = sources.indexOf(wellKnown);
+    assert.notEqual(index, -1, `${wellKnown} must be rewritten to the API`);
+    assert.ok(
+      index < sources.length - 1,
+      `${wellKnown} must be matched before the SPA fallback`,
+    );
+  }
 });
 
 check('Vercel deploys bounded API functions within the Hobby limit', () => {
@@ -266,11 +282,21 @@ check('Vercel deploys bounded API functions within the Hobby limit', () => {
       withFileTypes: true,
     })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.js'));
-  assert.equal(functionFiles.length, 6);
+  assert.equal(functionFiles.length, 7);
   assert.ok(functionFiles.length <= 12);
   assert.deepEqual(
     functionFiles.map((entry) => entry.name).sort(),
-    ['delete.js', 'export.js', 'maintenance.js', 'mcp.js', 'merge.js', 'router.js'],
+    [
+      'delete.js',
+      'export.js',
+      'maintenance.js',
+      'mcp.js',
+      'merge.js',
+      'router.js',
+      // /.well-known/* does not start with /api/, so the dispatcher's path
+      // parsing cannot route it and it needs its own entry.
+      'well-known.js',
+    ],
   );
   // Every file here escapes the dispatcher, which is only ever worth doing for
   // a route-specific duration limit. Each one costs a function slot against the
