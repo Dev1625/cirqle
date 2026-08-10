@@ -17,6 +17,9 @@ import {
   AI_MODEL_ALIASES_BY_TIER,
   PRODUCTION_MODEL_ALIASES,
 } from '../server/api/_lib/ai-feature-policy.js';
+import {
+  RETENTION_SOURCE_TYPES,
+} from '../server/api/_lib/source-retention.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const readJson = (relativePath) => JSON.parse(
@@ -614,6 +617,62 @@ check('every server collection-group query has a COLLECTION_GROUP index', () => 
 
 check('firebase.json deploys the index file', () => {
   assert.equal(readJson('firebase.json').firestore.indexes, 'firestore.indexes.json');
+});
+
+// The retention sweep, the source-delete boundaries, and the Settings →
+// Privacy & AI table all iterate the source-type list. The server keeps its own
+// copy because it must not import the browser Firebase bundle, and until now
+// only a comment held the two together. A type the server can write but the
+// policy cannot name is data the owner can neither retain-limit nor revoke.
+function parseStringArrayLiteral(source, declaration) {
+  const start = source.indexOf(declaration);
+  assert.notEqual(start, -1, `${declaration} not found`);
+  const open = source.indexOf('[', start);
+  const close = source.indexOf(']', open);
+  assert.ok(open !== -1 && close > open, `${declaration} is not an array`);
+  // Drop line comments first: an apostrophe in prose ("an agent's work")
+  // otherwise reads as a quote and swallows everything up to the next one.
+  const body = source
+    .slice(open + 1, close)
+    .replace(/\/\/[^\n]*/g, '');
+  return Array.from(body.matchAll(/'([^']+)'/g), (match) => match[1]);
+}
+
+check('the client and server source-type taxonomies are identical', () => {
+  const privacyPolicy = readText('src/lib/moat/privacyPolicy.ts');
+  const clientTypes = parseStringArrayLiteral(
+    privacyPolicy,
+    'export const PRIVACY_SOURCE_TYPES',
+  );
+
+  // Order matters: it is the display order of the privacy table.
+  assert.deepEqual(clientTypes, [...RETENTION_SOURCE_TYPES]);
+  assert.ok(
+    clientTypes.includes('agent'),
+    'MCP agent writes need their own revocable source boundary',
+  );
+  assert.equal(
+    new Set(clientTypes).size,
+    clientTypes.length,
+    'duplicate source type',
+  );
+});
+
+check('every source type is labelled in the privacy table', () => {
+  const controls = readText(
+    'src/components/settings/SourcePrivacyControls.tsx',
+  );
+  const start = controls.indexOf('const SOURCE_LABELS');
+  assert.notEqual(start, -1, 'SOURCE_LABELS not found');
+  const body = controls.slice(start, controls.indexOf('};', start));
+
+  for (const sourceType of RETENTION_SOURCE_TYPES) {
+    assert.match(
+      body,
+      new RegExp(`(^|[\\s{])'?${sourceType}'?\\s*:`, 'm'),
+      `${sourceType} has no label, so it would render blank in Settings`,
+    );
+  }
 });
 
 console.log(`\n${passed} security configuration checks passed`);

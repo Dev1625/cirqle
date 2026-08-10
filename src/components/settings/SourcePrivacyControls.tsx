@@ -20,6 +20,7 @@ import { RetentionSweepPanel } from './RetentionSweepPanel';
 const SOURCE_LABELS: Record<PrivacySourceType, string> = {
   profile: 'Profiles',
   import: 'Imports',
+  agent: 'AI agent writes',
   note: 'Notes',
   voice: 'Voice memos',
   meeting: 'Meetings',

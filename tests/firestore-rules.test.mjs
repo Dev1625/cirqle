@@ -2272,3 +2272,60 @@ await it('a fact denied when the same batch fences its contact for purging', asy
   );
   await assertFails(batch.commit());
 });
+
+// importProvenance is how a record says where it came from, and the retention
+// and source-delete machinery keys off it. `agent` (MCP writes) and `csv`
+// (the owner's own uploads) must both be accepted and must stay distinguishable
+// so an agent's work can be revoked without touching the owner's imports.
+await it('contact import provenance accepts csv and agent, and nothing else', async () => {
+  const provenance = (sourceType) => ({
+    sourceType,
+    sourceId: `${sourceType}:provenance-probe`,
+    rowId: null,
+    mapping: 'deterministic',
+    importedAt: serverTimestamp(),
+  });
+
+  for (const sourceType of ['csv', 'agent']) {
+    await assertSucceeds(setDoc(
+      doc(owner, `users/${OWNER}/contacts/provenance-${sourceType}`),
+      canonicalContact({
+        name: `Provenance ${sourceType}`,
+        importProvenance: provenance(sourceType),
+      }),
+    ));
+  }
+
+  // An unrecognised origin would land outside every privacy boundary, so it
+  // could never be retention-swept or revoked.
+  for (const sourceType of ['mcp', 'manual', 'scraper', '']) {
+    await assertFails(setDoc(
+      doc(owner, `users/${OWNER}/contacts/provenance-bad-${sourceType || 'blank'}`),
+      canonicalContact({
+        name: 'Unknown Origin',
+        importProvenance: provenance(sourceType),
+      }),
+    ));
+  }
+});
+
+await it('temporal facts accept an agent source type', async () => {
+  await assertSucceeds(setDoc(
+    doc(owner, `users/${OWNER}/contacts/c1/facts/agent-written`),
+    {
+      predicate: 'identity.company',
+      value: 'Lumen Studio',
+      normalizedValue: 'lumen studio',
+      sourceType: 'agent',
+      sourceId: 'agent:thread-import',
+      observedAt: serverTimestamp(),
+      confidence: 1,
+      current: true,
+      aiAllowed: true,
+      correctionOf: null,
+      supersededBy: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+  ));
+});

@@ -368,6 +368,15 @@ service cloud.firestore {
              && data.tags.size() <= 40;
     }
 
+    // `agent` marks a record written by an AI agent through the MCP server.
+    // Those writes go through the Admin SDK, which bypasses these rules
+    // entirely — this allowlist exists so the rules still describe every shape
+    // that can legitimately exist in the database. A spec that contradicts what
+    // is actually stored is how the last round of bugs stayed hidden.
+    //
+    // `agent` and `csv` are deliberately distinct: it must stay possible to
+    // revoke everything an agent wrote without touching the owner's own
+    // uploads. See RETENTION_SOURCE_TYPES.
     function isValidContactImportProvenance(value) {
       return value is map
              && value.keys().hasOnly([
@@ -376,7 +385,7 @@ service cloud.firestore {
              && value.keys().hasAll([
                'sourceType', 'sourceId', 'rowId', 'mapping', 'importedAt'
              ])
-             && value.sourceType == 'csv'
+             && value.sourceType in ['csv', 'agent']
              && value.sourceId is string
              && value.sourceId.size() > 0
              && value.sourceId.size() <= 300
@@ -1726,8 +1735,8 @@ service cloud.firestore {
              && data.normalizedValue is string
              && data.normalizedValue.size() <= 20000
              && data.sourceType in [
-                'profile', 'import', 'note', 'meeting', 'outreach', 'voice',
-                'public-card-capture', 'user-correction'
+                'profile', 'import', 'agent', 'note', 'meeting', 'outreach',
+                'voice', 'public-card-capture', 'user-correction'
               ]
              && isNullableString(data.sourceId, 300)
              && data.observedAt is timestamp

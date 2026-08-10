@@ -1,8 +1,20 @@
 import type { GroundedSource } from '../grounding';
 
+/**
+ * Order is the display order of the Settings → Privacy & AI table.
+ *
+ * `server/api/_lib/source-retention.js` mirrors this list exactly and
+ * `tests/security-config.test.mjs` asserts the two stay identical — a source
+ * type the server can write but the policy cannot name is data the owner
+ * cannot see, retain, or revoke.
+ */
 export const PRIVACY_SOURCE_TYPES = [
   'profile',
   'import',
+  // Anything an AI agent wrote through the MCP server. Kept distinct from
+  // `import` so an agent's work is visibly attributable and revocable in one
+  // action, rather than blending into the owner's own CSV uploads.
+  'agent',
   'note',
   'voice',
   'meeting',

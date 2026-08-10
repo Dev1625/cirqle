@@ -10,6 +10,9 @@ import { FieldPath } from 'firebase-admin/firestore';
 export const RETENTION_SOURCE_TYPES = Object.freeze([
   'profile',
   'import',
+  // MCP agent writes. See the note in privacyPolicy.ts — kept separate from
+  // `import` so agent-written records are revocable as one boundary.
+  'agent',
   'note',
   'voice',
   'meeting',
@@ -76,6 +79,7 @@ const NOTE_SOURCE_MARKERS = Object.freeze({
 const FACT_SOURCE_TYPE_MAP = Object.freeze({
   profile: 'profile',
   import: 'import',
+  agent: 'agent',
   note: 'note',
   voice: 'voice',
   meeting: 'meeting',
