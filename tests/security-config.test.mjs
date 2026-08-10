@@ -524,4 +524,96 @@ check('each public alias resolves to its intended upstream provider model', () =
   assert.doesNotMatch(liteLLMConfig, /gemini-1\.5|gpt-4|compatibility-/i);
 });
 
+// Firestore's automatic single-field indexes are COLLECTION scope only. A
+// collection-group query that filters or orders needs an explicitly declared
+// COLLECTION_GROUP index, or it throws FAILED_PRECONDITION at run time — which
+// is how the nightly maintenance cron silently failed every night. Server code
+// is the source of truth here; the index file has to keep up with it.
+check('every server collection-group query has a COLLECTION_GROUP index', () => {
+  const serverDir = path.join(ROOT, 'server');
+  const sourceFiles = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.js')) sourceFiles.push(full);
+    }
+  };
+  walk(serverDir);
+
+  // Resolve `collectionGroup(X)` where X is a literal or a constant declared
+  // in the same file, including via a `kind -> collection` mapping helper.
+  const queried = new Set();
+  for (const file of sourceFiles) {
+    const source = fs.readFileSync(file, 'utf8');
+    const constants = new Map(
+      Array.from(
+        source.matchAll(/^const\s+([A-Z0-9_]+)\s*=\s*'([^']+)'/gm),
+        (match) => [match[1], match[2]],
+      ),
+    );
+    for (const [, argument] of source.matchAll(
+      /\.collectionGroup\(\s*([^)]+?)\s*\)/g,
+    )) {
+      const literal = argument.match(/^['"]([^'"]+)['"]$/);
+      if (literal) {
+        queried.add(literal[1]);
+        continue;
+      }
+      // A helper call such as requestCollection(kind): every constant it can
+      // return must be indexed, so require them all.
+      const helper = argument.match(/^([A-Za-z_$][\w$]*)\(/);
+      if (helper) {
+        const body = source.match(
+          new RegExp(`function\\s+${helper[1]}\\b[\\s\\S]*?\\n}`),
+        );
+        for (const [, name] of (body?.[0] || '').matchAll(
+          /return\s+([A-Z0-9_]+)\s*;/g,
+        )) {
+          if (constants.has(name)) queried.add(constants.get(name));
+        }
+        continue;
+      }
+      if (constants.has(argument)) queried.add(constants.get(argument));
+    }
+  }
+
+  assert.ok(
+    queried.size > 0,
+    'collection-group scan found nothing — the detection regex has drifted',
+  );
+
+  const indexed = new Set();
+  for (const override of readJson('firestore.indexes.json').fieldOverrides || []) {
+    const hasGroupScope = (override.indexes || []).some(
+      (index) => index.queryScope === 'COLLECTION_GROUP',
+    );
+    if (hasGroupScope) indexed.add(override.collectionGroup);
+  }
+  for (const index of readJson('firestore.indexes.json').indexes || []) {
+    if (index.queryScope === 'COLLECTION_GROUP') indexed.add(index.collectionGroup);
+  }
+
+  const missing = [...queried].filter((name) => !indexed.has(name));
+  assert.deepEqual(
+    missing,
+    [],
+    `collection groups queried without a COLLECTION_GROUP index: ${missing.join(', ')}`,
+  );
+
+  // A field override replaces the automatic indexes for that field, so the
+  // collection-scoped ones the per-owner queries rely on must stay declared.
+  for (const override of readJson('firestore.indexes.json').fieldOverrides || []) {
+    const scopes = (override.indexes || []).map((index) => index.queryScope);
+    assert.ok(
+      scopes.includes('COLLECTION'),
+      `${override.collectionGroup}.${override.fieldPath} dropped its COLLECTION-scope index`,
+    );
+  }
+});
+
+check('firebase.json deploys the index file', () => {
+  assert.equal(readJson('firebase.json').firestore.indexes, 'firestore.indexes.json');
+});
+
 console.log(`\n${passed} security configuration checks passed`);

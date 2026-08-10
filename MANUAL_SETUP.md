@@ -159,6 +159,35 @@ taskkill //F //PID <pid>
 
 Nothing else uses port 8590, so anything holding it is a leftover test run.
 
+**If it fails with "Firestore Emulator has exited with code: 1" and an empty
+`firestore-debug.log`, check your Java version first — this one is not a
+stale port.** The emulator jar bundles an old Netty that reaches into
+`sun.misc.Unsafe`, which Java 24+ restricts, so it dies before it can log
+anything:
+
+```
+java.lang.IllegalStateException: failed to create a child event loop
+Caused by: io.netty.channel.ChannelException: failed to open a new selector
+```
+
+Run `java -version`. On **Java 24 or newer the emulator cannot start**, and no
+JVM flag works around it (`--add-opens java.base/sun.nio.ch=ALL-UNNAMED` and
+`--sun-misc-unsafe-memory-access=allow` were both tried). Install a JDK 21 and
+point the shell at it:
+
+```bash
+winget install EclipseAdoptium.Temurin.21.JDK
+export JAVA_HOME="/c/Program Files/Eclipse Adoptium/jdk-21.<build>-hotspot"
+export PATH="$JAVA_HOME/bin:$PATH"
+java -version   # expect 21.x
+```
+
+CI already pins Java 21 (`actions/setup-java` in both workflows), which is why
+the rules suite passes there while failing locally. This also blocks
+`firebase deploy`, because the `firestore` predeploy hook runs `npm run
+test:rules` — so a wrong local JDK looks like a rules failure or a hanging
+deploy rather than a toolchain problem.
+
 `npm test` runs the rules suite and the Cloud Function trigger suite in turn.
 They deliberately use separate emulators (`firebase.test.json` and
 `firebase.functions-test.json`): the rules tests seed a capture document as a
