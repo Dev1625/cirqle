@@ -27,6 +27,7 @@ Google project), digest email ~15 min.
 6. [Transactional email for the digest](#6-transactional-email-for-the-digest)
 7. [Firestore rules — must be redeployed](#7-firestore-rules--must-be-redeployed)
 8. [Ordering an actual NFC card](#8-ordering-an-actual-nfc-card)
+9. [Enabling the rules drift check in CI](#9-enabling-the-rules-drift-check-in-ci)
 
 ---
 
@@ -506,3 +507,63 @@ No software work left. The card page already exists at `/c/:cardId`.
 The card id doesn't change when you edit your card's content, so a written tag
 keeps working after redesigns. If you ever need to retire a card, unpublish it
 and the page returns a clean "no card here" state rather than an error.
+
+---
+
+## 9. Enabling the rules drift check in CI
+
+The `Security policy` workflow has a `Production rules match main` job that
+reads the **live** Firestore rules and compares them byte-for-byte with
+`firestore.rules` on `main`. It catches the case where someone edits rules in
+the Firebase console, or a rules deploy silently fails, and production quietly
+drifts away from what the repo says is enforced.
+
+It needs read-only access to your Google Cloud project. Until the two secrets
+below exist the job **skips with a warning** instead of failing — so this is
+optional, but the check is only real once you do it.
+
+Use Workload Identity Federation rather than a downloaded service-account
+key: GitHub mints a short-lived token per run, so there is no long-lived
+credential to leak or rotate.
+
+```bash
+PROJECT_ID=cirqle-9dd06
+PROJECT_NUMBER=$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')
+
+# 1. A pool + provider that trusts only this repository.
+gcloud iam workload-identity-pools create github --project="$PROJECT_ID" --location=global \
+  --display-name="GitHub Actions"
+
+gcloud iam workload-identity-pools providers create-oidc github-actions \
+  --project="$PROJECT_ID" --location=global --workload-identity-pool=github \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository=assertion.repository" \
+  --attribute-condition="assertion.repository=='Dev1625/cirqle'"
+
+# 2. A service account that can read rules and nothing else.
+gcloud iam service-accounts create firestore-rules-viewer --project="$PROJECT_ID" \
+  --display-name="CI Firestore rules viewer"
+
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+  --member="serviceAccount:firestore-rules-viewer@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/firebaserules.viewer"
+
+# 3. Let only this repo impersonate it.
+gcloud iam service-accounts add-iam-policy-binding \
+  "firestore-rules-viewer@$PROJECT_ID.iam.gserviceaccount.com" --project="$PROJECT_ID" \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/attribute.repository/Dev1625/cirqle"
+
+echo "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/github/providers/github-actions"
+```
+
+Then add two repository secrets (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+| --- | --- |
+| `GCP_WIF_PROVIDER_CIRQLE` | the `projects/…/providers/github-actions` string printed above |
+| `GCP_RULES_VIEWER_SERVICE_ACCOUNT` | `firestore-rules-viewer@cirqle-9dd06.iam.gserviceaccount.com` |
+
+The next scheduled or pushed run picks them up automatically — no workflow
+edit needed. `roles/firebaserules.viewer` is read-only, so a compromised run
+can read rules and nothing else.

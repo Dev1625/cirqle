@@ -54,7 +54,9 @@ async function defaultOpenDocument(data: ArrayBuffer): Promise<PDFDocument> {
       import('pdfjs-dist/build/pdf.worker?url'),
     ]);
   GlobalWorkerOptions.workerSrc = workerModule.default;
-  return getDocument(data).promise as unknown as Promise<PDFDocument>;
+  // pdfjs-dist 6 dropped the bare-buffer overload; the buffer now travels as
+  // an explicit `data` source parameter.
+  return getDocument({ data }).promise as unknown as Promise<PDFDocument>;
 }
 
 function cleanPageText(items: PDFTextItem[] | undefined): string {
