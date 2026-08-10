@@ -36,15 +36,31 @@ service cloud.firestore {
       return isOwner(userId) && hasVerifiedEmail();
     }
 
+    // Deliberately `existsAfter`/`getAfter` rather than `exists`/`get`.
+    //
+    // Adding a contact writes the contact and its derived profile facts in one
+    // atomic batch. Rules evaluate each write against *committed* state, so
+    // `exists` could not see the contact being created alongside the fact and
+    // denied the whole batch — which took out adding a contact at all.
+    //
+    // The `*After` variants read post-batch state, which is the condition this
+    // check actually wants: never leave a fact orphaned from its contact. A
+    // fact whose contact neither exists nor is created in the same request is
+    // still denied, and a contact fenced for purging in this same batch is now
+    // caught too. For any write that does not touch the contact document these
+    // behave identically to `exists`/`get`.
+    //
+    // Every caller is an `allow create`/`allow update`; the `*After` functions
+    // are not valid in read rules, so keep it that way.
     function contactAcceptsLinkedWrites(userId, contactId) {
       return contactId is string
              && contactId.size() > 0
              && contactId.size() <= 300
-             && exists(
+             && existsAfter(
                /databases/$(database)/documents/users/$(userId)/contacts/$(contactId)
              )
              && !(
-               'purgeFence' in get(
+               'purgeFence' in getAfter(
                  /databases/$(database)/documents/users/$(userId)/contacts/$(contactId)
                ).data
              );

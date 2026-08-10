@@ -2182,3 +2182,93 @@ if (failed > 0) {
   console.log(`Failing: ${failures.join('; ')}`);
   process.exit(1);
 }
+
+// Adding a contact writes the contact and its derived profile facts in ONE
+// atomic batch (src/pages/Directory.tsx). Rules evaluate each write in a batch
+// against committed state, so an `exists()` check on the parent could not see
+// the contact being created beside the fact and denied the entire batch —
+// production could not add a contact at all. Every fact test above seeds its
+// contact first, so nothing covered the real client path.
+await it('a contact and its derived facts commit in one batch', async () => {
+  const batch = writeBatch(owner);
+  const contactRef = doc(owner, `users/${OWNER}/contacts/batched-create`);
+  batch.set(contactRef, canonicalContact({ name: 'Batched Create' }));
+  batch.set(
+    doc(owner, `users/${OWNER}/contacts/batched-create/facts/profile-company`),
+    {
+      predicate: 'identity.company',
+      value: 'Northwind Analytics',
+      normalizedValue: 'northwind analytics',
+      sourceType: 'profile',
+      sourceId: 'profile:batched-create',
+      observedAt: serverTimestamp(),
+      confidence: 1,
+      current: true,
+      aiAllowed: true,
+      correctionOf: null,
+      supersededBy: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+  );
+  await assertSucceeds(batch.commit());
+});
+
+// The batched-create allowance must not become a way to orphan a fact under a
+// contact that is never created.
+await it('a fact whose contact is never created is still denied', async () => {
+  await assertFails(setDoc(
+    doc(owner, `users/${OWNER}/contacts/no-such-contact/facts/orphan`),
+    {
+      predicate: 'identity.company',
+      value: 'Nowhere',
+      normalizedValue: 'nowhere',
+      sourceType: 'profile',
+      sourceId: 'profile:no-such-contact',
+      observedAt: serverTimestamp(),
+      confidence: 1,
+      current: true,
+      aiAllowed: true,
+      correctionOf: null,
+      supersededBy: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+  ));
+});
+
+// A batch may not smuggle a linked write past the purge fence by writing the
+// fence and the fact together: post-batch state is what is checked.
+await it('a fact denied when the same batch fences its contact for purging', async () => {
+  const batch = writeBatch(owner);
+  const contactRef = doc(owner, `users/${OWNER}/contacts/fenced-in-batch`);
+  batch.set(contactRef, canonicalContact({
+    name: 'Fenced In Batch',
+    purgeFence: {
+      protocolVersion: 1,
+      requestId: 'fenced-in-batch',
+      leaseId: 'server-lease',
+      acquiredAt: new Date(),
+      leaseExpiresAt: new Date(Date.now() + 5 * 60 * 1_000),
+    },
+  }));
+  batch.set(
+    doc(owner, `users/${OWNER}/contacts/fenced-in-batch/facts/sneaky`),
+    {
+      predicate: 'identity.company',
+      value: 'Sneaky',
+      normalizedValue: 'sneaky',
+      sourceType: 'profile',
+      sourceId: 'profile:fenced-in-batch',
+      observedAt: serverTimestamp(),
+      confidence: 1,
+      current: true,
+      aiAllowed: true,
+      correctionOf: null,
+      supersededBy: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    },
+  );
+  await assertFails(batch.commit());
+});
