@@ -372,6 +372,11 @@ function noteSourceType(data) {
       'reply',
       'public-card-capture',
       'user-input',
+      // A note written by an MCP agent declares itself 'agent' so the owner can
+      // retire everything an AI added in one action. Without it here the value
+      // would fall through to the `source` marker below and be filed as an
+      // ordinary note — silently defeating the whole point of the label.
+      'agent',
     ].includes(explicit)
   ) {
     return explicit;

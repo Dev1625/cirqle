@@ -803,3 +803,65 @@ test('endpoint accepts POST only and rejects unauthenticated requests before sto
   assert.equal(unauthorized.payload.error.code, 'unauthorized');
   assert.equal(sweeps, 0);
 });
+
+// A note's sourceId must equal its own document id (isValidNoteBase), so
+// "revoke this import" cannot be expressed for notes the way it can for
+// contacts. Agent-written notes therefore declare privacySourceType 'agent' so
+// the owner can retire everything an AI added in one action.
+//
+// noteSourceType only honours an explicit type if it appears in its allowlist;
+// leaving 'agent' out of that list filed agent notes as ordinary notes and
+// silently defeated the label, which is exactly what this guards.
+test('agent-written notes and meeting logs classify as agent', () => {
+  const cases = [
+    { source: 'quick-note', recordType: 'note' },
+    { source: 'meeting-log', recordType: 'meeting' },
+  ];
+
+  for (const shape of cases) {
+    const classified = classifyStoredRetentionDocument({
+      collectionName: 'notes',
+      documentId: 'note-1',
+      data: {
+        ...shape,
+        privacySourceType: 'agent',
+        contactId: 'contact-1',
+        observedAt: new Date('2026-08-10T12:00:00.000Z'),
+      },
+    });
+    assert.equal(
+      classified?.sourceType,
+      'agent',
+      `${shape.source} should be revocable as agent-written`,
+    );
+  }
+});
+
+// The owner's own notes must keep their true category, or a retention rule for
+// meetings would stop applying to meetings they wrote themselves.
+test('a note the owner wrote keeps its own category', () => {
+  const meeting = classifyStoredRetentionDocument({
+    collectionName: 'notes',
+    documentId: 'note-2',
+    data: {
+      source: 'meeting-log',
+      recordType: 'meeting',
+      privacySourceType: 'meeting',
+      contactId: 'contact-1',
+      observedAt: new Date('2026-08-10T12:00:00.000Z'),
+    },
+  });
+  assert.equal(meeting?.sourceType, 'meeting');
+
+  const quick = classifyStoredRetentionDocument({
+    collectionName: 'notes',
+    documentId: 'note-3',
+    data: {
+      source: 'quick-note',
+      recordType: 'note',
+      contactId: 'contact-1',
+      observedAt: new Date('2026-08-10T12:00:00.000Z'),
+    },
+  });
+  assert.equal(quick?.sourceType, 'note');
+});

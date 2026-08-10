@@ -1408,7 +1408,12 @@ service cloud.firestore {
              && isValidNoteBase(userId, noteId, data)
              && data.recordType == 'note'
              && data.source == 'quick-note'
-             && data.privacySourceType == 'note'
+             // 'agent' marks a note an MCP agent wrote, so the owner can retire
+             // everything an AI added in one action rather than one note at a
+             // time — a note's sourceId must equal its own id, so per-import
+             // revocation is not otherwise expressible. See noteSourceType in
+             // source-retention.js, which must list it too.
+             && data.privacySourceType in ['note', 'agent']
              && data.content is string
              && data.content.size() > 0
              && data.content.size() <= 20000
@@ -1449,7 +1454,9 @@ service cloud.firestore {
              && isValidNoteBase(userId, noteId, data)
              && data.recordType == 'meeting'
              && data.source == 'meeting-log'
-             && data.privacySourceType == 'meeting'
+             // See the quick-note rule: 'agent' keeps AI-written meeting logs
+             // revocable as one group.
+             && data.privacySourceType in ['meeting', 'agent']
              && data.content is string
              && data.content.size() > 0
              && data.content.size() <= 70000
