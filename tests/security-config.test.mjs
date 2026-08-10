@@ -266,17 +266,21 @@ check('Vercel deploys bounded API functions within the Hobby limit', () => {
       withFileTypes: true,
     })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.js'));
-  assert.equal(functionFiles.length, 5);
+  assert.equal(functionFiles.length, 6);
   assert.ok(functionFiles.length <= 12);
   assert.deepEqual(
     functionFiles.map((entry) => entry.name).sort(),
-    ['delete.js', 'export.js', 'maintenance.js', 'merge.js', 'router.js'],
+    ['delete.js', 'export.js', 'maintenance.js', 'mcp.js', 'merge.js', 'router.js'],
   );
+  // Every file here escapes the dispatcher, which is only ever worth doing for
+  // a route-specific duration limit. Each one costs a function slot against the
+  // Hobby ceiling, so the two lists are asserted together.
   assert.deepEqual(Object.keys(vercel.functions || {}).sort(), [
     'api/account/delete.js',
     'api/account/export.js',
     'api/contacts/merge.js',
     'api/cron/maintenance.js',
+    'api/mcp.js',
   ]);
   assert.match(apiDispatcher, /'account\/bootstrap':/);
   assert.match(apiDispatcher, /'cron\/maintenance':/);

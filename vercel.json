@@ -12,6 +12,9 @@
     },
     "api/contacts/merge.js": {
       "maxDuration": 60
+    },
+    "api/mcp.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
