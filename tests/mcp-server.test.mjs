@@ -96,18 +96,19 @@ test('notifications are acknowledged with no body', async () => {
   assert.equal(res.payload, undefined);
 });
 
-test('tools/list advertises the contact tools with schemas', async () => {
+// The schemas are the field contract the model reads, so a tool without a real
+// description is a tool the model will use badly. The exact menu is asserted in
+// 'the full tool menu is advertised' below.
+test('every advertised tool carries a usable schema', async () => {
   const res = await call({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
-  const names = res.payload.result.tools.map((tool) => tool.name);
 
-  assert.deepEqual(names.sort(), [
-    'get_contact',
-    'search_contacts',
-    'upsert_contacts',
-  ]);
+  assert.ok(res.payload.result.tools.length > 0);
   for (const tool of res.payload.result.tools) {
     assert.equal(tool.inputSchema.type, 'object');
-    assert.ok(tool.description.length > 20);
+    assert.ok(
+      tool.description.length > 20,
+      `${tool.name} needs a description the model can act on`,
+    );
   }
 });
 
@@ -215,4 +216,38 @@ test('responses are never cached and vary on Authorization', async () => {
   assert.equal(res.headers.vary, 'Authorization');
   assert.equal(res.headers['x-content-type-options'], 'nosniff');
   assert.deepEqual(res.payload.result, {});
+});
+
+// The safety promise is "an agent can add, never remove". A promise in a
+// comment decays; this fails the build if a destructive tool ever appears,
+// including one added by someone who never read the comment.
+test('no tool an agent can call is destructive', async () => {
+  const { DESTRUCTIVE_NAME_PATTERN, MCP_TOOLS } = await import(
+    '../server/api/_lib/mcp-tools.js'
+  );
+
+  for (const tool of MCP_TOOLS) {
+    assert.doesNotMatch(
+      tool.name,
+      DESTRUCTIVE_NAME_PATTERN,
+      `${tool.name} looks destructive — agents get additive tools only`,
+    );
+  }
+
+  // And prove the guard actually bites, so it cannot rot into a no-op.
+  assert.match('delete_contact', DESTRUCTIVE_NAME_PATTERN);
+  assert.match('merge_duplicates', DESTRUCTIVE_NAME_PATTERN);
+  assert.doesNotMatch('upsert_contacts', DESTRUCTIVE_NAME_PATTERN);
+});
+
+test('the full tool menu is advertised', async () => {
+  const res = await call({ jsonrpc: '2.0', id: 20, method: 'tools/list' });
+  assert.deepEqual(res.payload.result.tools.map((t) => t.name).sort(), [
+    'add_note',
+    'get_contact',
+    'log_interaction',
+    'log_meeting',
+    'search_contacts',
+    'upsert_contacts',
+  ]);
 });

@@ -2,6 +2,11 @@ import {
   MAX_AGENT_CONTACTS_PER_CALL,
   ingestAgentContacts,
 } from './contact-ingest.js';
+import {
+  addAgentNote,
+  logAgentMeeting,
+  logAgentOutreach,
+} from './interaction-ingest.js';
 
 /**
  * Tool surface exposed to AI agents over MCP.
@@ -148,6 +153,86 @@ export const MCP_TOOLS = Object.freeze([
       },
     },
   },
+  {
+    name: 'add_note',
+    title: 'Add a note',
+    description:
+      'Attach a note to a contact — context about who they are, what was discussed, or something to remember. Use log_meeting for meetings and log_interaction for emails; this is for everything else.',
+    inputSchema: {
+      type: 'object',
+      required: ['contactId', 'content'],
+      additionalProperties: false,
+      properties: {
+        contactId: { type: 'string', description: 'Id from search_contacts.' },
+        content: {
+          type: 'string',
+          maxLength: 20_000,
+          description:
+            'The note. Record only what the source text supports; do not add outside knowledge about the person.',
+        },
+      },
+    },
+  },
+  {
+    name: 'log_meeting',
+    title: 'Log a meeting',
+    description:
+      'Record a meeting that already happened, with what was discussed. Use this for calls, coffees, and video meetings — not for emails.',
+    inputSchema: {
+      type: 'object',
+      required: ['contactId', 'content'],
+      additionalProperties: false,
+      properties: {
+        contactId: { type: 'string', description: 'Id from search_contacts.' },
+        content: {
+          type: 'string',
+          maxLength: 70_000,
+          description:
+            'What was discussed, decided, and agreed. Only what the source text supports.',
+        },
+        occurredAt: {
+          type: 'string',
+          description:
+            'When it happened, ISO format, e.g. "2026-08-10" or "2026-08-10T14:30:00Z". Defaults to now. Must not be in the future — log what has already happened, not what is scheduled.',
+        },
+      },
+    },
+  },
+  {
+    name: 'log_interaction',
+    title: 'Log an email you sent',
+    description:
+      "Record an email the owner sent, from a thread they paste in. Recorded as sent-on-the-owner's-word — never as provider-verified, because reading a pasted thread is not proof of delivery. Set responseReceived when the thread shows the contact wrote back.",
+    inputSchema: {
+      type: 'object',
+      required: ['contactId'],
+      additionalProperties: false,
+      properties: {
+        contactId: { type: 'string', description: 'Id from search_contacts.' },
+        subject: { type: 'string', maxLength: 500 },
+        body: {
+          type: 'string',
+          maxLength: 20_000,
+          description: 'What the owner sent. Quote the thread, do not summarise it away.',
+        },
+        sentAt: {
+          type: 'string',
+          description:
+            'When it was sent, ISO format. Defaults to now. Must not be in the future.',
+        },
+        responseReceived: {
+          type: 'boolean',
+          description:
+            'True only if the thread actually shows a reply from the contact.',
+        },
+        notes: {
+          type: 'string',
+          maxLength: 20_000,
+          description: 'Anything worth remembering about the exchange.',
+        },
+      },
+    },
+  },
 ]);
 
 function text(value) {
@@ -286,7 +371,46 @@ const HANDLERS = Object.freeze({
   search_contacts: searchContacts,
   get_contact: getContact,
   upsert_contacts: upsertContacts,
+  add_note: ({ db, uid, args, now }) =>
+    addAgentNote({
+      db,
+      uid,
+      contactId: args.contactId,
+      content: args.content,
+      now,
+    }),
+  log_meeting: ({ db, uid, args, now }) =>
+    logAgentMeeting({
+      db,
+      uid,
+      contactId: args.contactId,
+      content: args.content,
+      occurredAt: args.occurredAt,
+      now,
+    }),
+  log_interaction: ({ db, uid, args, now }) =>
+    logAgentOutreach({
+      db,
+      uid,
+      contactId: args.contactId,
+      subject: args.subject,
+      body: args.body,
+      channel: args.channel,
+      sentAt: args.sentAt,
+      responseReceived: args.responseReceived,
+      notes: args.notes,
+      now,
+    }),
 });
+
+/**
+ * Nothing an agent can call may remove data. Enforced rather than promised:
+ * a tool whose name suggests destruction fails the build in
+ * tests/mcp-server.test.mjs, so this survives someone adding a tool later
+ * without reading this comment.
+ */
+export const DESTRUCTIVE_NAME_PATTERN =
+  /delete|remove|destroy|purge|merge|archive|wipe|clear|drop|revoke/i;
 
 export function listMcpTools() {
   return MCP_TOOLS.map((tool) => ({

@@ -286,3 +286,181 @@ test('a name is required rather than guessed from the email', () => {
     (error) => error.code === 'contact_ingest_invalid',
   );
 });
+
+// --- interaction ingest -----------------------------------------------------
+
+const {
+  addAgentNote,
+  logAgentMeeting,
+  logAgentOutreach,
+  __testing: interactionTesting,
+} = await import('../server/api/_lib/interaction-ingest.js');
+
+function interactionDb(contactData = { name: 'Dana Okonkwo' }) {
+  const written = [];
+  const contactId = 'contact-1';
+  return {
+    written,
+    contactId,
+    doc: () => ({
+      async get() {
+        return { exists: true, data: () => contactData };
+      },
+    }),
+    collection: () => ({
+      doc: () => ({
+        id: `doc-${written.length + 1}`,
+        async set(data) {
+          written.push(data);
+        },
+      }),
+    }),
+  };
+}
+
+test('an agent note is labelled so it can be retired in one action', async () => {
+  const db = interactionDb();
+  const result = await addAgentNote({
+    db,
+    uid: UID,
+    contactId: db.contactId,
+    content: '  Met at a conference.  \n\n  Wants an intro.  ',
+    now: NOW,
+  });
+
+  const [note] = db.written;
+  assert.equal(note.privacySourceType, 'agent');
+  assert.equal(note.recordType, 'note');
+  assert.equal(note.source, 'quick-note');
+  assert.equal(note.sensitive, false);
+  // isValidNoteBase requires sourceId to equal the note's own id.
+  assert.equal(note.sourceId, result.noteId);
+  assert.equal(note.noteSchemaVersion, 2);
+});
+
+test('a meeting log pins all three timestamps to the same instant', async () => {
+  const db = interactionDb();
+  await logAgentMeeting({
+    db,
+    uid: UID,
+    contactId: db.contactId,
+    content: 'Discussed the platform roadmap.',
+    occurredAt: '2026-08-01T09:00:00.000Z',
+    now: NOW,
+  });
+
+  const [meeting] = db.written;
+  assert.equal(meeting.recordType, 'meeting');
+  assert.equal(meeting.source, 'meeting-log');
+  assert.equal(meeting.privacySourceType, 'agent');
+  // isValidMeetingNoteCreate requires occurredAt == meetingAt == observedAt.
+  assert.equal(meeting.occurredAt.getTime(), meeting.meetingAt.getTime());
+  assert.equal(meeting.observedAt.getTime(), meeting.occurredAt.getTime());
+  assert.ok(Array.isArray(meeting.factIds) && meeting.factIds.length <= 4);
+});
+
+// A misread "let's meet next Tuesday" must not become a meeting that happened.
+test('refuses to log something in the future', async () => {
+  const db = interactionDb();
+  await assert.rejects(
+    () =>
+      logAgentMeeting({
+        db,
+        uid: UID,
+        contactId: db.contactId,
+        content: 'Roadmap sync',
+        occurredAt: '2027-01-01T00:00:00.000Z',
+        now: NOW,
+      }),
+    (error) => error.code === 'date_in_future',
+  );
+});
+
+// The whole point of the evidence model: an agent reading a pasted thread has
+// not watched anything be delivered, so it may never claim it did.
+test('a logged email is user-confirmed, never provider-verified', async () => {
+  const db = interactionDb();
+  const result = await logAgentOutreach({
+    db,
+    uid: UID,
+    contactId: db.contactId,
+    subject: 'Following up',
+    body: 'Great to meet you.',
+    now: NOW,
+  });
+
+  const [outreach] = db.written;
+  assert.equal(outreach.verification, 'user-confirmed');
+  assert.equal(outreach.status, 'Sent (User Confirmed)');
+  assert.equal(result.verification, 'user-confirmed');
+  assert.notEqual(outreach.status, 'Sent (Provider Verified)');
+  assert.equal(outreach.deliveryMode, 'manual');
+
+  // browserOutreachProofCreateAllowed forbids every provider field; an agent
+  // must not be able to forge delivery proof through a different door.
+  for (const field of [
+    'provider',
+    'providerSendState',
+    'providerRequestDigest',
+    'providerReservationAt',
+    'providerMessageId',
+    'providerVerifiedAt',
+    'threadId',
+  ]) {
+    assert.equal(outreach[field], undefined, `${field} must never be set`);
+  }
+});
+
+test('a reply in the thread is recorded as a response', async () => {
+  const db = interactionDb();
+  await logAgentOutreach({
+    db,
+    uid: UID,
+    contactId: db.contactId,
+    subject: 'Following up',
+    responseReceived: true,
+    now: NOW,
+  });
+
+  const [outreach] = db.written;
+  assert.equal(outreach.status, 'Responded');
+  assert.equal(outreach.responseReceived, 'Yes');
+  assert.equal(outreach.verification, 'user-confirmed');
+});
+
+test('interactions refuse an archived or merged contact', async () => {
+  for (const state of [
+    { lifecycleStatus: 'deleted' },
+    { mergedIntoContactId: 'other' },
+    { purgeFence: { requestId: 'x' } },
+  ]) {
+    const db = interactionDb({ name: 'Dana', ...state });
+    await assert.rejects(
+      () =>
+        addAgentNote({
+          db,
+          uid: UID,
+          contactId: db.contactId,
+          content: 'note',
+          now: NOW,
+        }),
+      (error) => error.code === 'contact_not_writable',
+    );
+  }
+});
+
+test('empty content is refused rather than stored blank', async () => {
+  const db = interactionDb();
+  await assert.rejects(
+    () =>
+      addAgentNote({
+        db,
+        uid: UID,
+        contactId: db.contactId,
+        content: '   \n  ',
+        now: NOW,
+      }),
+    (error) => error.code === 'empty_note',
+  );
+  assert.equal(interactionTesting.AGENT_PRIVACY_SOURCE_TYPE, 'agent');
+});
