@@ -113,6 +113,40 @@ function safeSubject(uid) {
   return createHash('sha256').update(uid).digest('hex').slice(0, 16);
 }
 
+export const GATEWAY_RETRY_DELAY_MS = 400;
+
+/**
+ * Retry once when the gateway connection fails outright.
+ *
+ * A container restart on the LiteLLM host refuses connections for a moment,
+ * and every in-flight request became a user-facing "AI is temporarily
+ * unavailable". That is a transport blip, not a real failure, and it resolves
+ * faster than a person can read the error.
+ *
+ * Deliberately narrow: only a thrown fetch — a connection reset or refusal —
+ * is retried, and only once. An HTTP response of any status is returned
+ * untouched, because a 4xx means the request itself was wrong and retrying it
+ * would just spend the caller's budget twice. A client abort or timeout is
+ * likewise never retried.
+ */
+export async function fetchWithGatewayRetry(
+  fetchImpl,
+  url,
+  init,
+  { delayMs = GATEWAY_RETRY_DELAY_MS, sleep } = {},
+) {
+  try {
+    return await fetchImpl(url, init);
+  } catch (error) {
+    if (init?.signal?.aborted) throw error;
+    await (sleep
+      ? sleep(delayMs)
+      : new Promise((resolve) => setTimeout(resolve, delayMs)));
+    if (init?.signal?.aborted) throw error;
+    return fetchImpl(url, init);
+  }
+}
+
 export function createAIChatHandler({
   env = process.env,
   logger = console,
@@ -192,7 +226,8 @@ export function createAIChatHandler({
     );
 
     try {
-      const response = await fetchImpl(
+      const response = await fetchWithGatewayRetry(
+        fetchImpl,
         `${config.baseUrl}/v1/chat/completions`,
         {
           method: 'POST',

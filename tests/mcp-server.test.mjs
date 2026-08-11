@@ -2,8 +2,23 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createMcpHandler, __testing } from '../server/mcp/server.js';
+import { getOAuthConfig, signAccessToken } from '../server/api/_lib/oauth.js';
 
 const UID = 'mcp-owner';
+
+// OAuth is the only way in, so every test needs a real token. Minted once here
+// rather than stubbed, so the tests exercise the same verification production
+// runs.
+const TEST_ENV = Object.freeze({
+  MCP_OAUTH_SIGNING_SECRET: 'm'.repeat(48),
+  MCP_OAUTH_ISSUER: 'https://cirqle.test',
+});
+const TEST_TOKEN = signAccessToken({
+  config: getOAuthConfig(TEST_ENV),
+  uid: UID,
+  clientId: 'test-client',
+  scope: 'cirqle.read cirqle.write',
+});
 
 function response() {
   return {
@@ -27,11 +42,15 @@ function response() {
   };
 }
 
-function request(body, { method = 'POST', headers = {} } = {}) {
+function request(body, { method = 'POST', headers = {}, noAuth = false } = {}) {
   return {
     method,
     url: '/api/mcp',
-    headers: { 'user-agent': 'ClaudeDesktop/1.2', ...headers },
+    headers: {
+      'user-agent': 'ClaudeDesktop/1.2',
+      ...(noAuth ? {} : { authorization: `Bearer ${TEST_TOKEN}` }),
+      ...headers,
+    },
     body,
   };
 }
@@ -40,9 +59,8 @@ const ALLOW_ALL = { async check() {} };
 
 function handler(overrides = {}) {
   return createMcpHandler({
-    env: {},
+    env: TEST_ENV,
     logger: { error() {}, warn() {}, info() {} },
-    verifyIdentity: async () => ({ uid: UID, authTime: 1_700_000_000 }),
     adminServicesFactory: () => ({ db: {} }),
     rateLimiter: ALLOW_ALL,
     ...overrides,
@@ -119,18 +137,7 @@ test('rejects anything but POST', async () => {
 });
 
 test('unauthenticated calls get a 401 that tells the client to authenticate', async () => {
-  const res = await call(
-    { jsonrpc: '2.0', id: 3, method: 'tools/list' },
-    {
-      handler: {
-        verifyIdentity: async () => {
-          const error = new Error('nope');
-          error.code = 'unauthorized';
-          throw error;
-        },
-      },
-    },
-  );
+  const res = await call({ jsonrpc: '2.0', id: 3, method: 'tools/list' }, { noAuth: true });
 
   assert.equal(res.statusCode, 401);
   assert.match(res.headers['www-authenticate'], /Bearer/);
@@ -256,18 +263,7 @@ test('the full tool menu is advertised', async () => {
 // metadata. A bare realm leaves a connector with no way to find the
 // authorization server, which is exactly why claude.ai could not connect.
 test('the 401 tells a client where to discover the authorization server', async () => {
-  const res = await call(
-    { jsonrpc: '2.0', id: 30, method: 'tools/list' },
-    {
-      handler: {
-        verifyIdentity: async () => {
-          const error = new Error('nope');
-          error.code = 'unauthorized';
-          throw error;
-        },
-      },
-    },
-  );
+  const res = await call({ jsonrpc: '2.0', id: 30, method: 'tools/list' }, { noAuth: true });
 
   assert.equal(res.statusCode, 401);
   assert.match(
@@ -295,10 +291,6 @@ test('a Cirqle OAuth access token authenticates without Firebase', async () => {
   await createMcpHandler({
     env,
     logger: { error() {}, warn() {}, info() {} },
-    // Firebase must not be consulted at all when a valid OAuth token is present.
-    verifyIdentity: async () => {
-      throw new Error('Firebase should not have been called');
-    },
     adminServicesFactory: () => ({ db: {} }),
     rateLimiter: ALLOW_ALL,
   })(
@@ -335,11 +327,6 @@ test('an access token for another resource is refused', async () => {
   await createMcpHandler({
     env,
     logger: { error() {}, warn() {}, info() {} },
-    verifyIdentity: async () => {
-      const error = new Error('nope');
-      error.code = 'unauthorized';
-      throw error;
-    },
     adminServicesFactory: () => ({ db: {} }),
     rateLimiter: ALLOW_ALL,
   })(

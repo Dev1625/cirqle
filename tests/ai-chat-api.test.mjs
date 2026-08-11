@@ -486,3 +486,65 @@ test('a closed browser request aborts the upstream model request', async () => {
   assert.equal(res.statusCode, 499);
   assert.equal(res.body.error, 'request_cancelled');
 });
+
+// A LiteLLM container restart refuses connections for a moment. Every request
+// in that window surfaced as "AI is temporarily unavailable", which reads like
+// the feature is broken when it resolves in seconds.
+test('retries once when the gateway connection is refused', async () => {
+  const { fetchWithGatewayRetry } = await import('../server/api/ai/chat.js');
+  let attempts = 0;
+  const result = await fetchWithGatewayRetry(
+    async () => {
+      attempts += 1;
+      if (attempts === 1) throw new TypeError('fetch failed');
+      return new Response('{}', { status: 200 });
+    },
+    'https://gateway.invalid/v1/chat/completions',
+    { method: 'POST' },
+    { sleep: async () => {} },
+  );
+
+  assert.equal(attempts, 2);
+  assert.equal(result.status, 200);
+});
+
+// Retrying a rejected request would spend the caller's budget twice for a
+// result that cannot change.
+test('never retries an HTTP error response', async () => {
+  const { fetchWithGatewayRetry } = await import('../server/api/ai/chat.js');
+  let attempts = 0;
+  const result = await fetchWithGatewayRetry(
+    async () => {
+      attempts += 1;
+      return new Response('{}', { status: 400 });
+    },
+    'https://gateway.invalid/v1/chat/completions',
+    { method: 'POST' },
+    { sleep: async () => {} },
+  );
+
+  assert.equal(attempts, 1, 'a 400 is the request being wrong, not a blip');
+  assert.equal(result.status, 400);
+});
+
+test('gives up immediately when the caller has already gone away', async () => {
+  const { fetchWithGatewayRetry } = await import('../server/api/ai/chat.js');
+  const controller = new AbortController();
+  controller.abort();
+  let attempts = 0;
+
+  await assert.rejects(
+    () =>
+      fetchWithGatewayRetry(
+        async () => {
+          attempts += 1;
+          throw new TypeError('fetch failed');
+        },
+        'https://gateway.invalid/v1/chat/completions',
+        { method: 'POST', signal: controller.signal },
+        { sleep: async () => {} },
+      ),
+    (error) => error instanceof TypeError,
+  );
+  assert.equal(attempts, 1, 'an aborted request must not be retried');
+});

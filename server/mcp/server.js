@@ -1,9 +1,4 @@
-import {
-  AccountAuthenticationError,
-  getAccountAdminServices,
-  verifyActiveAccountIdentity,
-} from '../api/_lib/account-admin.js';
-import { AccountSecurityError } from '../api/_lib/account-security.js';
+import { getAccountAdminServices } from '../api/_lib/account-admin.js';
 import { ContactIngestError } from '../api/_lib/contact-ingest.js';
 import { ContactProfileError } from '../api/_lib/contact-profile.js';
 import { getSafeRequestId } from '../api/_lib/http.js';
@@ -34,9 +29,10 @@ import {
  * Stateless by design: one request, one response, no session to persist. Vercel
  * functions do not survive between calls, so an SSE session would be a lie.
  *
- * Phase 1 authenticates with a Firebase ID token, which means no new credential
- * exists yet — the identity boundary is still Firebase, and a leaked token
- * expires within the hour. Phase 2 adds OAuth for durable client access.
+ * Authentication is a Cirqle OAuth access token and nothing else. Identity
+ * still originates in Firebase — the consent screen is the app's own login —
+ * but this endpoint only accepts tokens its own authorization server issued,
+ * as the specification requires.
  */
 
 const SUPPORTED_PROTOCOL_VERSIONS = Object.freeze([
@@ -153,43 +149,38 @@ function bearerToken(req) {
 /**
  * Identify the caller.
  *
- * Two credentials are accepted, in this order:
+ * A Cirqle OAuth access token, and nothing else. The token is audience-bound
+ * to this server, so one minted for any other resource is refused — which the
+ * MCP specification requires and is what stops this endpoint being used as a
+ * confused deputy.
  *
- *   1. A Cirqle OAuth access token. The spec path, and what claude.ai, Cowork
- *      and ChatGPT use. Audience-bound to this server, so a token minted for
- *      anything else is refused.
- *   2. A Firebase ID token. Transitional, and the only thing that worked before
- *      the authorization server existed. Kept so setups configured against it
- *      keep working; remove once OAuth has been exercised in anger.
+ * Firebase ID tokens were accepted while the authorization server was being
+ * built, because nothing else could reach this endpoint. That path is gone now
+ * that OAuth is proven: the spec is explicit that a server must not accept
+ * tokens its own authorization server did not issue, and two ways in is one
+ * more than anything needs.
  *
- * The OAuth check runs first and is purely local, so the common case costs no
- * network round trip.
+ * Verification is purely local, so authenticating costs no network round trip.
  */
-async function identifyCaller({ req, env, verifyIdentity, now }) {
+async function identifyCaller({ req, env, now }) {
   const token = bearerToken(req);
-  if (token) {
-    try {
-      const config = getOAuthConfig(env);
-      const claims = verifyAccessToken({ config, token, now: now() });
-      return {
-        uid: claims.sub,
-        authTime: claims.iat,
-        scope: claims.scope || '',
-        via: 'oauth',
-      };
-    } catch {
-      // Not one of ours, or not valid. Fall through to Firebase rather than
-      // failing outright, so the transitional path still works.
-    }
+  if (!token) {
+    const error = new Error('Authentication required.');
+    error.code = 'invalid_token';
+    throw error;
   }
-  const identity = await verifyIdentity(req, { env });
-  return { ...identity, scope: 'cirqle.read cirqle.write', via: 'firebase' };
+  const config = getOAuthConfig(env);
+  const claims = verifyAccessToken({ config, token, now: now() });
+  return {
+    uid: claims.sub,
+    authTime: claims.iat,
+    scope: claims.scope || '',
+  };
 }
 
 export function createMcpHandler({
   env = process.env,
   logger = console,
-  verifyIdentity = verifyActiveAccountIdentity,
   adminServicesFactory = getAccountAdminServices,
   rateLimiter,
   now = () => new Date(),
@@ -216,14 +207,11 @@ export function createMcpHandler({
 
     let identity;
     try {
-      identity = await identifyCaller({ req, env, verifyIdentity, now });
+      identity = await identifyCaller({ req, env, now });
     } catch (error) {
-      if (
-        error instanceof AccountAuthenticationError ||
-        error instanceof AccountSecurityError ||
-        error?.code === 'unauthorized' ||
-        error?.code === 'invalid_token'
-      ) {
+      // Every rejection here is an authentication failure now that OAuth is
+      // the only way in; a missing signing secret is the one exception.
+      if (error?.code !== 'server_error') {
         // RFC 9728 section 5.1: the 401 must point at the protected-resource
         // metadata document. This is the entire discovery path — a client that
         // gets a bare realm has no way to find the authorization server, which

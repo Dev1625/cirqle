@@ -118,6 +118,18 @@ export async function chatWithMetadata(
         throw new AIUnavailableError('AI is receiving too many requests. Try again in a moment.');
       }
       if (body?.error === 'ai-not-provisioned') throw new AIKeyMissingError();
+      // The gateway can be briefly unreachable while its host restarts. The
+      // server already retries once; if it still failed, say what actually
+      // happened and that waiting is the fix, rather than implying the
+      // feature is broken.
+      if (body?.error === 'gateway_unavailable' || response.status === 502) {
+        throw new AIUnavailableError(
+          'The AI service is restarting. Wait a few seconds and try again — nothing was lost.',
+        );
+      }
+      if (body?.error === 'gateway_timeout' || response.status === 504) {
+        throw new AIUnavailableError('The model took too long. Try again.');
+      }
       throw new AIUnavailableError();
     }
 
