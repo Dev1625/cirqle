@@ -118,13 +118,19 @@ export async function chatWithMetadata(
         throw new AIUnavailableError('AI is receiving too many requests. Try again in a moment.');
       }
       if (body?.error === 'ai-not-provisioned') throw new AIKeyMissingError();
-      // The gateway can be briefly unreachable while its host restarts. The
-      // server already retries once; if it still failed, say what actually
-      // happened and that waiting is the fix, rather than implying the
-      // feature is broken.
-      if (body?.error === 'gateway_unavailable' || response.status === 502) {
+      // Keyed on the server's error code rather than the status, because 502
+      // covers both a gateway that is briefly down and a model that answered
+      // with nothing. Those need different advice, and telling someone the
+      // service is restarting when it is not just sends them to wait for a
+      // recovery that already happened.
+      if (body?.error === 'gateway_unavailable') {
         throw new AIUnavailableError(
           'The AI service is restarting. Wait a few seconds and try again — nothing was lost.',
+        );
+      }
+      if (body?.error === 'invalid_model_response') {
+        throw new AIUnavailableError(
+          'The model returned an empty answer. Try again.',
         );
       }
       if (body?.error === 'gateway_timeout' || response.status === 504) {
