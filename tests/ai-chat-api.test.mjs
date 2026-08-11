@@ -683,3 +683,54 @@ test('leaves a non-reasoning model budget exactly as requested', async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(sent.max_tokens, 400);
 });
+
+// A reasoning model sometimes spends its whole budget thinking and returns
+// nothing. It is non-deterministic, the call is already paid for, and there is
+// nothing for the caller to fix — so one more attempt turns wasted spend into
+// an answer rather than an error.
+test('retries once when the model returns an empty completion', async () => {
+  let attempts = 0;
+  const handler = createAIChatHandler({
+    env,
+    logger: silentLogger,
+    verifyIdentity: async () => identity,
+    fetchImpl: async () => {
+      attempts += 1;
+      const content = attempts === 1 ? '   ' : 'a real answer';
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    },
+  });
+
+  const res = responseRecorder();
+  await handler(request(validBody()), res);
+
+  assert.equal(attempts, 2);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.body.text, 'a real answer');
+});
+
+test('gives up after one retry rather than looping on spend', async () => {
+  let attempts = 0;
+  const handler = createAIChatHandler({
+    env,
+    logger: silentLogger,
+    verifyIdentity: async () => identity,
+    fetchImpl: async () => {
+      attempts += 1;
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '' } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    },
+  });
+
+  const res = responseRecorder();
+  await handler(request(validBody()), res);
+
+  assert.equal(attempts, 2, 'exactly one retry, not an unbounded loop');
+  assert.equal(res.statusCode, 502);
+  assert.equal(res.body.error, 'invalid_model_response');
+});

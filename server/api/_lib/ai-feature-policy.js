@@ -85,13 +85,13 @@ function definePolicy({
     // its own room. This does not really cost more: those reasoning tokens
     // were already being generated and billed, they were just truncated into
     // a useless empty response.
-    // 1500 was measured as not enough: the dashboard went from always failing
-    // to failing roughly one call in ten, which is the same bug with a smaller
-    // blast radius. Reasoning can run to thousands of tokens on a full source
-    // packet. max_tokens is a ceiling rather than a target, so a generous one
-    // costs nothing unless the model actually uses it — and the failure it
-    // prevents is spend with no output at all.
-    reasoningHeadroomTokens: modelAlias.startsWith('deepseek-') ? 6_000 : 0,
+    // Tuned by measurement, and it cuts both ways. Too little and the model
+    // spends the budget thinking and returns nothing; too much and it happily
+    // thinks until the request times out. 6000 produced 504s on the grounded
+    // briefs, 1500 produced roughly one empty answer in ten, so 1500 is the
+    // better failure and the residual is handled by retrying an empty reply
+    // rather than by widening this further.
+    reasoningHeadroomTokens: modelAlias.startsWith('deepseek-') ? 1_500 : 0,
     label,
     group,
     defaultMaxTokens,

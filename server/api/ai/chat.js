@@ -229,11 +229,11 @@ export function createAIChatHandler({
       config.derivationSecret,
     );
 
+    const gatewayUrl = `${config.baseUrl}/v1/chat/completions`;
+    let gatewayInit;
+
     try {
-      const response = await fetchWithGatewayRetry(
-        fetchImpl,
-        `${config.baseUrl}/v1/chat/completions`,
-        {
+      gatewayInit = {
           method: 'POST',
           signal: controller.signal,
           headers: {
@@ -277,7 +277,12 @@ export function createAIChatHandler({
               ],
             },
           }),
-        },
+      };
+
+      let response = await fetchWithGatewayRetry(
+        fetchImpl,
+        gatewayUrl,
+        gatewayInit,
       );
 
       if (!response.ok) {
@@ -305,8 +310,34 @@ export function createAIChatHandler({
         return sendError(res, 502, 'gateway_unavailable', requestId);
       }
 
-      const payload = await response.json();
-      const text = payload?.choices?.[0]?.message?.content;
+      let payload = await response.json();
+      let text = payload?.choices?.[0]?.message?.content;
+
+      // A reasoning model sometimes spends its whole budget thinking and
+      // returns nothing. That is non-deterministic — the same request succeeds
+      // on a second pass — and unlike a rejected request there is nothing to
+      // fix by giving up. The call was already paid for, so one more attempt
+      // turns wasted spend into an answer instead of an error.
+      if (
+        (typeof text !== 'string' || !text.trim()) &&
+        !controller.signal.aborted
+      ) {
+        logger.warn?.('[ai-chat] empty_completion_retry', {
+          requestId,
+          subject: safeSubject(identity.uid),
+          feature: request.feature,
+        });
+        response = await fetchWithGatewayRetry(
+          fetchImpl,
+          gatewayUrl,
+          gatewayInit,
+        );
+        if (response.ok) {
+          payload = await response.json();
+          text = payload?.choices?.[0]?.message?.content;
+        }
+      }
+
       if (typeof text !== 'string' || !text.trim()) {
         return sendError(res, 502, 'invalid_model_response', requestId);
       }
