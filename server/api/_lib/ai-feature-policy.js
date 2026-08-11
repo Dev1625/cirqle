@@ -72,6 +72,20 @@ function definePolicy({
     // JSON envelope, DeepSeek honours it without the flag, and parseLooseJSON
     // tolerates fences and surrounding prose. Gemini keeps it.
     sendsJsonMode: !modelAlias.startsWith('deepseek-'),
+    // DeepSeek reasons before it answers, and those tokens are drawn from the
+    // same max_tokens budget as the reply. A feature asking for 500 tokens of
+    // prose can therefore spend the lot thinking and return nothing — which
+    // arrives as an empty answer, intermittently, depending on how long the
+    // model happened to deliberate. Observed exactly that on the weekly
+    // priorities brief: the same request failed and then succeeded minutes
+    // apart.
+    //
+    // The headroom is added on top of the caller's budget when forwarding, so
+    // a feature still expresses the answer length it wants and thinking gets
+    // its own room. This does not really cost more: those reasoning tokens
+    // were already being generated and billed, they were just truncated into
+    // a useless empty response.
+    reasoningHeadroomTokens: modelAlias.startsWith('deepseek-') ? 1_500 : 0,
     label,
     group,
     defaultMaxTokens,

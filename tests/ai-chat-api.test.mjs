@@ -343,7 +343,10 @@ test('derives the model and default limits from the feature policy', async () =>
   );
   assert.equal(forwarded.body.metadata.cirqle_tier, 'reasoning');
   assert.equal(forwarded.body.model, 'deepseek-v4-flash');
-  assert.equal(forwarded.body.max_tokens, 500);
+  // The policy default is 500 tokens of answer; DeepSeek also reasons from the
+  // same budget, so it is forwarded with headroom on top. See 'gives a
+  // reasoning model headroom beyond the requested answer length'.
+  assert.ok(forwarded.body.max_tokens > 500);
   assert.equal(forwarded.body.temperature, 0.2);
   // This feature runs on DeepSeek, which returns empty content when
   // response_format is set on a long prompt. The flag is dropped even though
@@ -613,4 +616,70 @@ test('still sends response_format to Gemini, which handles it', async () => {
   assert.equal(res.statusCode, 200);
   assert.equal(sent.model, 'gemini-3.5-flash-lite');
   assert.deepEqual(sent.response_format, { type: 'json_object' });
+});
+
+// DeepSeek spends from the same max_tokens budget while reasoning, so a
+// feature asking for 500 tokens of prose could spend the lot thinking and
+// return nothing — intermittently, which is the worst way for it to fail.
+// Thinking gets its own room on top of the caller's budget.
+test('gives a reasoning model headroom beyond the requested answer length', async () => {
+  let sent = null;
+  const handler = createAIChatHandler({
+    env,
+    logger: silentLogger,
+    verifyIdentity: async () => identity,
+    fetchImpl: async (_url, init) => {
+      sent = JSON.parse(init.body);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: 'ok' } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    },
+  });
+
+  const res = responseRecorder();
+  await handler(
+    request(validBody({ maxTokens: 500 })),
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(sent.model, 'deepseek-v4-flash');
+  assert.ok(
+    sent.max_tokens > 500,
+    `expected headroom above the requested 500, got ${sent.max_tokens}`,
+  );
+});
+
+// Gemini does not reason before answering, so its budget is left exactly as
+// the caller asked — no silent inflation of somebody's token spend.
+test('leaves a non-reasoning model budget exactly as requested', async () => {
+  let sent = null;
+  const handler = createAIChatHandler({
+    env,
+    logger: silentLogger,
+    verifyIdentity: async () => identity,
+    fetchImpl: async (_url, init) => {
+      sent = JSON.parse(init.body);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: 'ok' } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    },
+  });
+
+  const res = responseRecorder();
+  await handler(
+    request({
+      feature: 'contact.tags.extract',
+      model: 'gemini-3.5-flash-lite',
+      prompt: 'Extract tags.',
+      temperature: 0,
+      maxTokens: 400,
+    }),
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(sent.max_tokens, 400);
 });

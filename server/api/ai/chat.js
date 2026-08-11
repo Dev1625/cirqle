@@ -109,6 +109,7 @@ function normalizeRequest(body) {
     // DeepSeek answers a long prompt with empty content when the flag is set,
     // and the prompt already asks for the JSON envelope regardless.
     json: body?.json === true && policy.sendsJsonMode,
+    reasoningHeadroomTokens: policy.reasoningHeadroomTokens,
   };
 }
 
@@ -247,8 +248,15 @@ export function createAIChatHandler({
             ...(request.sendsTemperature
               ? { temperature: request.temperature }
               : {}),
+            // The caller's budget is for the answer. A reasoning model spends
+            // from the same allowance before it writes anything, so it gets
+            // its own room on top — otherwise a long prompt can consume the
+            // whole budget thinking and return an empty reply.
             ...(request.maxTokens
-              ? { max_tokens: request.maxTokens }
+              ? {
+                  max_tokens:
+                    request.maxTokens + request.reasoningHeadroomTokens,
+                }
               : {}),
             ...(request.json
               ? { response_format: { type: 'json_object' } }
