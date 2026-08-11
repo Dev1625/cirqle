@@ -345,9 +345,12 @@ test('derives the model and default limits from the feature policy', async () =>
   assert.equal(forwarded.body.model, 'deepseek-v4-flash');
   assert.equal(forwarded.body.max_tokens, 500);
   assert.equal(forwarded.body.temperature, 0.2);
-  assert.deepEqual(forwarded.body.response_format, {
-    type: 'json_object',
-  });
+  // This feature runs on DeepSeek, which returns empty content when
+  // response_format is set on a long prompt. The flag is dropped even though
+  // the caller asked for it; the prompt still specifies the JSON envelope and
+  // parseLooseJSON tolerates the result. See 'never sends response_format to
+  // DeepSeek' and the Gemini counterpart.
+  assert.equal(forwarded.body.response_format, undefined);
   assert.equal(
     Object.hasOwn(forwarded.body, 'stream'),
     false,
@@ -547,4 +550,67 @@ test('gives up immediately when the caller has already gone away', async () => {
     (error) => error instanceof TypeError,
   );
   assert.equal(attempts, 1, 'an aborted request must not be retried');
+});
+
+// The dashboard briefs failed on real data because DeepSeek answers a long
+// prompt with empty content when response_format json_object is set. The
+// handler must drop the flag for that provider even when the caller asks for
+// it — asserted on the actual outbound request, not just on the policy.
+test('never sends response_format to DeepSeek', async () => {
+  let sent = null;
+  const handler = createAIChatHandler({
+    env,
+    logger: silentLogger,
+    verifyIdentity: async () => identity,
+    fetchImpl: async (_url, init) => {
+      sent = JSON.parse(init.body);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    },
+  });
+
+  const res = responseRecorder();
+  await handler(request(validBody({ json: true })), res);
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(sent.model, 'deepseek-v4-flash');
+  assert.equal(
+    sent.response_format,
+    undefined,
+    'DeepSeek returns empty content when this is set on a long prompt',
+  );
+});
+
+test('still sends response_format to Gemini, which handles it', async () => {
+  let sent = null;
+  const handler = createAIChatHandler({
+    env,
+    logger: silentLogger,
+    verifyIdentity: async () => identity,
+    fetchImpl: async (_url, init) => {
+      sent = JSON.parse(init.body);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: '{"ok":true}' } }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    },
+  });
+
+  const res = responseRecorder();
+  await handler(
+    request({
+      feature: 'contact.tags.extract',
+      model: 'gemini-3.5-flash-lite',
+      prompt: 'Extract tags.',
+      temperature: 0,
+      json: true,
+    }),
+    res,
+  );
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(sent.model, 'gemini-3.5-flash-lite');
+  assert.deepEqual(sent.response_format, { type: 'json_object' });
 });

@@ -62,6 +62,16 @@ function definePolicy({
     tier,
     modelAlias,
     sendsTemperature: !modelAlias.startsWith('gemini-3.'),
+    // DeepSeek returns EMPTY content when response_format json_object is
+    // combined with a long prompt — which is every grounded call the app makes,
+    // since those carry the whole source packet. Short prompts succeed, so this
+    // hid until real data was involved; the app surfaced it as "AI is
+    // temporarily unavailable" on the dashboard briefs.
+    //
+    // Dropping the flag costs nothing: the prompt already specifies the exact
+    // JSON envelope, DeepSeek honours it without the flag, and parseLooseJSON
+    // tolerates fences and surrounding prose. Gemini keeps it.
+    sendsJsonMode: !modelAlias.startsWith('deepseek-'),
     label,
     group,
     defaultMaxTokens,

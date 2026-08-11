@@ -105,7 +105,10 @@ function normalizeRequest(body) {
     maxTokens,
     feature,
     tier: policy.tier,
-    json: body?.json === true,
+    // Honoured only where the model actually supports it. See sendsJsonMode:
+    // DeepSeek answers a long prompt with empty content when the flag is set,
+    // and the prompt already asks for the JSON envelope regardless.
+    json: body?.json === true && policy.sendsJsonMode,
   };
 }
 

@@ -341,3 +341,21 @@ test('the only non-product call is the exact bounded production smoke request', 
   );
   assert.match(smoke, /assertAttributedUsage\(\{\s*baseUrl,\s*token: idToken\s*\}\)/);
 });
+
+// DeepSeek returns empty content when response_format json_object meets a long
+// prompt, which is every grounded call the app makes. The dashboard briefs
+// failed on real data while short test prompts passed, so this pins the
+// capability rather than leaving it to be rediscovered.
+test('JSON mode is only claimed for models that survive it', () => {
+  for (const [id, policy] of Object.entries(AI_FEATURE_POLICIES)) {
+    if (policy.modelAlias.startsWith('deepseek-')) {
+      assert.equal(
+        policy.sendsJsonMode,
+        false,
+        `${id} must not send response_format to DeepSeek`,
+      );
+    } else {
+      assert.equal(policy.sendsJsonMode, true, `${id} should keep JSON mode`);
+    }
+  }
+});
