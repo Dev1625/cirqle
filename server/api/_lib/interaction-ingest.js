@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { ContactIngestError } from './contact-ingest.js';
 
 /**
@@ -18,7 +20,7 @@ const AGENT_PRIVACY_SOURCE_TYPE = 'agent';
 const MAX_NOTE_CONTENT = 20_000;
 const MAX_MEETING_CONTENT = 70_000;
 const MAX_SUBJECT = 500;
-const MAX_BODY = 20_000;
+const MAX_BODY = 70_000;
 
 function ingestError(code, message, status = 400) {
   return new ContactIngestError({ code, message, status });
@@ -53,7 +55,8 @@ function safeContactId(value) {
 
 function parseOccurredAt(value, now) {
   if (value == null || value === '') return now;
-  const parsed = new Date(value);
+  const parsed =
+    typeof value?.toDate === 'function' ? value.toDate() : new Date(value);
   if (Number.isNaN(parsed.getTime())) {
     throw ingestError(
       'invalid_date',
@@ -142,6 +145,9 @@ export async function logAgentMeeting({
   db,
   uid,
   contactId,
+  title,
+  summary,
+  notes,
   content,
   occurredAt,
   now,
@@ -149,11 +155,21 @@ export async function logAgentMeeting({
   const id = safeContactId(contactId);
   await assertContactWritable(db, uid, id);
 
-  const body = cleanMultiline(content, MAX_MEETING_CONTENT);
-  if (!body) {
+  const cleanTitle = cleanLine(title, MAX_SUBJECT);
+  const cleanSummary = cleanMultiline(summary, 12_000);
+  const cleanNotes = cleanMultiline(notes ?? content, MAX_MEETING_CONTENT);
+  if (!cleanSummary && !cleanNotes) {
     throw ingestError('empty_meeting', 'A meeting log needs some content.');
   }
   const when = parseOccurredAt(occurredAt, now);
+  const body = [
+    cleanTitle ? `**${cleanTitle}**` : '',
+    cleanSummary ? `**Summary**\n${cleanSummary}` : '',
+    cleanNotes ? `**Notes**\n${cleanNotes}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, MAX_MEETING_CONTENT);
 
   const ref = db.collection(`users/${uid}/notes`).doc();
   await ref.set({
@@ -168,12 +184,16 @@ export async function logAgentMeeting({
     }),
     recordType: 'meeting',
     source: 'meeting-log',
+    meetingTitle: cleanTitle || null,
+    meetingSummary: cleanSummary || null,
+    meetingNotes: cleanNotes || null,
     occurredAt: when,
     meetingAt: when,
   });
 
   return {
     noteId: ref.id,
+    meetingId: ref.id,
     contactId: id,
     occurredAt: when.toISOString(),
     characters: body.length,
@@ -205,6 +225,7 @@ export async function logAgentOutreach({
   sentAt,
   responseReceived,
   notes,
+  clientReferenceId,
   now,
 }) {
   const id = safeContactId(contactId);
@@ -221,12 +242,42 @@ export async function logAgentOutreach({
   }
 
   const replied = responseReceived === true;
-  const ref = db.collection(`users/${uid}/outreaches`).doc();
+  const cleanReferenceId = cleanLine(clientReferenceId, 500);
+  const stableId = cleanReferenceId
+    ? `agent-outreach-${createHash('sha256')
+        .update(`${uid}\u001f${id}\u001f${cleanReferenceId}`)
+        .digest('hex')
+        .slice(0, 40)}`
+    : null;
+  const outreachCollection = db.collection(`users/${uid}/outreaches`);
+  const ref = stableId ? outreachCollection.doc(stableId) : outreachCollection.doc();
+  if (stableId) {
+    const existing = await ref.get();
+    if (existing.exists) {
+      return {
+        outreachId: ref.id,
+        contactId: id,
+        status: existing.data()?.status || 'Sent (User Confirmed)',
+        verification: 'user-confirmed',
+        sentAt: parseOccurredAt(existing.data()?.sentAt, now).toISOString(),
+        alreadyMirrored: true,
+      };
+    }
+  }
   await ref.set({
     userId: uid,
     contactId: id,
     contactName: cleanLine(contact.name, 240) || null,
-    type: 'Email',
+    type:
+      cleanLine(channel, 120).toLocaleLowerCase() === 'linkedin'
+        ? 'LinkedIn'
+        : cleanLine(channel, 120).toLocaleLowerCase() === 'text'
+          ? 'Text'
+          : cleanLine(channel, 120).toLocaleLowerCase() === 'phone'
+            ? 'Phone'
+            : cleanLine(channel, 120).toLocaleLowerCase() === 'other'
+              ? 'Other'
+              : 'Email',
     channel: cleanLine(channel, 120) || 'email',
     subject: cleanSubject,
     body: cleanBody,
@@ -236,9 +287,23 @@ export async function logAgentOutreach({
     sentAt: when,
     userConfirmedAt: now,
     responseReceived: replied ? 'Yes' : 'No',
-    dateOfResponse: replied ? now : null,
+    dateOfResponse: replied ? when : null,
+    ...(replied
+      ? {
+          replyEvidence: {
+            occurredAt: when,
+            source: 'user',
+            sourceRecordId: null,
+            provider: null,
+            threadId: null,
+            messageId: null,
+            eventId: null,
+          },
+        }
+      : {}),
     notes: cleanMultiline(notes, MAX_BODY) || null,
     generatedBy: 'agent',
+    ...(cleanReferenceId ? { clientReferenceId: cleanReferenceId } : {}),
     createdAt: now,
     updatedAt: now,
   });
@@ -249,6 +314,7 @@ export async function logAgentOutreach({
     status: replied ? 'Responded' : 'Sent (User Confirmed)',
     verification: 'user-confirmed',
     sentAt: when.toISOString(),
+    alreadyMirrored: false,
   };
 }
 

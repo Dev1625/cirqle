@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import {
+  CONTACT_PROFILE_FIELDS,
   ContactProfileError,
   PROFILE_FACT_FIELDS,
   deterministicFactId,
@@ -146,26 +147,93 @@ export function normalizeAgentContactInput(value) {
       'Each contact must be an object.',
     );
   }
-  // Deliberately stricter than the CSV path, which falls back to company or
-  // email when a name is missing. A CSV row is a messy artefact of somebody
-  // else's export; an agent is constructing this object right now and the tool
-  // schema tells it a name is required. Guessing here would let a
-  // half-understood email thread become a contact named after a domain.
-  const profile = validateProfile(value);
+  const suppliedProfile = Object.fromEntries(
+    CONTACT_PROFILE_FIELDS
+      .filter((field) => Object.prototype.hasOwnProperty.call(value, field))
+      .map((field) => [field, value[field]]),
+  );
+  if (
+    Object.prototype.hasOwnProperty.call(suppliedProfile, 'name') &&
+    !String(suppliedProfile.name ?? '').trim()
+  ) {
+    throw ingestError('contact_profile_invalid', 'A contact name cannot be empty.');
+  }
+  // Run every supplied value through the canonical profile normalizer while
+  // retaining only the fields the agent actually sent. This makes partial
+  // updates real: omitted fields stay omitted instead of becoming empty
+  // defaults (or an accidental Cold relationship tier).
+  const normalized = validateProfile({
+    ...suppliedProfile,
+    name: suppliedProfile.name || 'Existing contact',
+  });
+  const profile = Object.freeze(
+    Object.fromEntries(
+      Object.keys(suppliedProfile).map((field) => [field, normalized[field]]),
+    ),
+  );
+  const contactId =
+    value.contactId == null
+      ? null
+      : String(value.contactId).normalize('NFKC').trim();
+  if (
+    contactId &&
+    (contactId.length > 300 ||
+      contactId.includes('/') ||
+      contactId === '.' ||
+      contactId === '..')
+  ) {
+    throw ingestError('invalid_contact', 'The contactId is invalid.');
+  }
+  if (!contactId && !String(suppliedProfile.name ?? '').trim()) {
+    throw ingestError(
+      'contact_profile_invalid',
+      'A contact name is required when contactId is not supplied.',
+    );
+  }
   const externalId =
     value.externalId == null
       ? null
       : String(value.externalId).normalize('NFKC').trim().slice(0, 300) ||
         null;
-  return { profile, externalId };
+  return { profile, externalId, contactId: contactId || null };
 }
 
-async function resolveTarget({ db, uid, profile, externalId }) {
+async function resolveTarget({ db, uid, profile, externalId, contactId }) {
   const contacts = db.collection(`users/${uid}/contacts`);
+  if (contactId) {
+    const snapshot = await contacts.doc(contactId).get();
+    if (!snapshot.exists) {
+      throw ingestError('contact_not_found', 'No contact with that contactId.', 404);
+    }
+    return { ref: contacts.doc(contactId), existing: snapshot };
+  }
+
   const deterministicId = agentContactDocumentId(profile.email);
 
   if (deterministicId) {
     const snapshot = await contacts.doc(deterministicId).get();
+    if (snapshot.exists) {
+      return { ref: contacts.doc(deterministicId), existing: snapshot };
+    }
+    // Contacts created in the dashboard have random ids. Match their
+    // canonical email before falling back to the deterministic MCP id.
+    const emailMatches = await contacts
+      .where('normalizedEmail', '==', normalizeAgentEmail(profile.email))
+      .limit(1)
+      .get();
+    if (!emailMatches.empty) {
+      return { ref: emailMatches.docs[0].ref, existing: emailMatches.docs[0] };
+    }
+    const legacyEmailMatches = await contacts
+      .where('email', '==', normalizeAgentEmail(profile.email))
+      .limit(1)
+      .get();
+    if (!legacyEmailMatches.empty) {
+      return {
+        ref: legacyEmailMatches.docs[0].ref,
+        existing: legacyEmailMatches.docs[0],
+      };
+    }
     return { ref: contacts.doc(deterministicId), existing: snapshot };
   }
 
@@ -201,10 +269,11 @@ async function createContact({
   sourceId,
   now,
 }) {
+  const completeProfile = validateProfile(profile);
   const batch = db.batch();
   batch.set(ref, {
-    ...profile,
-    normalizedEmail: profile.email,
+    ...completeProfile,
+    normalizedEmail: completeProfile.email,
     lifecycleStatus: 'active',
     aiAllowed: true,
     profileRevision: 0,
@@ -223,7 +292,7 @@ async function createContact({
   for (const fact of agentProfileFacts({
     uid,
     contactId: ref.id,
-    profile,
+    profile: completeProfile,
     sourceId,
     now,
   })) {
@@ -246,12 +315,12 @@ async function updateContact({
   const data = existing.data() || {};
   // Merge rather than replace. The agent only sees what the thread mentioned; a
   // field it did not mention must not blank out something the owner typed.
-  const merged = { ...data };
-  for (const field of Object.keys(profile)) {
-    const next = profile[field];
-    const isEmpty = Array.isArray(next) ? next.length === 0 : !next;
-    if (!isEmpty) merged[field] = next;
-  }
+  const nonEmptyPatch = Object.fromEntries(
+    Object.entries(profile).filter(([, value]) =>
+      Array.isArray(value) ? value.length > 0 : Boolean(value),
+    ),
+  );
+  const merged = validateProfile({ ...data, ...nonEmptyPatch });
 
   const result = await saveProfile({
     db,
@@ -308,12 +377,13 @@ export async function ingestAgentContacts({
   // them concurrently would race to create that document twice.
   for (const [index, candidate] of contacts.entries()) {
     try {
-      const { profile, externalId } = normalizeAgentContactInput(candidate);
+      const { profile, externalId, contactId } = normalizeAgentContactInput(candidate);
       const { ref, existing } = await resolveTarget({
         db,
         uid,
         profile,
         externalId,
+        contactId,
       });
 
       if (existing?.exists && !contactAcceptsAgentWrite(existing.data())) {

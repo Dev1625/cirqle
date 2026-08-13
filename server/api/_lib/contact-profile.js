@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { FieldValue } from 'firebase-admin/firestore';
 
-const PROFILE_FIELDS = Object.freeze([
+export const CONTACT_PROFILE_FIELDS = Object.freeze([
   'name',
   'email',
   'phone',
@@ -273,7 +273,7 @@ export function normalizeContactProfileRequest(value) {
       'The expected profile revision is invalid.',
     );
   }
-  if (!hasOnlyKeys(value.profile, PROFILE_FIELDS)) {
+  if (!hasOnlyKeys(value.profile, CONTACT_PROFILE_FIELDS)) {
     throw profileError(
       'contact_profile_invalid',
       'A complete contact profile is required.',
@@ -352,7 +352,7 @@ function assertAccountUnlocked(snapshot, authTime) {
 }
 
 function changedProfileFields(previous, next) {
-  return PROFILE_FIELDS.filter(
+  return CONTACT_PROFILE_FIELDS.filter(
     (field) =>
       JSON.stringify(previous[field]) !== JSON.stringify(next[field]),
   );

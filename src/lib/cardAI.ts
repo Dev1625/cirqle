@@ -129,6 +129,10 @@ export async function generateCardDraft(profile: {
     ],
     options: {
       tier: 'draft',
+      // Card drafting is a quality-model task. Let it finish and leave the
+      // visible Cancel action in charge instead of imposing the generic
+      // twenty-second browser deadline.
+      timeoutMs: null,
       maxTokens: 450,
       feature: 'digital-card-draft',
       signal: profile.signal,

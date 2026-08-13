@@ -141,18 +141,17 @@ export function FactLedgerPanel({
       className={`border border-ink/15 bg-white ${className}`}
       aria-labelledby={`${id}-title`}
     >
-      <header className="border-b border-ink/10 p-5">
+      <header className="border-b border-ink/10 px-5 py-4">
         <p className="flex items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-widest text-brand">
           <Shield size={13} aria-hidden="true" />
           Evidence and privacy
         </p>
-        <h2 id={`${id}-title`} className="mt-1 font-serif text-2xl">
-          Fact history
+        <h2 id={`${id}-title`} className="mt-1 font-serif text-xl">
+          Saved facts
         </h2>
-        <p className="mt-2 max-w-2xl text-sm text-subtle">
-          Every update creates a correction record. Earlier values and their
-          original sources remain visible, and each fact can be withheld from
-          AI independently.
+        <p className="mt-1 max-w-2xl text-xs leading-relaxed text-subtle">
+          Current values stay compact. Open one only when you need its source,
+          correction history, or AI privacy control.
         </p>
       </header>
 
@@ -195,13 +194,13 @@ export function FactLedgerPanel({
           {Array.from(grouped.entries()).map(([predicate, history]) => {
             const current = history.find((fact) => fact.current) || history[0];
             return (
-              <details key={predicate} className="group p-5" open>
+              <details key={predicate} className="group px-5 py-3">
                 <summary className="flex cursor-pointer list-none items-start justify-between gap-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30">
                   <div className="min-w-0">
                     <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-subtle">
                       {predicateLabel(predicate)}
                     </p>
-                    <p className="mt-1 break-words text-base font-medium">
+                    <p className="mt-0.5 break-words text-sm font-medium">
                       {current.value}
                     </p>
                   </div>

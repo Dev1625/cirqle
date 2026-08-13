@@ -245,7 +245,7 @@ export async function generateBrief(
     ],
     options: {
       tier: 'reasoning',
-      timeoutMs: 25_000,
+      timeoutMs: null,
       maxTokens: 700,
       feature: 'pre-meeting-brief',
       signal: options.signal,

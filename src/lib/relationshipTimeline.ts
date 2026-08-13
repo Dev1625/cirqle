@@ -86,7 +86,9 @@ function noteKind(note: Record<string, any>): {
       label: 'Meeting logged',
       provenanceLabel: note.providerEventId
         ? 'Calendar-linked meeting record'
-        : 'Meeting entered by you',
+        : note.privacySourceType === 'agent'
+          ? 'Meeting logged through Cirqle MCP'
+          : 'Meeting entered by you',
     };
   }
   if (note.replyTargetOutreachId || note.replyTargetThreadId) {
@@ -142,7 +144,12 @@ function outreachKind(outreach: Record<string, any>): {
     return {
       kind: 'user-confirmed-send',
       label: 'User-confirmed send',
-      provenanceLabel: 'Confirmed sent by you',
+      provenanceLabel:
+        outreach.generatedBy === 'agent'
+          ? 'Mirrored through Cirqle MCP; delivery confirmed by the sender'
+          : outreach.deliveryMode === 'manual'
+            ? 'Pasted from external outreach and confirmed by you'
+            : 'Confirmed sent by you',
     };
   }
   if (outreach.status === 'Opened in Mail Client' || outreach.openedAt) {

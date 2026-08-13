@@ -37,7 +37,8 @@ export interface ChatOptions {
   prompt: string;
   /** Ask the model for a JSON object rather than prose. */
   json?: boolean;
-  timeoutMs?: number;
+  /** Set to null for deliberately long-running surfaces; user cancellation still works. */
+  timeoutMs?: number | null;
   /** Kept low by default: these are short, factual outputs. */
   temperature?: number;
   maxTokens?: number;
@@ -72,14 +73,18 @@ function boundedTokenCount(value: unknown): number {
 }
 
 /**
- * One chat completion. AbortController cancels slow upstream work instead of
- * leaving a detached, billable request running after the UI times out.
+ * One chat completion. The caller can opt out of the browser deadline for
+ * work that is expected to take a while; explicit cancellation still aborts
+ * the request and the server keeps its own infrastructure safety bound.
  */
 export async function chatWithMetadata(
   options: ChatOptions,
 ): Promise<AIChatResult> {
   const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), options.timeoutMs ?? 20_000);
+  const timeoutMs = options.timeoutMs === null ? null : options.timeoutMs ?? 20_000;
+  const timer = timeoutMs == null
+    ? null
+    : window.setTimeout(() => controller.abort(), timeoutMs);
   const cancel = () => controller.abort();
   if (options.signal?.aborted) controller.abort();
   options.signal?.addEventListener('abort', cancel, { once: true });
@@ -181,7 +186,7 @@ export async function chatWithMetadata(
     }
     throw new AIUnavailableError();
   } finally {
-    window.clearTimeout(timer);
+    if (timer != null) window.clearTimeout(timer);
     options.signal?.removeEventListener('abort', cancel);
   }
 }

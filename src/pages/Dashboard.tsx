@@ -36,8 +36,6 @@ import {
   writeDashboardBriefCache,
 } from '../lib/dashboardBriefCache';
 
-const BRIEF_TIMEOUT_MS = 20000;
-
 export default function Dashboard() {
   const { user } = useAuth();
   const [contacts, setContacts] = useState<any[]>([]);
@@ -184,7 +182,7 @@ export default function Dashboard() {
       const { grounded, sources } = await generateWeeklyPriorities(
         contacts,
         outreaches,
-        BRIEF_TIMEOUT_MS,
+        null,
         controller.signal,
       );
       if (controller.signal.aborted) return;

@@ -54,6 +54,8 @@ const INSTRUCTIONS = [
   'Record only what the supplied text actually says — never fill fields from',
   'outside knowledge about a person or their employer. Everything you write is',
   'tagged as agent-written and the owner can revoke an entire import at once.',
+  'Use log_meeting for durable meeting notes and summaries. Use log_interaction',
+  'to mirror outreach sent outside Cirqle, including email sent by this agent.',
 ].join(' ');
 
 // JSON-RPC 2.0 reserved codes.

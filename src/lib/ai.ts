@@ -30,7 +30,7 @@ export type { AIResponseMeta };
 export interface GenerateOptions {
   /** Defaults to 'fast' — the cheap tier. Opt *up*, never accidentally. */
   tier: ModelTier;
-  timeoutMs?: number;
+  timeoutMs?: number | null;
   temperature?: number;
   maxTokens?: number;
   /** Stable product feature name used for spend and quality attribution. */

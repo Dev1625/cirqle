@@ -17,6 +17,12 @@ import {
 import { getExplicitLiteLLMConfig } from '../_lib/litellm-config.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const LONG_RUNNING_TIMEOUT_MS = 240_000;
+const LONG_RUNNING_FEATURES = new Set([
+  'dashboard-weekly-priorities',
+  'digital-card-draft',
+  'pre-meeting-brief',
+]);
 const MAX_PROMPT_CHARS = 60_000;
 const MAX_OUTPUT_TOKENS = 4_000;
 
@@ -156,7 +162,7 @@ export function createAIChatHandler({
   logger = console,
   verifyIdentity = verifyActiveBearerFirebaseToken,
   fetchImpl = globalThis.fetch,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
+  timeoutMs = null,
 } = {}) {
   return async function aiChatHandler(req, res) {
     const requestId = getSafeRequestId(req);
@@ -212,11 +218,16 @@ export function createAIChatHandler({
     }
 
     const controller = new AbortController();
+    const requestTimeoutMs = Number.isFinite(timeoutMs)
+      ? timeoutMs
+      : LONG_RUNNING_FEATURES.has(request.feature)
+        ? LONG_RUNNING_TIMEOUT_MS
+        : DEFAULT_TIMEOUT_MS;
     let abortReason = null;
     const timeout = setTimeout(() => {
       abortReason = 'timeout';
       controller.abort();
-    }, timeoutMs);
+    }, requestTimeoutMs);
     const cancelForClosedClient = () => {
       if (!res.writableEnded) {
         abortReason = 'client';

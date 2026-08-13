@@ -36,13 +36,18 @@ export class McpToolError extends Error {
 
 const CONTACT_INPUT_SCHEMA = Object.freeze({
   type: 'object',
-  required: ['name'],
+  anyOf: [{ required: ['contactId'] }, { required: ['name'] }],
   additionalProperties: false,
   properties: {
+    contactId: {
+      type: 'string',
+      description:
+        'Id from search_contacts. Supply this when updating an existing contact; fields you omit remain unchanged.',
+    },
     name: {
       type: 'string',
       description:
-        'Full name of the person. Required — do not infer it from an email address or company name. If the source text does not name them, skip the record.',
+        'Full name of the person. Required when creating; optional when contactId identifies an existing contact. Never infer it from an email address or company name.',
     },
     email: { type: 'string', description: 'Primary email address.' },
     phone: { type: 'string' },
@@ -119,7 +124,7 @@ export const MCP_TOOLS = Object.freeze([
     name: 'get_contact',
     title: 'Get a contact',
     description:
-      'Read one contact in full, including where each fact came from. Use it to check what is already recorded before overwriting anything.',
+      'Read one contact in full, including fact provenance plus recent meeting notes, notes, and outreach. Use it to check what is already recorded before writing anything.',
     inputSchema: {
       type: 'object',
       required: ['contactId'],
@@ -133,7 +138,7 @@ export const MCP_TOOLS = Object.freeze([
     name: 'upsert_contacts',
     title: 'Add or update contacts',
     description:
-      `Create or update up to ${MAX_AGENT_CONTACTS_PER_CALL} contacts in one call. Matching is by email, so re-sending the same person updates them rather than creating a duplicate — safe to retry. Fields you omit are left untouched; never send an empty string to clear something. Everything written is tagged as agent-written and can be revoked by the owner in one action.`,
+      `Create or update up to ${MAX_AGENT_CONTACTS_PER_CALL} contacts in one call. Prefer contactId from search_contacts for updates; otherwise matching uses normalized email. Re-sending the same person updates them rather than creating a duplicate. Fields you omit are left untouched; never send an empty string to clear something. Everything written is tagged as agent-written and can be revoked by the owner in one action.`,
     inputSchema: {
       type: 'object',
       required: ['contacts'],
@@ -177,18 +182,40 @@ export const MCP_TOOLS = Object.freeze([
     name: 'log_meeting',
     title: 'Log a meeting',
     description:
-      'Record a meeting that already happened, with what was discussed. Use this for calls, coffees, and video meetings — not for emails.',
+      'Create a first-class meeting record with durable notes and an optional concise summary. Use this for calls, coffees, and video meetings — not for emails. The meeting remains visible in the contact timeline, not only in the fact ledger.',
     inputSchema: {
       type: 'object',
-      required: ['contactId', 'content'],
+      required: ['contactId'],
+      anyOf: [
+        { required: ['notes'] },
+        { required: ['summary'] },
+        { required: ['content'] },
+      ],
       additionalProperties: false,
       properties: {
         contactId: { type: 'string', description: 'Id from search_contacts.' },
+        title: {
+          type: 'string',
+          maxLength: 500,
+          description: 'Short meeting title, if known.',
+        },
+        summary: {
+          type: 'string',
+          maxLength: 12_000,
+          description:
+            'A concise meeting summary, kept separate so it can be scanned quickly later.',
+        },
+        notes: {
+          type: 'string',
+          maxLength: 70_000,
+          description:
+            'Full notes: discussion, decisions, commitments, and next steps supported by the source.',
+        },
         content: {
           type: 'string',
           maxLength: 70_000,
           description:
-            'What was discussed, decided, and agreed. Only what the source text supports.',
+            'Legacy alias for notes. Prefer notes and summary for new calls.',
         },
         occurredAt: {
           type: 'string',
@@ -200,19 +227,25 @@ export const MCP_TOOLS = Object.freeze([
   },
   {
     name: 'log_interaction',
-    title: 'Log an email you sent',
+    title: 'Log external outreach',
     description:
-      "Record an email the owner sent, from a thread they paste in. Recorded as sent-on-the-owner's-word — never as provider-verified, because reading a pasted thread is not proof of delivery. Set responseReceived when the thread shows the contact wrote back.",
+      "Mirror outreach sent outside Cirqle, including an email sent by this agent or a pasted email thread. It becomes a first-class Tracker and contact-timeline record. It is recorded as sent-on-the-owner's-word, never provider-verified. Set responseReceived only when the thread shows the contact wrote back.",
     inputSchema: {
       type: 'object',
       required: ['contactId'],
       additionalProperties: false,
       properties: {
         contactId: { type: 'string', description: 'Id from search_contacts.' },
+        channel: {
+          type: 'string',
+          enum: ['email', 'linkedin', 'text', 'phone', 'other'],
+          default: 'email',
+          description: 'Where the outreach happened.',
+        },
         subject: { type: 'string', maxLength: 500 },
         body: {
           type: 'string',
-          maxLength: 20_000,
+          maxLength: 70_000,
           description: 'What the owner sent. Quote the thread, do not summarise it away.',
         },
         sentAt: {
@@ -230,6 +263,12 @@ export const MCP_TOOLS = Object.freeze([
           maxLength: 20_000,
           description: 'Anything worth remembering about the exchange.',
         },
+        clientReferenceId: {
+          type: 'string',
+          maxLength: 500,
+          description:
+            'Optional stable id from the sending client or message. Reuse it on retries so Cirqle mirrors the outreach exactly once.',
+        },
       },
     },
   },
@@ -237,6 +276,18 @@ export const MCP_TOOLS = Object.freeze([
 
 function text(value) {
   return String(value ?? '').toLocaleLowerCase();
+}
+
+function isoDate(value) {
+  const date =
+    typeof value?.toDate === 'function'
+      ? value.toDate()
+      : value instanceof Date
+        ? value
+        : value
+          ? new Date(value)
+          : null;
+  return date && !Number.isNaN(date.getTime()) ? date.toISOString() : null;
 }
 
 function contactSummary(id, data) {
@@ -317,11 +368,35 @@ async function getContact({ db, uid, args }) {
     throw new McpToolError('No contact with that id.', 'contact_not_found');
   }
   const data = snapshot.data() || {};
-  const facts = await ref
-    .collection('facts')
-    .where('current', '==', true)
-    .limit(50)
-    .get();
+  const [facts, notes, outreaches] = await Promise.all([
+    ref.collection('facts').where('current', '==', true).limit(50).get(),
+    db
+      .collection(`users/${uid}/notes`)
+      .where('contactId', '==', contactId)
+      .limit(100)
+      .get(),
+    db
+      .collection(`users/${uid}/outreaches`)
+      .where('contactId', '==', contactId)
+      .limit(100)
+      .get(),
+  ]);
+  const newest = (documents, fields) =>
+    [...documents]
+      .sort((left, right) => {
+        const leftData = left.data() || {};
+        const rightData = right.data() || {};
+        const leftTime = fields
+          .map((field) => Date.parse(isoDate(leftData[field]) || ''))
+          .find(Number.isFinite) || 0;
+        const rightTime = fields
+          .map((field) => Date.parse(isoDate(rightData[field]) || ''))
+          .find(Number.isFinite) || 0;
+        return rightTime - leftTime;
+      })
+      .slice(0, 25);
+  const recentNotes = newest(notes.docs, ['occurredAt', 'observedAt', 'createdAt']);
+  const recentOutreaches = newest(outreaches.docs, ['sentAt', 'createdAt']);
 
   return {
     ...contactSummary(snapshot.id, data),
@@ -332,6 +407,7 @@ async function getContact({ db, uid, args }) {
     seniority: data.seniority || '',
     connectionSource: data.connectionSource || '',
     linkedinUrl: data.linkedinUrl || '',
+    profileRevision: Number(data.profileRevision) || 0,
     // Provenance is exposed so an agent can see which values it wrote itself
     // and avoid treating its own earlier guess as independent confirmation.
     facts: facts.docs.map((document) => {
@@ -340,6 +416,47 @@ async function getContact({ db, uid, args }) {
         predicate: fact.predicate,
         value: fact.value,
         sourceType: fact.sourceType,
+      };
+    }),
+    meetings: recentNotes
+      .filter((document) => document.data()?.recordType === 'meeting')
+      .map((document) => {
+        const meeting = document.data() || {};
+        return {
+          meetingId: document.id,
+          title: String(meeting.meetingTitle || '').slice(0, 500),
+          summary: String(meeting.meetingSummary || '').slice(0, 12_000),
+          notes: String(meeting.meetingNotes || meeting.content || '').slice(0, 20_000),
+          occurredAt: isoDate(meeting.occurredAt || meeting.observedAt),
+          source: meeting.privacySourceType === 'agent' ? 'agent' : 'user',
+        };
+      }),
+    notes: recentNotes
+      .filter((document) => document.data()?.recordType !== 'meeting')
+      .map((document) => {
+        const note = document.data() || {};
+        return {
+          noteId: document.id,
+          content:
+            note.sensitive === true
+              ? null
+              : String(note.content || '').slice(0, 20_000),
+          sensitive: note.sensitive === true,
+          observedAt: isoDate(note.observedAt || note.createdAt),
+          source: note.privacySourceType === 'agent' ? 'agent' : 'user',
+        };
+      }),
+    outreaches: recentOutreaches.map((document) => {
+      const outreach = document.data() || {};
+      return {
+        outreachId: document.id,
+        channel: outreach.channel || outreach.type || '',
+        subject: String(outreach.subject || '').slice(0, 500),
+        body: String(outreach.body || '').slice(0, 20_000),
+        status: outreach.status || '',
+        responseReceived: outreach.responseReceived === 'Yes',
+        sentAt: isoDate(outreach.sentAt || outreach.createdAt),
+        clientReferenceId: outreach.clientReferenceId || null,
       };
     }),
   };
@@ -384,6 +501,9 @@ const HANDLERS = Object.freeze({
       db,
       uid,
       contactId: args.contactId,
+      title: args.title,
+      summary: args.summary,
+      notes: args.notes,
       content: args.content,
       occurredAt: args.occurredAt,
       now,
@@ -399,6 +519,7 @@ const HANDLERS = Object.freeze({
       sentAt: args.sentAt,
       responseReceived: args.responseReceived,
       notes: args.notes,
+      clientReferenceId: args.clientReferenceId,
       now,
     }),
 });

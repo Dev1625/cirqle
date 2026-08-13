@@ -739,7 +739,9 @@ service cloud.firestore {
                      && isNullableString(data.replyEvidence.messageId, 500)
                      && isNullableString(data.replyEvidence.eventId, 500)))
              && (!('deliveryMode' in data)
-                 || data.deliveryMode in ['mailto', 'provider', 'preview'])
+                 || data.deliveryMode in [
+                   'mailto', 'manual', 'provider', 'preview'
+                 ])
              && (!('providerSendState' in data)
                  || data.providerSendState in ['reserved', 'completed'])
              && (!('trackerLifecycleStatus' in data)

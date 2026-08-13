@@ -79,7 +79,7 @@ export function buildPrioritySources(
 export async function generateWeeklyPriorities(
   contacts: any[],
   outreaches: any[],
-  timeoutMs = 20_000,
+  timeoutMs: number | null = null,
   signal?: AbortSignal,
 ): Promise<{ grounded: GroundedResult<string>; sources: GroundedSource[] }> {
   const sources = buildPrioritySources(contacts, outreaches);

@@ -417,6 +417,16 @@ function RelationshipTimelineItem({
           <p className="mt-1 text-xs leading-relaxed text-subtle">
             {event.provenance.label}
           </p>
+          {item.body && (
+            <details className="mt-3 border-l-2 border-ink/10 pl-3">
+              <summary className="flex min-h-9 cursor-pointer list-none items-center font-mono text-[9px] font-bold uppercase tracking-widest text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30">
+                View saved message or thread
+              </summary>
+              <p className="max-h-80 overflow-y-auto whitespace-pre-wrap pb-2 font-mono text-xs leading-relaxed text-ink/80">
+                {String(item.body).slice(0, 20_000)}
+              </p>
+            </details>
+          )}
           {item.aiSummary && (!item.replyEvidence || event.kind === 'reply') && (
             <div className="markdown-body prose-sm mt-3 font-mono leading-relaxed text-ink/80">
               <Markdown>{item.aiSummary}</Markdown>
@@ -523,6 +533,13 @@ export default function ContactDetail() {
   const [sensitiveNotePassphrase, setSensitiveNotePassphrase] = useState('');
   const [isSavingNote, setIsSavingNote] = useState(false);
   const [meetingData, setMeetingData] = useState({ date: new Date().toISOString().split('T')[0], discussed: '', promised: '', nextSteps: '', followupDate: '' });
+  const [externalOutreach, setExternalOutreach] = useState({
+    date: new Date().toISOString().split('T')[0],
+    subject: '',
+    thread: '',
+    responseReceived: false,
+  });
+  const [isSavingExternalOutreach, setIsSavingExternalOutreach] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [selectedReplyTargetId, setSelectedReplyTargetId] = useState('');
   const [conversationLog, setConversationLog] = useState('');
@@ -1100,6 +1117,80 @@ export default function ContactDetail() {
      } catch(err: any) {
        handleFirestoreError(err, 'create', `users/${user.uid}/notes`);
      }
+  };
+
+  const handleLogExternalOutreach = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !id || !externalOutreach.thread.trim()) return;
+    const sentAt = localDateFromISODate(externalOutreach.date);
+    if (!sentAt) {
+      toast('Choose a valid sent date.', 'error');
+      return;
+    }
+
+    setIsSavingExternalOutreach(true);
+    try {
+      const outreachRef = doc(collection(db, `users/${user.uid}/outreaches`));
+      const outreachBatch = writeBatch(db);
+      const replied = externalOutreach.responseReceived;
+      outreachBatch.set(outreachRef, {
+        userId: user.uid,
+        contactId: id,
+        contactName: contact.name || null,
+        type: 'Email',
+        channel: 'email',
+        subject: externalOutreach.subject.trim().slice(0, 500),
+        body: externalOutreach.thread.trim().slice(0, 70_000),
+        status: replied ? 'Responded' : 'Sent (User Confirmed)',
+        verification: 'user-confirmed',
+        deliveryMode: 'manual',
+        sentAt,
+        userConfirmedAt: serverTimestamp(),
+        responseReceived: replied ? 'Yes' : 'No',
+        dateOfResponse: replied ? sentAt : null,
+        ...(replied
+          ? {
+              replyEvidence: {
+                occurredAt: sentAt,
+                source: 'user',
+                sourceRecordId: null,
+                provider: null,
+                threadId: null,
+                messageId: null,
+                eventId: null,
+              },
+            }
+          : {}),
+        notes: 'Pasted from outreach sent outside Cirqle.',
+        generatedBy: 'manual',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      if (sentAt.getTime() >= timestampMillis(contact.lastContactedAt)) {
+        outreachBatch.update(doc(db, `users/${user.uid}/contacts/${id}`), {
+          lastContactedAt: sentAt,
+          updatedAt: serverTimestamp(),
+        });
+      }
+      await outreachBatch.commit();
+      setExternalOutreach({
+        date: new Date().toISOString().split('T')[0],
+        subject: '',
+        thread: '',
+        responseReceived: false,
+      });
+      setActiveTab('note');
+      toast(
+        replied
+          ? 'Email thread added to outreach with its reply.'
+          : 'External email added to outreach.',
+        'success',
+      );
+    } catch (err: any) {
+      handleFirestoreError(err, 'create', `users/${user.uid}/outreaches`);
+    } finally {
+      setIsSavingExternalOutreach(false);
+    }
   };
 
   const handleProcessReply = async (e: React.FormEvent) => {
@@ -1801,14 +1892,17 @@ export default function ContactDetail() {
          >
             <ArrowLeft size={16} aria-hidden="true" />
          </button>
-         <h1 className="font-serif text-5xl italic font-black">{contact.name}</h1>
+         <div className="min-w-0">
+           <p className="font-mono text-[9px] font-bold uppercase tracking-[0.2em] text-brand">Contact record</p>
+           <h1 className="truncate font-serif text-4xl italic font-black sm:text-5xl">{contact.name}</h1>
+         </div>
       </div>
       
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
          {/* Details Panel */}
          <div className="xl:col-span-1 space-y-6">
-           <div className="bg-white border border-ink/15 rounded-card p-8">
-             <div className="flex justify-between items-start mb-6">
+           <div className="bg-white border border-ink/15 rounded-card p-5">
+             <div className="flex justify-between items-start mb-4">
                <div>
                  {contact.role && <p className="font-mono text-lg">{contact.role}</p>}
                  {/* Joined rather than interpolated with a literal bullet:
@@ -1823,7 +1917,7 @@ export default function ContactDetail() {
                </div>
              </div>
              
-             <div className="flex flex-col gap-2 mb-6">
+             <div className="flex flex-col gap-2 mb-4">
                 <div className="flex items-center gap-2 w-fit">
                   <TierBadge tier={contact.relationshipTier} />
                   <span className="text-xs font-mono text-subtle uppercase tracking-widest">connection</span>
@@ -1832,19 +1926,22 @@ export default function ContactDetail() {
              </div>
              
              {contact.summary && (
-               <div className="mb-6">
+               <div className="mb-4">
                  <h4 className="text-xs uppercase font-mono tracking-widest text-subtle mb-2">Context</h4>
-                 <p className="font-mono text-sm leading-relaxed">{contact.summary}</p>
+                 <p className="line-clamp-4 font-mono text-sm leading-relaxed">{contact.summary}</p>
                </div>
              )}
              
-             <div className="flex flex-wrap gap-2 mb-6">
-                {contact.tags?.map((t: string) => (
+             <div className="flex flex-wrap gap-2 mb-4">
+                {contact.tags?.slice(0, 4).map((t: string) => (
                   <span key={t} className="px-3 py-1 bg-accent/50 border border-ink/20 font-mono text-[10px] tracking-widest uppercase">{t}</span>
                 ))}
+                {contact.tags?.length > 4 && (
+                  <span className="px-2 py-1 font-mono text-[10px] text-subtle">+{contact.tags.length - 4}</span>
+                )}
              </div>
              
-             <div className="pt-6 border-t border-ink/20 flex flex-col gap-3">
+             <div className="pt-4 border-t border-ink/20 flex flex-col gap-2">
                <Button ref={composeButtonRef} onClick={startDrafting} className="tour-draft-btn gap-2 w-full justify-center"><Sparkles size={16} aria-hidden="true" /> Compose Outreach</Button>
                {safeLinkedInUrl && (
                   <Button variant="outline" className="w-full justify-center" asChild>
@@ -1854,23 +1951,6 @@ export default function ContactDetail() {
              </div>
            </div>
 
-           {user && id && (
-             <>
-               <ContactIntelligence
-                 uid={user.uid}
-                 contactId={id}
-                 contact={contact}
-                 notes={notes}
-                 outreaches={outreaches}
-               />
-               <ContactCommunicationLoop
-                 uid={user.uid}
-                 contactId={id}
-                 notes={notes}
-                 outreaches={outreaches}
-               />
-             </>
-           )}
          </div>
 
          {/* Outreach Tracker & Notes */}
@@ -1879,7 +1959,7 @@ export default function ContactDetail() {
                <div role="tablist" aria-label="Contact activity" className="border-b border-ink/20 flex divide-x divide-ink/20 bg-paper/30 font-mono text-[10px] uppercase tracking-widest font-bold">
                  <button type="button" role="tab" id="contact-tab-note" aria-controls="contact-panel-note" aria-selected={activeTab === 'note'} onClick={() => setActiveTab('note')} className={`flex-1 py-3 hover:bg-paper transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${activeTab === 'note' ? 'bg-white border-b-2 border-b-ink' : ''}`}>Quick Note</button>
                  <button type="button" role="tab" id="contact-tab-meeting" aria-controls="contact-panel-meeting" aria-selected={activeTab === 'meeting'} onClick={() => setActiveTab('meeting')} className={`flex flex-1 items-center justify-center gap-1 py-3 hover:bg-paper transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${activeTab === 'meeting' ? 'bg-white border-b-2 border-b-ink' : ''}`}><Calendar size={12} aria-hidden="true"/> Log Meeting</button>
-                 <button type="button" role="tab" id="contact-tab-reply" aria-controls="contact-panel-reply" aria-selected={activeTab === 'reply'} onClick={() => setActiveTab('reply')} className={`tour-reply-tab flex flex-1 items-center justify-center gap-1 py-3 hover:bg-paper transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${activeTab === 'reply' ? 'bg-white border-b-2 border-b-ink' : ''}`}><MessageSquare size={12} aria-hidden="true"/> Process Reply <Sparkles size={10} aria-hidden="true"/></button>
+                 <button type="button" role="tab" id="contact-tab-reply" aria-controls="contact-panel-reply" aria-selected={activeTab === 'reply'} onClick={() => setActiveTab('reply')} className={`tour-reply-tab flex flex-1 items-center justify-center gap-1 py-3 hover:bg-paper transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${activeTab === 'reply' ? 'bg-white border-b-2 border-b-ink' : ''}`}><MessageSquare size={12} aria-hidden="true"/> Log Email</button>
                  <button type="button" role="tab" id="contact-tab-parse" aria-controls="contact-panel-parse" aria-selected={activeTab === 'parse'} onClick={() => setActiveTab('parse')} className={`flex flex-1 items-center justify-center gap-1 py-3 hover:bg-paper transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand ${activeTab === 'parse' ? 'bg-white border-b-2 border-b-ink' : ''}`}><Tag size={12} aria-hidden="true"/> Add AI Tags <Sparkles size={10} aria-hidden="true"/></button>
                </div>
                
@@ -1971,7 +2051,79 @@ export default function ContactDetail() {
 
                  {/* Process Reply Component */}
                  {activeTab === 'reply' && (
-                   <form onSubmit={handleProcessReply} className="space-y-4">
+                   <div className="space-y-5">
+                     <form onSubmit={handleLogExternalOutreach} className="space-y-4">
+                       <div>
+                         <p className="font-mono text-xs font-bold text-ink">Sent it somewhere else?</p>
+                         <p className="mt-1 font-mono text-xs leading-relaxed text-subtle">
+                           Paste the sent email or full thread. It will count as outreach without pretending Cirqle verified delivery.
+                         </p>
+                       </div>
+                       <div className="grid gap-4 sm:grid-cols-[150px_minmax(0,1fr)]">
+                         <div>
+                           <label htmlFor="external-outreach-date" className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-subtle">
+                             Sent / thread date
+                           </label>
+                           <Input
+                             id="external-outreach-date"
+                             type="date"
+                             required
+                             value={externalOutreach.date}
+                             onChange={(event) => setExternalOutreach((current) => ({ ...current, date: event.target.value }))}
+                           />
+                         </div>
+                         <div>
+                           <label htmlFor="external-outreach-subject" className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-subtle">
+                             Subject (optional)
+                           </label>
+                           <Input
+                             id="external-outreach-subject"
+                             maxLength={500}
+                             value={externalOutreach.subject}
+                             onChange={(event) => setExternalOutreach((current) => ({ ...current, subject: event.target.value }))}
+                             placeholder="Following up"
+                           />
+                         </div>
+                       </div>
+                       <div>
+                         <label htmlFor="external-outreach-thread" className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-subtle">
+                           Sent email or full thread
+                         </label>
+                         <textarea
+                           id="external-outreach-thread"
+                           required
+                           maxLength={70_000}
+                           className="min-h-36 w-full rounded-card border border-ink/15 bg-paper/50 p-3 font-mono text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30"
+                           placeholder="Paste the email or thread exactly as you have it…"
+                           value={externalOutreach.thread}
+                           onChange={(event) => setExternalOutreach((current) => ({ ...current, thread: event.target.value }))}
+                         />
+                       </div>
+                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                         <label className="flex min-h-11 cursor-pointer items-center gap-2 text-xs text-subtle">
+                           <input
+                             type="checkbox"
+                             checked={externalOutreach.responseReceived}
+                             onChange={(event) => setExternalOutreach((current) => ({ ...current, responseReceived: event.target.checked }))}
+                           />
+                           The pasted thread includes their reply
+                         </label>
+                         <Button
+                           type="submit"
+                           disabled={isSavingExternalOutreach || !externalOutreach.thread.trim()}
+                           aria-busy={isSavingExternalOutreach}
+                         >
+                           {isSavingExternalOutreach ? 'Adding…' : 'Add to outreach'}
+                         </Button>
+                       </div>
+                     </form>
+
+                     <details className="border-t border-ink/10 pt-2">
+                       <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 font-mono text-[10px] font-bold uppercase tracking-widest text-brand focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/30">
+                         <Sparkles size={12} aria-hidden="true" />
+                         Process only a reply with AI
+                       </summary>
+                       <form onSubmit={handleProcessReply} className="space-y-4 pb-1 pt-4">
                       <p className="font-mono text-xs text-subtle">Choose the exact outreach this answers, or explicitly save it as unlinked. Cirqle never guesses the newest thread.</p>
                       {!contactAIAllowed && (
                         <p className="rounded-card border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950" role="status">
@@ -2035,7 +2187,9 @@ export default function ContactDetail() {
                           generation={inlineProvenance.generation}
                         />
                       )}
-                   </form>
+                       </form>
+                     </details>
+                   </div>
                  )}
 
                  {/* Parse AI Tags Component */}
@@ -2179,24 +2333,60 @@ export default function ContactDetail() {
          </div>
       </div>
 
+      {user && id && (
+        <details className="rounded-card border border-ink/15 bg-white">
+          <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-5 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
+            <div>
+              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-brand">Relationship insights</p>
+              <p className="mt-0.5 text-xs text-subtle">Health, commitments, tracked threads, and the evidence chain.</p>
+            </div>
+            <span className="font-mono text-[9px] uppercase tracking-widest text-muted">Open when needed</span>
+          </summary>
+          <div className="grid gap-5 border-t border-ink/10 p-5 lg:grid-cols-2">
+            <ContactIntelligence
+              uid={user.uid}
+              contactId={id}
+              contact={contact}
+              notes={notes}
+              outreaches={outreaches}
+            />
+            <ContactCommunicationLoop
+              uid={user.uid}
+              contactId={id}
+              notes={notes}
+              outreaches={outreaches}
+            />
+          </div>
+        </details>
+      )}
+
       {user && managedContact && (
-        <div className="space-y-5">
-          <ContactManagementWorkspace
-            uid={user.uid}
-            contact={managedContact}
-            onFactsChanged={() => {
-              void listContactFacts(user.uid, managedContact.id)
-                .then(setFacts)
-                .catch(() => setFacts([]));
-            }}
-            onLifecycleExit={() => navigate('/app/directory')}
-          />
-          <IntroductionSignalsPanel
-            uid={user.uid}
-            contactId={managedContact.id}
-            contact={contact}
-          />
-        </div>
+        <details className="rounded-card border border-ink/15 bg-white">
+          <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-4 px-5 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40">
+            <div>
+              <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-brand">Contact data &amp; privacy</p>
+              <p className="mt-0.5 text-xs text-subtle">Full profile, fact sources, job history, duplicates, introductions, and lifecycle controls.</p>
+            </div>
+            <span className="font-mono text-[9px] uppercase tracking-widest text-muted">Advanced</span>
+          </summary>
+          <div className="space-y-5 border-t border-ink/10 p-5">
+            <ContactManagementWorkspace
+              uid={user.uid}
+              contact={managedContact}
+              onFactsChanged={() => {
+                void listContactFacts(user.uid, managedContact.id)
+                  .then(setFacts)
+                  .catch(() => setFacts([]));
+              }}
+              onLifecycleExit={() => navigate('/app/directory')}
+            />
+            <IntroductionSignalsPanel
+              uid={user.uid}
+              contactId={managedContact.id}
+              contact={contact}
+            />
+          </div>
+        </details>
       )}
 
       {/* Drafting Modal overlay */}
