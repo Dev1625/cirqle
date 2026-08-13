@@ -287,9 +287,9 @@ check('Vercel deploys bounded API functions within the Hobby limit', () => {
   assert.deepEqual(
     functionFiles.map((entry) => entry.name).sort(),
     [
+      'chat.js',
       'delete.js',
       'export.js',
-      'chat.js',
       'maintenance.js',
       'mcp.js',
       'merge.js',
