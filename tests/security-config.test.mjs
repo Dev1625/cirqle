@@ -282,13 +282,14 @@ check('Vercel deploys bounded API functions within the Hobby limit', () => {
       withFileTypes: true,
     })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.js'));
-  assert.equal(functionFiles.length, 7);
+  assert.equal(functionFiles.length, 8);
   assert.ok(functionFiles.length <= 12);
   assert.deepEqual(
     functionFiles.map((entry) => entry.name).sort(),
     [
       'delete.js',
       'export.js',
+      'chat.js',
       'maintenance.js',
       'mcp.js',
       'merge.js',
@@ -304,6 +305,7 @@ check('Vercel deploys bounded API functions within the Hobby limit', () => {
   assert.deepEqual(Object.keys(vercel.functions || {}).sort(), [
     'api/account/delete.js',
     'api/account/export.js',
+    'api/ai/chat.js',
     'api/contacts/merge.js',
     'api/cron/maintenance.js',
     'api/mcp.js',
